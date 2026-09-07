@@ -164,7 +164,7 @@ class Interface(unittest.TestCase):
 
     def test_checks_never_block_the_page(self):
         # Background reads pass quiet, so the busy overlay is not raised for them.
-        self.assertRegex(self.js, r"api\('check-rule'[^)]*, true\)")
+        self.assertRegex(self.js, r"api\('check-rule',[^;]*, true\)")
         self.assertRegex(self.js, r"api\('progress'[^)]*, true\)")
         self.assertIn('function queueChecks', self.js)
 

@@ -431,7 +431,7 @@ def apply_removals(settings: dict, rules, dry_run: bool) -> list:
                 episodes = client.episodes(rule['series_id'], files_only=False)
                 client.set_monitored([e['episode_id'] for e in episodes], action == 'monitor-all')
             elif action == 'monitor-in-frame':
-                state = monitoring_for(settings, rule)
+                state = monitoring_for(settings, rule, force=True)
                 inside = [row['episode_id'] for row in state.get('in_frame_unmonitored') or []]
                 client.set_monitored(inside, True)
             elif action in ('delete-series', 'delete-series-files'):
@@ -574,7 +574,9 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     # Phase two: bring monitoring in line with the keep window, before anything is
     # removed. Doing it first means the run leaves Sonarr consistent even if the deletion
     # pass is stopped by a guard.
-    reconciled = reconcile_monitoring(settings, rule, monitoring_for(settings, rule), dry_run)
+    # A run reads Sonarr for itself. Everything it is about to change is decided here, and
+    # a stored reading is the one thing that must not stand behind a write.
+    reconciled = reconcile_monitoring(settings, rule, monitoring_for(settings, rule, force=True), dry_run)
     outcome['monitored'] = reconciled['monitored']
     outcome['unmonitored_frame'] = reconciled['unmonitored']
     outcome['searched'] = reconciled['searched']
@@ -731,7 +733,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
             rule = next((r for r in selected if r['id'] == result['rule_id']), None)
             if rule:
                 with contextlib.suppress(Rejected, SonarrError):
-                    record_monitoring(settings, rule, monitoring_for(settings, rule))
+                    record_monitoring(settings, rule, monitoring_for(settings, rule, force=True))
 
     summary['finished'] = now_iso()
     summary['duration_seconds'] = round(time.monotonic() - clock, 1)
@@ -792,7 +794,11 @@ def read_cache(settings: dict, name: str) -> dict:
 
 def write_cache(settings: dict, name: str, value: dict) -> None:
     try:
-        atomic_json(cache_path(settings, name), value)
+        path = cache_path(settings, name)
+        # Names may carry a directory — one file per rule keeps a single series check
+        # from rewriting every series' episodes.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_json(path, value)
     except OSError:
         pass
 
@@ -835,6 +841,130 @@ def catalogue_for(settings: dict, instance_id: str, force: bool = False) -> list
     return series
 
 
+def series_record(settings: dict, rule: dict) -> dict:
+    """The rule's series, without paying for the library to get it.
+
+    A check needs one series' lifecycle. Reaching through the catalogue for it meant that
+    whenever the catalogue's hour was up, a single series check paid twelve megabytes and
+    three and a half seconds to learn eleven kilobytes. A fresh catalogue is still used —
+    it is already in hand — and anything else asks Sonarr for the one series.
+    """
+    entry = read_cache(settings, 'catalogue.json').get(rule.get('instance_id')) or {}
+    age = age_seconds(entry.get('fetched_at'))
+    ttl = int(settings.get('catalogue_ttl_minutes', 60)) * 60
+    if entry.get('schema') == CACHE_SCHEMA and age is not None and age < ttl:
+        for series in entry.get('series') or []:
+            if series.get('series_id') == rule.get('series_id'):
+                return series
+    try:
+        return client_for(settings, rule['instance_id']).series_one(rule['series_id'])
+    except Rejected:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Episodes, cached
+# ---------------------------------------------------------------------------
+# Retention is a pure function of a series' episodes and the rule over them: core.py
+# takes no network by design. So a rule edited, a shared preset raised, or simply a day
+# passing can all be answered from the episodes already read. Only a change in Sonarr
+# needs Sonarr, which is what makes a re-check cheap enough to want to do often.
+
+def episode_cache(settings: dict, rule: dict) -> tuple:
+    """One rule's stored episodes and when they were read, or (None, None).
+
+    Stored per rule rather than in one file: a single series check would otherwise
+    rewrite every series' episodes, and on a fallback to flash that is a megabyte of
+    writes to say one thing changed.
+    """
+    entry = read_cache(settings, f'episodes/{rule["id"]}.json')
+    if entry.get('schema') != CACHE_SCHEMA or entry.get('series_id') != rule.get('series_id'):
+        return None, None, None
+    return entry.get('episodes') or [], entry.get('series') or {}, entry.get('fetched_at')
+
+
+def store_episodes(settings: dict, rule: dict, episodes: list, series: dict = None) -> str:
+    stamp = now_iso()
+    write_cache(settings, f'episodes/{rule["id"]}.json',
+                {'schema': CACHE_SCHEMA, 'series_id': rule.get('series_id'),
+                 'instance_id': rule.get('instance_id'), 'fetched_at': stamp,
+                 'episodes': episodes, 'series': series or {}})
+    return stamp
+
+
+def forget_episodes(settings: dict, rule_id: str) -> None:
+    with contextlib.suppress(OSError):
+        cache_path(settings, f'episodes/{rule_id}.json').unlink()
+
+
+def episodes_for(settings: dict, rule: dict, force: bool = False) -> tuple:
+    """One rule's reading of Sonarr: its episodes, its series record, and when it was read.
+
+    Fetches when asked to, when nothing is stored, or when what is stored has aged past
+    the health TTL. Otherwise the stored reading is returned with its true age, so a plan
+    computed from it can be shown as what it is: current arithmetic over a known-old read.
+
+    The series record is stored with the episodes rather than read separately, or serving
+    a cached reading would still cost a call — a small one, but one per series per check.
+    """
+    cached, series, fetched_at = episode_cache(settings, rule)
+    ttl = int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
+    age = age_seconds(fetched_at)
+    if not force and cached and age is not None and age < ttl:
+        return cached, series, fetched_at, True
+    client = client_for(settings, rule['instance_id'])
+    episodes = client.episodes(rule['series_id'], files_only=False)
+    if not interpolate_air_dates(episodes):
+        fill_from_history(client, rule['series_id'], episodes)
+    series = series_record(settings, rule)
+    return episodes, series, store_episodes(settings, rule, episodes, series), False
+
+
+def watch_sonarr(settings: dict, health: dict, min_interval: int = 30) -> bool:
+    """Ask each instance which series changed, instead of re-reading them all to find out.
+
+    `history/since` names the series Sonarr has imported to or deleted from since the
+    last look: on this library, two of thirty-six over a day where a blind sweep read all
+    thirty-six. The cursor is carried forward with a slight overlap, because a record
+    written while the call is in flight would otherwise fall between two windows.
+
+    It does not see monitoring toggled by hand in Sonarr — that is not a history event —
+    so it never marks a series clean, only dirty. The TTL still catches the rest.
+    """
+    watch = health.setdefault('watch', {})
+    dirty = set(health.get('dirty') or [])
+    moved = False
+    for instance in settings.get('instances', []):
+        if not instance.get('enabled', True):
+            continue
+        entry = watch.get(instance['id']) or {}
+        seen = age_seconds(entry.get('checked_at'))
+        if seen is not None and seen < min_interval:
+            continue
+        started = dt.datetime.now(dt.timezone.utc)
+        if not entry.get('cursor'):
+            # First look starts the cursor here rather than replaying years of history.
+            watch[instance['id']] = {'cursor': started.isoformat(), 'checked_at': started.isoformat()}
+            moved = True
+            continue
+        try:
+            touched = Sonarr(instance).changes_since(entry['cursor'])
+        except Rejected:
+            continue
+        # Never behind where we already were: the overlap guards against a record written
+        # mid-call, it is not licence to keep sliding backwards.
+        overlap = (started - dt.timedelta(seconds=90)).isoformat()
+        watch[instance['id']] = {'cursor': max(overlap, entry['cursor']),
+                                 'checked_at': started.isoformat()}
+        moved = True
+        for rule in settings.get('rules', []):
+            if rule.get('instance_id') == instance['id'] and rule.get('series_id') in touched:
+                dirty.add(rule['id'])
+    if moved:
+        health['dirty'] = sorted(dirty)
+    return moved
+
+
 def invalidate_catalogue(settings: dict, instance_id: str = '') -> None:
     cache = read_cache(settings, 'catalogue.json')
     if instance_id:
@@ -858,9 +988,15 @@ def stale_rule_ids(settings: dict, health: dict) -> list:
     which is the whole point of keeping one.
     """
     ttl = int(settings.get('health', {}).get('ttl_hours', 24)) * 3600
+    dirty = set(health.get('dirty') or [])
     stale = []
     for rule in settings.get('rules', []):
         if not rule.get('enabled'):
+            continue
+        # Sonarr reported a change to this series: nothing cached for it can be trusted,
+        # whatever its age says.
+        if rule['id'] in dirty:
+            stale.append(rule['id'])
             continue
         entry = (health.get('rules') or {}).get(rule['id'])
         if not entry:
@@ -1022,22 +1158,27 @@ def clear_progress(settings: dict) -> None:
     write_cache(settings, 'checking.json', {'running': False, 'finished': now_iso()})
 
 
-def check_one_rule(settings: dict, rule: dict, instance_state: dict = None) -> dict:
+def check_one_rule(settings: dict, rule: dict, instance_state: dict = None, force: bool = False) -> dict:
     """Verify one rule, cache the result, and refresh that rule's alerts.
 
     Only this rule's alerts are replaced; everything else in the set is left alone, so a
     single-series recheck cannot clear a problem it never looked at.
     """
+    health = load_health(settings)
+    dirty = list(health.get('dirty') or [])
     if instance_state and not instance_state.get('ok', True):
         state = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
                  'ok': False, 'status': 'unmatched', 'label': 'Sonarr unavailable',
                  'error': instance_state.get('error', ''), 'checked_at': now_iso(),
                  'fingerprint': rule_fingerprint(rule, settings)}
     else:
-        state = monitoring_for(settings, rule)
+        # A series Sonarr says changed is re-read whatever its age; everything else is
+        # re-decided from what is already stored, which costs no call at all.
+        state = monitoring_for(settings, rule, force=force or rule['id'] in dirty)
         state['checked_at'] = now_iso()
         state['fingerprint'] = rule_fingerprint(rule, settings)
-    health = load_health(settings)
+    if rule['id'] in dirty and not state.get('from_cache') and state.get('ok'):
+        health['dirty'] = [known for known in dirty if known != rule['id']]
     was = (health.get('rules') or {}).get(rule['id']) or {}
     # Said once, when Sonarr first reports it, rather than on every check thereafter.
     if state.get('ended') and not was.get('ended'):
@@ -1161,7 +1302,10 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
         for rule in rules:
             set_progress(settings, done=checked, current=rule['id'],
                          current_title=rule.get('series_title') or rule['path'])
-            state = check_one_rule(settings, rule, instances.get(rule['instance_id']))
+            # The scheduled sweep is the backstop: it reads every series outright, which
+            # is what catches monitoring toggled by hand in Sonarr — the one change no
+            # cheap signal reports. Fourteen megabytes and about a second, once a day.
+            state = check_one_rule(settings, rule, instances.get(rule['instance_id']), force=force)
             checked += 1
             found.extend(alerts_for_rule(settings, rule, state))
 
@@ -1169,7 +1313,10 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
         # Results for rules that no longer exist would otherwise accumulate for ever and
         # make the counts disagree with the list on screen.
         live = {rule['id'] for rule in settings.get('rules', [])}
+        for gone in set(health.get('rules') or {}) - live:
+            forget_episodes(settings, gone)
         health['rules'] = {rid: entry for rid, entry in (health.get('rules') or {}).items() if rid in live}
+        health['dirty'] = [rid for rid in (health.get('dirty') or []) if rid in live]
         previous = health.get('alerts') or []
         cleared = alerts.resolved(previous, found)
         health['alerts'] = alerts.merge(previous, found)
@@ -1241,7 +1388,9 @@ def plan_summary(settings: dict, health: dict) -> dict:
             totals['series'] += 1
         for key in ('delete', 'delete_bytes', 'unmonitor', 'monitor', 'monitor_skipped'):
             totals[key] += int(plan.get(key) or 0)
-        stamp = entry.get('checked_at')
+        # The age of the reading, not of the arithmetic over it: the plan is recomputed
+        # every time it is asked for, and dating it "now" would hide how old the data is.
+        stamp = entry.get('read_at') or entry.get('checked_at')
         if stamp and (totals['oldest'] is None or stamp < totals['oldest']):
             totals['oldest'] = stamp
     totals['actionable'] = (totals['delete'] + totals['unmonitor'] + totals['monitor']
@@ -1348,6 +1497,11 @@ def tick() -> int:
 def action_snapshot(settings, request):
     state = load_state(settings)
     health = load_health(settings)
+    # One small question — "what changed?" — in place of re-reading every series to find
+    # out. Rate limited, and it only ever adds to what must be re-read.
+    if array_ready() and watch_sonarr(settings, health, min_interval=int(request.get('watch_seconds') or 30)):
+        write_cache(settings, 'health.json', health)
+        health = load_health(settings)
     return {
         'version': VERSION,
         'settings': redact(settings),
@@ -1404,9 +1558,13 @@ def action_check_rule(settings, request):
     bind_rules(settings)
     settings = load_settings()
     rule = next((r for r in settings.get('rules', []) if r['id'] == rule['id']), rule)
-    state = check_one_rule(settings, rule, instance_state)
+    state = check_one_rule(settings, rule, instance_state, force=bool(request.get('force')))
     summary = trim_health({'rules': {rule['id']: state}})['rules'][rule['id']]
-    return {'busy': False, 'rule_id': rule['id'], 'state': summary}
+    # The alerts come back with the check that produced them. Asking for them separately
+    # meant a second PHP request and a second Python process for every series read.
+    fresh = load_health(settings)
+    return {'busy': False, 'rule_id': rule['id'], 'state': summary,
+            'alerts': fresh.get('alerts') or [], 'summary': alerts.summarise(fresh.get('alerts'))}
 
 
 def action_settings(settings, request):
@@ -1417,6 +1575,9 @@ def action_settings(settings, request):
     # timestamp would catch, so it is dropped rather than aged out.
     if canonical_json(settings.get('instances', [])) != canonical_json(updated.get('instances', [])):
         invalidate_catalogue(updated)
+    # A rule that is gone must not leave its episodes behind; the store is keyed by rule.
+    for gone in {rule['id'] for rule in settings.get('rules', [])} - {rule['id'] for rule in updated.get('rules', [])}:
+        forget_episodes(updated, gone)
     return {'settings': redact(updated), 'schedule_active': CRON.exists(),
             'schedule_text': schedules.describe(updated.get('schedule') or {}),
             'series_match_text': schedules.describe((updated.get('health') or {}).get('series_match') or {})}
@@ -1452,11 +1613,15 @@ def action_test_instance(settings, request):
 
 
 
-def monitoring_for(settings: dict, rule: dict) -> dict:
+def monitoring_for(settings: dict, rule: dict, force: bool = False) -> dict:
     """Everything one check knows about a series: monitoring, lifecycle, and the plan.
 
     Entirely from Sonarr. Sizes, air dates, import dates, monitoring and season numbers all
     arrive with the episodes, so this touches no filesystem and needs no path mapping.
+
+    The episodes come from the store unless `force` is set or they have aged out, so
+    re-deciding what a rule would do costs nothing. Everything below the fetch is
+    arithmetic, and it is redone every time.
     """
     base = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'], 'ok': True}
     if rule.get('match_status') != 'matched':
@@ -1464,16 +1629,15 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
                     status='unmatched', label='Not matched to Sonarr')
     try:
         active = effective_rule(rule, settings.get('profiles'))
-        client = client_for(settings, rule['instance_id'])
-        episodes = client.episodes(rule['series_id'], files_only=False)
+        episodes, series, read_at, from_cache = episodes_for(settings, rule, force=force)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
-    if not interpolate_air_dates(episodes):
-        fill_from_history(client, rule['series_id'], episodes)
 
     state = dict(base, **classify_monitoring(episodes, active, settings))
-    series = next((entry for entry in catalogue_for(settings, rule['instance_id'])
-                   if entry['series_id'] == rule['series_id']), None)
+    # The age shown is the age of the reading, not of the arithmetic over it: the plan is
+    # always current, and saying so about the data behind it would be a lie.
+    state['read_at'] = read_at
+    state['from_cache'] = from_cache
     if series:
         state.update(describe_lifecycle(state, series))
 
@@ -1518,14 +1682,14 @@ def action_monitor_apply(settings, request):
     rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
     if not rule:
         raise Rejected('That rule no longer exists.')
-    status = monitoring_for(settings, rule)
+    status = monitoring_for(settings, rule, force=True)
     if not status.get('ok'):
         raise Rejected(status.get('error') or 'This rule is not matched to a Sonarr series.')
 
     targets = status['in_frame_unmonitored'] if mode == 'monitor-in-frame' else status['out_frame_monitored']
     ids = [entry['episode_id'] for entry in targets if entry.get('episode_id')]
     if not ids:
-        return {'changed': 0, 'monitoring': monitoring_for(settings, rule),
+        return {'changed': 0, 'monitoring': status,
                 'ok_message': 'Nothing to change; monitoring already matches the keep frame.'}
     client = client_for(settings, rule['instance_id'])
     client.set_monitored(ids, mode == 'monitor-in-frame')
@@ -1553,7 +1717,7 @@ def action_monitor_apply(settings, request):
         save_ledger(settings, ledger)
 
     verb = 'monitored' if mode == 'monitor-in-frame' else 'unmonitored'
-    return {'changed': len(ids), 'monitoring': monitoring_for(settings, rule),
+    return {'changed': len(ids), 'monitoring': monitoring_for(settings, rule, force=True),
             'ok_message': f'{len(ids)} episode(s) {verb} in Sonarr.'}
 
 

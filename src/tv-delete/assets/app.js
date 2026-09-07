@@ -289,6 +289,7 @@
 
   // -- snapshot and background checking ----------------------------------
   const checking = new Set();
+  const forced = new Set();
   let checkQueue = [];
   let checkRunning = false;
   let bulkChecking = false;
@@ -329,9 +330,12 @@
     : list.some((a) => a.severity === 'warning') ? 'warning'
     : list.length ? 'notice' : '');
 
-  function queueChecks(ruleIds) {
+  // `force` is what the refresh buttons mean: read this series from Sonarr again. Without
+  // it a check re-decides from the episodes already stored, which needs no call at all.
+  function queueChecks(ruleIds, force) {
     const wanted = (ruleIds || []).filter((id) => !checkQueue.includes(id) && !checking.has(id));
     if (!wanted.length) return;
+    if (force) wanted.forEach((id) => forced.add(id));
     checkQueue = checkQueue.concat(wanted);
     wanted.forEach((id) => checking.add(id));
     // A sweep empties the list: a card left standing during a re-read looks like a
@@ -348,23 +352,26 @@
       while (checkQueue.length) {
         const ruleId = checkQueue.shift();
         try {
-          const data = await api('check-rule', { rule_id: ruleId }, '', true);
+          const data = await api('check-rule', { rule_id: ruleId, force: forced.has(ruleId) }, '', true);
           if (data.busy) {
             checkQueue.forEach((id) => checking.delete(id));
             checkQueue = [];
             checking.delete(ruleId);
+            forced.clear();
             startPolling();
             break;
           }
           monitoring[data.rule_id] = data.state;
-          const fresh = await api('alerts', {}, '', true);
-          applyAlerts(fresh.alerts);
+          // The alerts arrive with the check that produced them; asking separately cost a
+          // second request and a second worker process for every series.
+          applyAlerts(data.alerts);
         } catch (error) {
           monitoring[ruleId] = Object.assign({}, monitoring[ruleId], {
             ok: false, label: 'Check failed', error: error.message, checked_at: new Date().toISOString(),
           });
         } finally {
           checking.delete(ruleId);
+          forced.delete(ruleId);
           renderRules();
           renderAlerts();
           renderStats();
@@ -536,7 +543,7 @@
     const label = $('tvd-uptodate');
     label.hidden = !quiet;
     if (quiet) {
-      label.textContent = `Up to date, no changes scheduled${plan.oldest ? ` — checked ${ago(plan.oldest)}` : ''}`;
+      label.textContent = `Up to date, no changes scheduled${plan.oldest ? ` — Sonarr read ${ago(plan.oldest)}` : ''}`;
       return;
     }
     const open = (kind) => guarded('', async () => {
@@ -644,7 +651,7 @@
   $('tvd-refresh-all').addEventListener('click', () => guarded('', async () => {
     const ids = (settings.rules || []).filter((rule) => rule.enabled).map((rule) => rule.id);
     if (!ids.length) throw new Error('There are no enabled series to check.');
-    queueChecks(ids);
+    queueChecks(ids, true);
   }));
 
   $('tvd-run').addEventListener('click', () => guarded('', async () => {
@@ -766,7 +773,7 @@
       const state = monitoring[rule.id];
       return el('span', {
         className: `tvd-dot-badge ${state ? 'clear' : 'unknown'}`,
-        title: state ? `No problems — checked ${ago(state.checked_at)}` : 'Not checked yet',
+        title: state ? `No problems — Sonarr read ${ago(state.read_at || state.checked_at)}` : 'Not checked yet',
         textContent: '',
       });
     }
@@ -869,7 +876,7 @@
       const refresh = el('button', { type: 'button', className: 'tvd-icon-button',
                                      title: 'Re-read this series from Sonarr' },
                         [el('i', { className: 'fa fa-refresh' })]);
-      refresh.addEventListener('click', () => queueChecks([rule.id]));
+      refresh.addEventListener('click', () => queueChecks([rule.id], true));
       line.append(refresh);
       // A sweep hides what it is about to replace. The card stays — it is the series that
       // is being re-read, not the list — but a plan left standing during the read is a
@@ -887,10 +894,13 @@
         });
         const lines = changeLines(plan, open);
         line.append(lines);
-        line.append(el('span', { className: 'tvd-plan-quiet', textContent: `checked ${ago(state.checked_at)}` }));
+        // The plan is recomputed on every check; the reading behind it is as old as it is.
+        line.append(el('span', { className: 'tvd-plan-quiet',
+                                 textContent: `Sonarr read ${ago(state.read_at || state.checked_at)}` }));
       } else {
         line.append(el('span', { className: 'tvd-plan-quiet',
-                                 textContent: `Up to date, no changes scheduled — checked ${ago(state.checked_at)}` }));
+                                 textContent: 'Up to date, no changes scheduled — Sonarr read '
+                                   + ago(state.read_at || state.checked_at) }));
       }
       body.append(line);
 
@@ -1007,7 +1017,8 @@
     ]);
     if (blocked) head.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocked' }));
     const state = monitoring[rule.id];
-    head.append(el('span', { className: 'tvd-alert-age', textContent: state ? `checked ${ago(state.checked_at)}` : 'not checked' }));
+    head.append(el('span', { className: 'tvd-alert-age',
+                             textContent: state ? `Sonarr read ${ago(state.read_at || state.checked_at)}` : 'not checked' }));
     card.append(head);
     list.forEach((alert) => card.append(alertItem(alert)));
     const foot = el('div', { className: 'tvd-alert-foot' });
@@ -1021,7 +1032,7 @@
       foot.append(open);
     }
     const recheck = el('button', { type: 'button', className: 'tvd-small', textContent: 'Re-check now' });
-    recheck.addEventListener('click', () => { $('tvd-dialog').close('cancel'); queueChecks([rule.id]); });
+    recheck.addEventListener('click', () => { $('tvd-dialog').close('cancel'); queueChecks([rule.id], true); });
     foot.append(recheck);
     card.append(foot);
     return card;
@@ -1140,7 +1151,7 @@
   $('tvd-recheck-all').addEventListener('click', () => guarded('', async () => {
     const ids = (settings.rules || []).filter((rule) => rule.enabled).map((rule) => rule.id);
     if (!ids.length) throw new Error('There are no enabled series to check.');
-    queueChecks(ids);
+    queueChecks(ids, true);
     notice(`Re-reading ${plural(ids.length, 'series')} in the background.`, 'ok');
   }));
 
