@@ -389,11 +389,24 @@ class Interface(unittest.TestCase):
         self.assertIn("setBadge($('tvd-series-badge'), seriesList)", self.js)
         self.assertIn("setBadge($('tvd-tab-badge'), systemAlerts)", self.js)
 
-    def test_a_sweep_clears_the_list_while_it_runs(self):
-        # A card left standing during a re-read reads as a fresh result, and it is not one.
+    def test_a_sweep_clears_each_plan_but_keeps_the_series(self):
+        # The series are not what is being re-read; their plans are. A plan left standing
+        # during the read is a stale reading shown as a current one — but emptying the
+        # whole list to say so throws away the page.
         self.assertIn('bulkChecking', self.js)
-        self.assertRegex(self.js, r'if \(bulkChecking\) \{\s*\n\s*\$\(.tvd-rules-empty.\)\.hidden = true;')
+        self.assertIn('if (isChecking(rule.id) || bulkChecking) {', self.js)
         self.assertIn('bulkChecking = false;', self.js)
+        self.assertNotRegex(self.js, r'if \(bulkChecking\) \{\s*\n\s*\$\(.tvd-rules-empty.\)')
+
+    def test_buttons_do_not_inherit_the_font_shorthand(self):
+        """`font: inherit` also sets line-height, and outranks any class that sets it.
+
+        At `#tv-delete button` it is (1,0,1), so every dense list built from buttons —
+        the scheduled-change lines, the series jump list — silently reverted to the
+        page's paragraph spacing however tight the component's own rule was.
+        """
+        self.assertNotRegex(self.css, r'#tv-delete button \{[^}]*font:\s*inherit')
+        self.assertRegex(self.css, r'#tv-delete button \{[^}]*font-family:\s*inherit')
 
     def test_the_change_view_offers_a_list_of_the_series_it_covers(self):
         self.assertIn('tvd-change-nav', self.js)

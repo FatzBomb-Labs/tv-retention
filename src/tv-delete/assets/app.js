@@ -831,12 +831,6 @@
     $('tvd-disable-all').textContent = `Disable shown (${rules.length})`;
     container.replaceChildren();
     $('tvd-rules-empty').hidden = (settings.rules || []).length > 0;
-    if (bulkChecking) {
-      $('tvd-rules-empty').hidden = true;
-      container.append(el('div', { className: 'tvd-empty' }, [
-        el('span', { className: 'tvd-spinner' }), text(' Reading from Sonarr…')]));
-      return;
-    }
     rules.forEach((rule) => {
       // A queued series shows its intent instead of its retention: nothing about the
       // keep window matters once you have decided to stop managing it.
@@ -877,7 +871,10 @@
                         [el('i', { className: 'fa fa-refresh' })]);
       refresh.addEventListener('click', () => queueChecks([rule.id]));
       line.append(refresh);
-      if (isChecking(rule.id)) {
+      // A sweep hides what it is about to replace. The card stays — it is the series that
+      // is being re-read, not the list — but a plan left standing during the read is a
+      // stale reading presented as a current one.
+      if (isChecking(rule.id) || bulkChecking) {
         line.append(el('span', { className: 'tvd-plan-quiet', textContent: 'Reading from Sonarr…' }));
       } else if (blocked) {
         line.append(el('span', { className: 'tvd-plan-quiet', textContent: 'Blocked — nothing will run for this series.' }));
@@ -901,7 +898,7 @@
       const editButton = el('button', { type: 'button', className: 'tvd-small', textContent: 'Edit' });
       editButton.addEventListener('click', () => editRule(rule));
       actions.append(editButton);
-      if (isChecking(rule.id)) {
+      if (isChecking(rule.id) || bulkChecking) {
         [...actions.children].forEach((button) => { button.disabled = true; });
         card.classList.add('tvd-busy-row');
       }
