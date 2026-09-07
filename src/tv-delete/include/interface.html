@@ -23,6 +23,7 @@
 
 <nav class="tvd-tabs" aria-label="TV Delete views">
   <button type="button" class="active" data-tab="shows">Shows &amp; rules</button>
+  <button type="button" data-tab="presets">Retention presets</button>
   <button type="button" data-tab="sonarr">Sonarr instances</button>
   <button type="button" data-tab="settings">Schedule &amp; safety</button>
   <button type="button" data-tab="history">Runs &amp; history</button>
@@ -45,6 +46,14 @@
   </div>
   <div id="tvd-rules" class="tvd-rules"></div>
   <p id="tvd-rules-empty" class="tvd-empty">No shows yet. Choose <strong>Add show</strong> to pick a series from Sonarr, or to point at a folder and have it matched.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-presets" class="tvd-panel" hidden>
+  <p class="tvd-lede">A preset is a named retention setting — <strong>Keep 30 days</strong>, <strong>Keep 2 seasons</strong> — that any number of shows can point at. Change the preset and every show using it changes with it, which is the tidy way to widen a group of shows at once.</p>
+  <div id="tvd-presets" class="tvd-rules"></div>
+  <p id="tvd-presets-empty" class="tvd-empty">No presets yet. Shows can still carry their own values, but a preset saves repeating them.</p>
+  <div class="tvd-actions"><button type="button" id="tvd-add-preset" class="tvd-primary">Add preset</button></div>
 </section>
 
 <!-- ------------------------------------------------------------------ -->
@@ -88,6 +97,7 @@
     <label class="tvd-check"><input type="checkbox" id="tvd-include-specials"> Include specials (season 0)</label>
     <label class="tvd-check"><input type="checkbox" id="tvd-mtime-fallback"> Fall back to file modification time when no air date exists<small>With this off, an episode with no known air date is never deleted.</small></label>
     <label class="tvd-check"><input type="checkbox" id="tvd-unmonitor"> Unmonitor episodes in Sonarr after deleting them</label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-remonitor"> Re-monitor episodes again when a rule is widened<small>Only episodes this plugin unmonitored, and only while they fall back inside the new keep window. Sonarr may download them again.</small></label>
   </div>
 
   <h2 class="tvd-h2">Deletion</h2>

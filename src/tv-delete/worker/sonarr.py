@@ -141,11 +141,22 @@ class Sonarr:
         """Delete through Sonarr so its database stays correct and its recycle bin applies."""
         self._request('DELETE', f'episodefile/{int(file_id)}')
 
-    def unmonitor(self, episode_ids) -> None:
+    def set_monitored(self, episode_ids, monitored: bool) -> None:
         ids = [int(value) for value in episode_ids if value]
         if not ids:
             return
-        self._request('PUT', 'episode/monitor', body={'episodeIds': ids, 'monitored': False})
+        self._request('PUT', 'episode/monitor', body={'episodeIds': ids, 'monitored': bool(monitored)})
+
+    def unmonitor(self, episode_ids) -> None:
+        self.set_monitored(episode_ids, False)
+
+    def remonitor(self, episode_ids) -> None:
+        """Re-arm episodes a narrower rule previously unmonitored. Sonarr may re-download them."""
+        self.set_monitored(episode_ids, True)
+
+    def root_folders(self) -> list:
+        payload = self._request('GET', 'rootfolder')
+        return [entry.get('path') for entry in payload or [] if entry.get('path')]
 
     def rescan(self, series_id: int) -> None:
         self._request('POST', 'command', body={'name': 'RescanSeries', 'seriesId': int(series_id)})

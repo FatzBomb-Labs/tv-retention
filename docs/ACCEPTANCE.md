@@ -13,16 +13,23 @@ read-only or reversible.
 
 ## 2. Sonarr instances
 
-- [ ] Add `Sonarr-Series` (`http://<server>:8989`) with mapping `/tv` →
-      `/mnt/user/media/TV`. **Test connection** reports the Sonarr version and finds
-      every series folder.
+- [ ] Add `Sonarr-Series` (`http://<server>:8989`). Press **Detect roots** and confirm it
+      fills in `/tv` → `/mnt/user/media/TV`. **Test connection** then reports the Sonarr
+      version and finds every series folder.
 - [ ] Add `Sonarr-Anime` (port 8990) with the same mapping, and test it.
 - [ ] Note whether either Sonarr has a recycle bin configured — the test reports it. If
       not, deletions through Sonarr are permanent, so consider the plugin's own recycle
       folder.
 - [ ] Reload the page: the API keys show as masked, and saving again keeps them working.
 
-## 3. Rules
+## 3. Presets and rules
+
+- [ ] Create a preset, for example *Keep 180 days*. Point two shows at it, and confirm
+      both cards show the preset name and its values.
+- [ ] Edit the preset. Confirm the editor lists the shows that will change, and that both
+      cards update after saving.
+- [ ] Confirm a preset in use cannot be removed.
+- [ ] Add one show with **Custom** retention and confirm the preset has no effect on it.
 
 - [ ] Add one show by picking it from the Sonarr list. It saves as **matched**.
 - [ ] Add one show by browsing to its folder. It also saves as **matched**.
@@ -50,7 +57,18 @@ read-only or reversible.
       folder has a matching record.
 - [ ] Re-enable the other rules.
 
-## 6. Schedule
+## 6. Re-monitoring a widened rule
+
+- [ ] With re-monitoring off, let one live run delete and unmonitor at least one episode.
+      Confirm `unmonitored.json` in the state folder lists it.
+- [ ] Turn re-monitoring on, widen the preset that rule uses, and **Preview**. Confirm the
+      episode is reported as one that would be re-monitored, and that the ledger is
+      unchanged by the preview.
+- [ ] Run for real. Confirm Sonarr now shows the episode as monitored, and that it has
+      left the ledger.
+- [ ] Confirm an episode you unmonitored by hand in Sonarr is not affected.
+
+## 7. Schedule
 
 - [ ] Enable a daily schedule. Confirm `/boot/config/plugins/tv-delete/schedule.cron`
       exists and `crontab -l` contains the entry.
@@ -58,12 +76,12 @@ read-only or reversible.
       appears in history marked *schedule*, and that an Unraid notification arrived.
 - [ ] Disable the schedule and confirm the cron file is removed.
 
-## 7. Restart
+## 8. Restart
 
 - [ ] Reboot, or stop and start the array. Confirm settings and rules survive, and that
       the cron entry is republished.
 
-## 8. Uninstall
+## 9. Uninstall
 
 - [ ] Remove the plugin. Confirm the cron entry is gone, and that `settings.json` and
       the journal remain.

@@ -17,15 +17,16 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.parse
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from core import (DEFAULTS, VERSION, Rejected, atomic_json, empty_directories, evaluate,
-                  new_id, normalise, redact, scan_media, sidecars_for,
-                  validate_cron, validate_settings)
+from core import (DEFAULTS, VERSION, Rejected, atomic_json, derive_mappings,
+                  effective_rule, empty_directories, evaluate, new_id, normalise, redact,
+                  scan_media, select_remonitor, sidecars_for, validate_cron, validate_settings)
 from sonarr import Sonarr, SonarrError, match_rule
 from tmdb import TMDB, TMDBError, fill_air_dates
 
@@ -348,12 +349,54 @@ def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_ru
     return action
 
 
+# ---------------------------------------------------------------------------
+# The unmonitored ledger
+# ---------------------------------------------------------------------------
+
+def load_ledger(settings: dict) -> dict:
+    """Episodes this plugin unmonitored, per rule.
+
+    Kept so a later, wider rule can put them back. Nothing the operator unmonitored by
+    hand is ever recorded here, and so nothing of theirs is ever re-monitored.
+    """
+    path = state_dir(settings) / 'unmonitored.json'
+    if not path.exists():
+        return {}
+    try:
+        stored = json.loads(path.read_text())
+        return stored if isinstance(stored, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_ledger(settings: dict, ledger: dict) -> None:
+    try:
+        atomic_json(state_dir(settings) / 'unmonitored.json', ledger)
+    except OSError:
+        pass
+
+
+def ledger_entry(episode: dict) -> dict:
+    return {
+        'episode_id': episode.get('episode_id'),
+        'season': episode.get('season'),
+        'episode': episode.get('episode'),
+        'title': episode.get('title'),
+        'air_date': episode.get('air_date'),
+        'air_source': episode.get('air_source'),
+        'mtime': episode.get('mtime'),
+        'path': episode.get('path'),
+        'unmonitored_at': now_iso(),
+    }
+
+
 def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     """Evaluate and (unless previewing) execute one rule."""
     outcome = {
         'rule_id': rule['id'],
         'series_title': rule.get('series_title') or rule['path'],
         'path': rule['path'],
+        'preset': '',
         'ok': True,
         'error': '',
         'blocked': None,
@@ -366,6 +409,7 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         'freed_bytes': 0,
         'emptied_dirs': [],
         'unmonitored': 0,
+        'remonitored': [],
     }
     if rule.get('match_status') != 'matched':
         outcome.update(ok=False, error=rule.get('match_error') or 'Rule is not matched to a Sonarr series')
@@ -373,6 +417,12 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     if not Path(rule['path']).is_dir():
         outcome.update(ok=False, error=f'Folder does not exist on this server: {rule["path"]}')
         return outcome
+    try:
+        active = effective_rule(rule, settings.get('profiles'))
+    except Rejected as error:
+        outcome.update(ok=False, error=str(error))
+        return outcome
+    outcome['preset'] = active.get('profile_name', '')
     client = client_for(settings, rule['instance_id'])
     try:
         episodes, missing, unknown = collect_episodes(settings, rule, client, tmdb)
@@ -380,7 +430,30 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         outcome.update(ok=False, error=str(error))
         return outcome
 
-    decision = evaluate(episodes, rule, settings)
+    # -- put back what a widened rule now covers -------------------------
+    ledger = load_ledger(settings)
+    entries = ledger.get(rule['id'], [])
+    present_ids = {episode.get('episode_id') for episode in episodes}
+    # An episode that has a file again left the ledger's remit, however it returned.
+    returned = [entry for entry in entries if entry.get('episode_id') in present_ids]
+    entries = [entry for entry in entries if entry.get('episode_id') not in present_ids]
+    ledger_dirty = bool(returned)
+    if (settings.get('retention') or {}).get('remonitor_widened') and entries:
+        candidates = select_remonitor(episodes, entries, active, settings)
+        outcome['remonitored'] = [{'season': entry.get('season'), 'episode': entry.get('episode'),
+                                   'title': entry.get('title'), 'air_date': entry.get('air_date'),
+                                   'dry_run': dry_run} for entry in candidates]
+        if candidates and not dry_run:
+            try:
+                client.remonitor([entry['episode_id'] for entry in candidates])
+                restored = {entry['episode_id'] for entry in candidates}
+                entries = [entry for entry in entries if entry.get('episode_id') not in restored]
+                ledger_dirty = True
+            except SonarrError as error:
+                outcome['error'] = f'Could not re-monitor widened episodes: {error}'
+                outcome['remonitored'] = []
+
+    decision = evaluate(episodes, active, settings)
     outcome['considered'] = decision['considered']
     outcome['kept'] = len(decision['keep'])
     outcome['protected'] = len(decision['protected'])
@@ -388,15 +461,19 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     outcome['unknown_files'] = [entry['path'] for entry in unknown[:50]]
     if decision['blocked']:
         outcome['blocked'] = decision['blocked']
+        if ledger_dirty and not dry_run:
+            ledger[rule['id']] = entries
+            save_ledger(settings, ledger)
         return outcome
 
-    deleted_ids = []
+    deleted, deleted_ids = [], []
     for episode in decision['delete']:
         action = delete_one(settings, rule, client, episode, dry_run)
         outcome['deleted'].append(action)
         if action['ok']:
             outcome['freed_bytes'] += int(episode.get('size') or 0)
             deleted_ids.append(episode.get('episode_id'))
+            deleted.append(episode)
         else:
             outcome['ok'] = False
             outcome['error'] = action['error']
@@ -406,12 +483,18 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
             try:
                 client.unmonitor(deleted_ids)
                 outcome['unmonitored'] = len(deleted_ids)
+                entries = entries + [ledger_entry(episode) for episode in deleted]
+                ledger_dirty = True
             except SonarrError as error:
                 outcome['error'] = f'Files removed, but unmonitoring failed: {error}'
         if (settings.get('recycle') or {}).get('mode') == 'plugin':
             # Moving files out of the library is invisible to Sonarr until it rescans.
             with contextlib.suppress(SonarrError):
                 client.rescan(rule['series_id'])
+
+    if ledger_dirty and not dry_run:
+        ledger[rule['id']] = entries
+        save_ledger(settings, ledger)
 
     if settings.get('delete_empty_dirs') and (deleted_ids or dry_run):
         for directory in empty_directories(rule['path']):
@@ -449,7 +532,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                             'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
                             'considered': 0, 'kept': 0, 'protected': 0, 'unknown_files': [],
                             'blocked': None, 'freed_bytes': 0, 'emptied_dirs': [], 'unmonitored': 0,
-                            'missing_files': 0})
+                            'missing_files': 0, 'remonitored': [], 'preset': ''})
     total = sum(len(result['deleted']) for result in results)
 
     cap = int((settings.get('guards') or {}).get('max_deletes_per_run', 200))
@@ -469,6 +552,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         'rules': results,
         'planned': total,
         'deleted': 0,
+        'remonitored': sum(len(result.get('remonitored') or []) for result in results),
         'freed_bytes': 0,
         'errors': [r['error'] for r in results if r.get('error')],
         'blocked': [r['blocked'] for r in results if r.get('blocked')],
@@ -487,9 +571,10 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                                  'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
                                  'considered': 0, 'kept': 0, 'protected': 0, 'unknown_files': [],
                                  'blocked': None, 'freed_bytes': 0, 'emptied_dirs': [], 'unmonitored': 0,
-                                 'missing_files': 0})
+                                 'missing_files': 0, 'remonitored': [], 'preset': ''})
         summary['rules'] = executed
         summary['deleted'] = sum(len([d for d in r['deleted'] if d['ok']]) for r in executed)
+        summary['remonitored'] = sum(len(r.get('remonitored') or []) for r in executed)
         summary['freed_bytes'] = sum(r['freed_bytes'] for r in executed)
         summary['errors'] = [r['error'] for r in executed if r.get('error')]
         summary['blocked'] = [r['blocked'] for r in executed if r.get('blocked')]
@@ -504,6 +589,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
             'id': summary['id'], 'started': summary['started'], 'finished': summary['finished'],
             'scheduled': scheduled, 'dry_run': dry_run, 'planned': summary['planned'],
             'deleted': summary['deleted'], 'freed_bytes': summary['freed_bytes'],
+            'remonitored': summary['remonitored'],
             'aborted': summary['aborted'], 'errors': summary['errors'][:10],
         }]
         state['last_run'] = summary
@@ -567,6 +653,67 @@ def action_test_instance(settings, request):
         'sonarr_recycle_bin': recycle_bin,
         'sample': [{'title': entry['title'], 'sonarr_path': entry['sonarr_path'], 'path': entry['path'],
                     'exists': Path(entry['path']).is_dir()} for entry in mapped[:5]],
+    }
+
+
+def docker_mounts(hint_port: str = '') -> list:
+    """Bind mounts of the running containers, preferring one that publishes hint_port.
+
+    Used to translate the paths Sonarr reports into Unraid share paths without the
+    operator having to look either of them up. Read-only: `docker ps` and `docker inspect`
+    only.
+    """
+    if not shutil.which('docker'):
+        return []
+    try:
+        ids = subprocess.run(['docker', 'ps', '-q'], text=True, timeout=20, check=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.split()
+        if not ids:
+            return []
+        containers = json.loads(subprocess.run(['docker', 'inspect', *ids], text=True, timeout=30,
+                                               check=True, stdout=subprocess.PIPE,
+                                               stderr=subprocess.DEVNULL).stdout)
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+        return []
+
+    def publishes(container) -> bool:
+        ports = ((container.get('NetworkSettings') or {}).get('Ports') or {})
+        for bindings in ports.values():
+            for binding in bindings or []:
+                if str(binding.get('HostPort')) == str(hint_port):
+                    return True
+        return False
+
+    # A container publishing the port from the Sonarr URL is almost certainly that Sonarr.
+    ordered = sorted(containers, key=lambda container: 0 if (hint_port and publishes(container)) else 1)
+    if hint_port and ordered and publishes(ordered[0]):
+        ordered = [container for container in ordered if publishes(container)]
+    mounts = []
+    for container in ordered:
+        for mount in container.get('Mounts') or []:
+            if mount.get('Type') == 'bind' and mount.get('Source') and mount.get('Destination'):
+                mounts.append({'source': mount['Source'], 'destination': mount['Destination'],
+                               'container': (container.get('Name') or '').lstrip('/')})
+    return mounts
+
+
+def action_detect_mappings(settings, request):
+    """Propose path mappings for one Sonarr instance, from its root folders and Docker."""
+    from core import validate_instance
+    existing = {i['id']: i.get('api_key', '') for i in settings.get('instances', [])}
+    instance = validate_instance(request.get('instance') or {}, existing)
+    roots = Sonarr(instance).root_folders()
+    port = urllib.parse.urlparse(instance['url']).port or ''
+    mounts = docker_mounts(str(port))
+    mappings = derive_mappings(roots, mounts)
+    for mapping in mappings:
+        mapping['exists'] = Path(mapping['to']).is_dir()
+    return {
+        'root_folders': roots,
+        'mappings': mappings,
+        'containers': sorted({mount['container'] for mount in mounts if mount.get('container')}),
+        'note': '' if mappings else ('Sonarr reported its root folders, but no running container '
+                                     'mounts them. Enter the mapping by hand.'),
     }
 
 
@@ -638,6 +785,7 @@ ACTIONS = {
     'snapshot': action_snapshot,
     'settings': action_settings,
     'test-instance': action_test_instance,
+    'detect-mappings': action_detect_mappings,
     'series': action_series,
     'browse': action_browse,
     'match': action_match,

@@ -74,7 +74,7 @@
   document.querySelectorAll('.tvd-tabs button').forEach((button) => {
     button.addEventListener('click', () => {
       document.querySelectorAll('.tvd-tabs button').forEach((other) => other.classList.toggle('active', other === button));
-      ['shows', 'sonarr', 'settings', 'history', 'help'].forEach((name) => {
+      ['shows', 'presets', 'sonarr', 'settings', 'history', 'help'].forEach((name) => {
         $(`tvd-panel-${name}`).hidden = name !== button.dataset.tab;
       });
     });
@@ -123,6 +123,7 @@
     $('tvd-dry').hidden = !settings.dry_run;
     renderStats();
     renderRules();
+    renderPresets();
     renderInstances();
     renderSettings();
     renderHistory();
@@ -145,11 +146,17 @@
   }
 
   // -- rules -------------------------------------------------------------
+  function presetFor(rule) {
+    return (settings.profiles || []).find((preset) => preset.id === rule.profile_id) || null;
+  }
+
   function ruleSummary(rule) {
+    const preset = presetFor(rule);
+    const source = preset || rule;
     const parts = [];
-    if (rule.keep_days) parts.push(`keep ${plural(rule.keep_days, 'day')}`);
-    if (rule.keep_episodes) parts.push(`keep ${plural(rule.keep_episodes, 'episode')}`);
-    if (rule.keep_seasons) parts.push(`keep ${plural(rule.keep_seasons, 'season')}`);
+    if (source.keep_days) parts.push(`keep ${plural(source.keep_days, 'day')}`);
+    if (source.keep_episodes) parts.push(`keep ${plural(source.keep_episodes, 'episode')}`);
+    if (source.keep_seasons) parts.push(`keep ${plural(source.keep_seasons, 'season')}`);
     return parts;
   }
 
@@ -180,7 +187,9 @@
       card.append(el('div', { className: 'tvd-rule-path', textContent: rule.path }));
       const body = el('div', { className: 'tvd-rule-body' });
       ruleSummary(rule).forEach((text) => body.append(el('span', { className: 'tvd-chip on', textContent: text })));
-      body.append(el('span', { className: 'tvd-chip', textContent: `combine: ${rule.combine}` }));
+      const preset = presetFor(rule);
+      if (preset) body.prepend(el('span', { className: 'tvd-chip on', textContent: `preset: ${preset.name}` }));
+      body.append(el('span', { className: 'tvd-chip', textContent: `combine: ${(preset || rule).combine}` }));
       if (rule.unmonitor) body.append(el('span', { className: 'tvd-chip', textContent: 'unmonitor' }));
 
       const actions = el('div', { className: 'tvd-rule-actions' });
@@ -207,6 +216,96 @@
 
   $('tvd-search').addEventListener('input', renderRules);
   $('tvd-filter').addEventListener('change', renderRules);
+
+  // -- retention presets -------------------------------------------------
+  function presetSummary(preset) {
+    const parts = [];
+    if (preset.keep_days) parts.push(`keep ${plural(preset.keep_days, 'day')}`);
+    if (preset.keep_episodes) parts.push(`keep ${plural(preset.keep_episodes, 'episode')}`);
+    if (preset.keep_seasons) parts.push(`keep ${plural(preset.keep_seasons, 'season')}`);
+    return parts;
+  }
+
+  function renderPresets() {
+    const container = $('tvd-presets');
+    const presets = settings.profiles || [];
+    container.replaceChildren();
+    $('tvd-presets-empty').hidden = presets.length > 0;
+    presets.forEach((preset) => {
+      const users = (settings.rules || []).filter((rule) => rule.profile_id === preset.id);
+      const card = el('div', { className: 'tvd-rule matched' });
+      card.append(el('div', { className: 'tvd-rule-head' }, [
+        el('span', { className: 'tvd-rule-title', textContent: preset.name }),
+        el('span', { className: 'tvd-chip', textContent: `used by ${plural(users.length, 'show')}` }),
+      ]));
+      const body = el('div', { className: 'tvd-rule-body' });
+      presetSummary(preset).forEach((text) => body.append(el('span', { className: 'tvd-chip on', textContent: text })));
+      body.append(el('span', { className: 'tvd-chip', textContent: `combine: ${preset.combine}` }));
+      const actions = el('div', { className: 'tvd-rule-actions' });
+      const editButton = el('button', { type: 'button', textContent: 'Edit' });
+      editButton.addEventListener('click', () => editPreset(preset));
+      const removeButton = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Remove' });
+      removeButton.addEventListener('click', () => guarded('', async () => {
+        if (users.length) throw new Error(`${plural(users.length, 'show')} still use "${preset.name}". Point them elsewhere first.`);
+        if (!window.confirm(`Remove the preset "${preset.name}"?`)) return;
+        settings.profiles = settings.profiles.filter((other) => other.id !== preset.id);
+        await saveSettings('Preset removed.');
+      }));
+      actions.append(editButton, removeButton);
+      body.append(actions);
+      card.append(body);
+      container.append(card);
+    });
+  }
+
+  function conditionFields(source) {
+    const days = el('input', { type: 'number', min: '1', max: '36500', value: source.keep_days || '' });
+    const episodes = el('input', { type: 'number', min: '1', max: '100000', value: source.keep_episodes || '' });
+    const seasons = el('input', { type: 'number', min: '1', max: '1000', value: source.keep_seasons || '' });
+    const combine = el('select');
+    [['earliest', 'Earliest — keep if any condition keeps it (safest)'],
+     ['latest', 'Latest — delete only if every condition agrees'],
+     ['any', 'Any — delete if any condition says so (most aggressive)']]
+      .forEach(([value, label]) => combine.append(el('option', { value, textContent: label })));
+    combine.value = source.combine || 'earliest';
+    const node = el('div', {}, [
+      el('div', { className: 'tvd-row' }, [field('Keep days', days), field('Keep episodes', episodes), field('Keep seasons', seasons)]),
+      el('small', { textContent: 'Leave a box empty to switch that condition off. At least one is required.' }),
+      field('Combine conditions', combine),
+    ]);
+    return { days, episodes, seasons, combine, node };
+  }
+
+  function editPreset(existing) {
+    const preset = Object.assign({ id: '', name: '', keep_days: '', keep_episodes: '', keep_seasons: '', combine: 'earliest' }, existing || {});
+    dialog(existing ? 'Edit preset' : 'Add preset', (body) => {
+      const name = el('input', { type: 'text', value: preset.name, placeholder: 'Keep 30 days' });
+      const conditions = conditionFields(preset);
+      const users = (settings.rules || []).filter((rule) => rule.profile_id === preset.id);
+      body.append(field('Preset name', name), conditions.node);
+      if (users.length) {
+        body.append(el('p', { textContent: `${plural(users.length, 'show')} use this preset and will change with it:` }));
+        users.forEach((rule) => body.append(el('div', { className: 'tvd-mono', textContent: rule.series_title || rule.path })));
+        if ((settings.retention || {}).remonitor_widened) {
+          body.append(el('div', { className: 'tvd-banner', textContent: 'Re-monitoring is on: widening this preset will put previously removed episodes back on Sonarr’s wanted list at the next run.' }));
+        }
+      }
+      return { name, conditions };
+    }, async (context) => {
+      const draft = {
+        id: preset.id || undefined,
+        name: context.name.value,
+        keep_days: context.conditions.days.value || null,
+        keep_episodes: context.conditions.episodes.value || null,
+        keep_seasons: context.conditions.seasons.value || null,
+        combine: context.conditions.combine.value,
+      };
+      settings.profiles = (settings.profiles || []).filter((other) => other.id !== preset.id).concat([draft]);
+      await saveSettings('Preset saved.');
+    });
+  }
+
+  $('tvd-add-preset').addEventListener('click', () => editPreset(null));
 
   // -- rule editor -------------------------------------------------------
   async function seriesFor(instanceId) {
@@ -251,6 +350,7 @@
     const rule = Object.assign({
       id: '', enabled: true, instance_id: (settings.instances[0] || {}).id || '',
       series_id: null, series_title: '', tvdb_id: null, path: '',
+      profile_id: existing ? '' : ((settings.profiles || [])[0] || {}).id || '',
       keep_days: '', keep_episodes: '', keep_seasons: '', combine: 'earliest', unmonitor: true,
     }, existing || {});
 
@@ -301,15 +401,17 @@
       modeSelect.addEventListener('change', applyMode);
       instanceSelect.addEventListener('change', () => { seriesCache = {}; applyMode(); });
 
-      const days = el('input', { type: 'number', min: '1', max: '36500', value: rule.keep_days || '' });
-      const episodes = el('input', { type: 'number', min: '1', max: '100000', value: rule.keep_episodes || '' });
-      const seasons = el('input', { type: 'number', min: '1', max: '1000', value: rule.keep_seasons || '' });
-      const combine = el('select');
-      [['earliest', 'Earliest — keep if any condition keeps it (safest)'],
-       ['latest', 'Latest — delete only if every condition agrees'],
-       ['any', 'Any — delete if any condition says so (most aggressive)']]
-        .forEach(([value, label]) => combine.append(el('option', { value, textContent: label })));
-      combine.value = rule.combine;
+      const presetSelect = el('select');
+      (settings.profiles || []).forEach((preset) => {
+        presetSelect.append(el('option', { value: preset.id, textContent: `${preset.name} — ${presetSummary(preset).join(', ')}` }));
+      });
+      presetSelect.append(el('option', { value: '', textContent: 'Custom — set the values on this show only' }));
+      presetSelect.value = rule.profile_id || '';
+      const conditions = conditionFields(rule);
+      const applyPreset = () => { conditions.node.hidden = !!presetSelect.value; };
+      presetSelect.addEventListener('change', applyPreset);
+      applyPreset();
+
       const enabled = checkbox('Rule is enabled', rule.enabled);
       const unmonitor = checkbox('Unmonitor these episodes in Sonarr after deleting', rule.unmonitor);
 
@@ -317,24 +419,26 @@
         field('Sonarr instance', instanceSelect),
         field('How to identify the show', modeSelect),
         seriesField, pathField,
-        el('div', { className: 'tvd-row' }, [field('Keep days', days), field('Keep episodes', episodes), field('Keep seasons', seasons)]),
-        el('small', { textContent: 'Leave a box empty to switch that condition off. At least one is required.' }),
-        field('Combine conditions', combine),
+        field('Retention', presetSelect, (settings.profiles || []).length
+          ? 'Presets are managed on the Retention presets tab.'
+          : 'No presets yet — create one there to reuse the same values across shows.'),
+        conditions.node,
         enabled.node, unmonitor.node,
       );
       modeSelect.value = existing && existing.series_id ? 'series' : (existing ? 'folder' : 'series');
       applyMode();
 
-      return { instanceSelect, modeSelect, seriesSelect, pathInput, days, episodes, seasons, combine, enabled, unmonitor };
+      return { instanceSelect, modeSelect, seriesSelect, pathInput, presetSelect, conditions, enabled, unmonitor };
     }, async (context) => {
       const draft = {
         id: rule.id || undefined,
         enabled: context.enabled.input.checked,
         instance_id: context.instanceSelect.value,
-        keep_days: context.days.value || null,
-        keep_episodes: context.episodes.value || null,
-        keep_seasons: context.seasons.value || null,
-        combine: context.combine.value,
+        profile_id: context.presetSelect.value || '',
+        keep_days: context.presetSelect.value ? null : (context.conditions.days.value || null),
+        keep_episodes: context.presetSelect.value ? null : (context.conditions.episodes.value || null),
+        keep_seasons: context.presetSelect.value ? null : (context.conditions.seasons.value || null),
+        combine: context.conditions.combine.value,
         unmonitor: context.unmonitor.input.checked,
       };
       if (context.modeSelect.value === 'series') {
@@ -441,31 +545,71 @@
       const key = el('input', { type: 'password', value: instance.api_key || '', autocomplete: 'off', placeholder: 'Sonarr API key' });
       const enabled = checkbox('Instance is enabled', instance.enabled);
       const verify = checkbox('Verify the TLS certificate', instance.verify_tls, 'Turn off only for a self-signed certificate on your own network.');
-      const mapFrom = el('input', { type: 'text', value: (instance.path_maps[0] || {}).from || '', placeholder: '/tv', spellcheck: false });
-      const mapTo = el('input', { type: 'text', value: (instance.path_maps[0] || {}).to || '', placeholder: '/mnt/user/media/TV', spellcheck: false });
+      // Sonarr's mounted paths will not match Unraid's. Each row translates one root.
+      const mapRows = el('div', { className: 'tvd-rules' });
+      const addRow = (entry) => {
+        const from = el('input', { type: 'text', value: (entry || {}).from || '', placeholder: '/tv', spellcheck: false });
+        const to = el('input', { type: 'text', value: (entry || {}).to || '', placeholder: '/mnt/user/media/TV', spellcheck: false });
+        const drop = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Remove' });
+        const row = el('div', { className: 'tvd-row' }, [field('Path in Sonarr', from), field('Path on Unraid', to), drop]);
+        drop.addEventListener('click', (event) => { event.preventDefault(); row.remove(); });
+        row.dataset.mapping = '1';
+        row._pair = { from, to };
+        mapRows.append(row);
+        return row;
+      };
+      ((instance.path_maps || []).length ? instance.path_maps : [{}]).forEach(addRow);
+      const readMappings = () => [...mapRows.children]
+        .map((row) => ({ from: row._pair.from.value.trim(), to: row._pair.to.value.trim() }))
+        .filter((entry) => entry.from || entry.to);
+
+      const addMapButton = el('button', { type: 'button', textContent: 'Add another root' });
+      addMapButton.addEventListener('click', (event) => { event.preventDefault(); addRow(null); });
+
+      const draftInstance = () => ({
+        id: instance.id, name: name.value, url: url.value, api_key: key.value,
+        enabled: enabled.input.checked, verify_tls: verify.input.checked, path_maps: readMappings(),
+      });
+
+      const detectButton = el('button', { type: 'button', textContent: 'Detect roots' });
+      detectButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        guarded('', async () => {
+          const data = await api('detect-mappings', { instance: draftInstance() }, 'Reading Sonarr root folders…');
+          if (data.mappings.length) {
+            mapRows.replaceChildren();
+            data.mappings.forEach(addRow);
+            const missing = data.mappings.filter((entry) => !entry.exists);
+            notice(missing.length
+              ? `Filled in ${data.mappings.length} mapping(s), but ${missing.length} target folder(s) do not exist here. Check them before saving.`
+              : `Filled in ${data.mappings.length} mapping(s) from Sonarr's root folders and the container's mounts.`,
+              missing.length ? 'bad' : 'ok');
+          } else {
+            notice(`${data.note} Sonarr root folders: ${(data.root_folders || []).join(', ') || 'none reported'}`, 'bad');
+          }
+        });
+      });
+
       const testButton = el('button', { type: 'button', textContent: 'Test connection' });
       testButton.addEventListener('click', (event) => {
         event.preventDefault();
         guarded('', async () => {
-          const draft = {
-            id: instance.id, name: name.value, url: url.value, api_key: key.value,
-            enabled: enabled.input.checked, verify_tls: verify.input.checked,
-            path_maps: mapFrom.value || mapTo.value ? [{ from: mapFrom.value, to: mapTo.value }] : [],
-          };
-          const data = await api('test-instance', { instance: draft }, 'Contacting Sonarr…');
+          const data = await api('test-instance', { instance: draftInstance() }, 'Contacting Sonarr…');
           notice(`Sonarr ${data.sonarr_version}: ${data.series_count} series, ${data.folders_found} folders found on this server.`, 'ok');
         });
       });
+
       body.append(
         field('Name', name),
         field('URL', url, 'Include the port, and any base URL Sonarr is configured with.'),
         field('API key', key, existing ? 'Leave the masked value to keep the stored key.' : 'Sonarr: Settings → General → API Key.'),
-        el('h3', { textContent: 'Path mapping' }),
-        el('small', { textContent: 'Sonarr in a container reports its own paths. Map the path Sonarr reports to the matching Unraid share path. Leave both empty if Sonarr runs with Unraid paths directly.' }),
-        el('div', { className: 'tvd-row' }, [field('Path in Sonarr', mapFrom), field('Path on Unraid', mapTo)]),
+        el('h3', { textContent: 'Root path mapping' }),
+        el('small', { textContent: 'Sonarr reports the paths it sees inside its container; they will not match Unraid’s. Map each Sonarr root to the share it really lives on, and every path is translated in both directions. "Detect roots" fills this in from Sonarr’s root folders and the container’s mounts.' }),
+        mapRows,
+        el('div', { className: 'tvd-row' }, [addMapButton, detectButton]),
         enabled.node, verify.node, testButton,
       );
-      return { name, url, key, enabled, verify, mapFrom, mapTo };
+      return { name, url, key, enabled, verify, readMappings };
     }, async (context) => {
       const draft = {
         id: instance.id || undefined,
@@ -474,7 +618,7 @@
         api_key: context.key.value,
         enabled: context.enabled.input.checked,
         verify_tls: context.verify.input.checked,
-        path_maps: context.mapFrom.value || context.mapTo.value ? [{ from: context.mapFrom.value, to: context.mapTo.value }] : [],
+        path_maps: context.readMappings(),
       };
       settings.instances = (settings.instances || []).filter((other) => other.id !== instance.id).concat([draft]);
       seriesCache = {};
@@ -502,6 +646,7 @@
     $('tvd-include-specials').checked = !!retention.include_specials;
     $('tvd-mtime-fallback').checked = !!retention.allow_mtime_fallback;
     $('tvd-unmonitor').checked = !!retention.unmonitor_deleted;
+    $('tvd-remonitor').checked = !!retention.remonitor_widened;
     $('tvd-recycle-mode').value = recycle.mode || 'sonarr';
     $('tvd-recycle-path').value = recycle.path || '';
     $('tvd-recycle-days').value = recycle.retention_days;
@@ -539,6 +684,7 @@
         include_specials: $('tvd-include-specials').checked,
         allow_mtime_fallback: $('tvd-mtime-fallback').checked,
         unmonitor_deleted: $('tvd-unmonitor').checked,
+        remonitor_widened: $('tvd-remonitor').checked,
       },
       recycle: { mode: $('tvd-recycle-mode').value, path: $('tvd-recycle-path').value.trim(), retention_days: $('tvd-recycle-days').value },
       sidecars: { enabled: $('tvd-sidecars').checked, extensions: $('tvd-sidecar-ext').value.split(',').map((value) => value.trim()).filter(Boolean) },
@@ -572,7 +718,8 @@
       (result.blocked || []).forEach((message) => body.append(el('div', { className: 'tvd-warning', textContent: message })));
       body.append(el('p', {
         textContent: `${result.planned} file(s) selected across ${result.rules.length} rule(s) in ${result.duration_seconds}s.`
-                     + (result.dry_run ? ' Dry run: nothing was changed.' : ` ${bytes(result.freed_bytes)} reclaimed.`),
+                     + (result.dry_run ? ' Dry run: nothing was changed.' : ` ${bytes(result.freed_bytes)} reclaimed.`)
+                     + (result.remonitored ? ` ${result.remonitored} episode(s) re-monitored.` : ''),
       }));
       result.rules.forEach((rule) => {
         const card = el('div', { className: `tvd-rule ${rule.ok ? 'matched' : 'unmatched'}` });
@@ -582,7 +729,15 @@
           el('span', { className: 'tvd-chip', textContent: `${rule.kept} kept` }),
           el('span', { className: 'tvd-chip', textContent: `${rule.protected} protected` }),
         ]));
+        if (rule.preset) card.append(el('small', { textContent: `Retention preset: ${rule.preset}` }));
         if (rule.error) card.append(el('div', { className: 'tvd-error', textContent: rule.error }));
+        if ((rule.remonitored || []).length) {
+          card.append(el('p', { textContent: `${rule.remonitored.length} previously removed episode(s) ${result.dry_run ? 'would be' : 'were'} re-monitored because this rule now covers them again:` }));
+          rule.remonitored.slice(0, 20).forEach((item) => card.append(el('div', {
+            className: 'tvd-mono',
+            textContent: `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')} ${item.title || ''} (aired ${item.air_date || 'unknown'})`,
+          })));
+        }
         if (rule.blocked) card.append(el('div', { className: 'tvd-warning', textContent: rule.blocked }));
         if (rule.deleted.length) {
           const table = el('table', { className: 'tvd-table' });

@@ -31,6 +31,8 @@ DEFAULTS = {
     'dry_run': True,
     'schedule': {'enabled': False, 'cron': '0 4 * * *'},
     'instances': [],
+    # Named retention presets. A rule either points at one, or carries its own values.
+    'profiles': [],
     'rules': [],
     'tmdb': {'enabled': False, 'api_key': ''},
     'guards': {
@@ -42,6 +44,8 @@ DEFAULTS = {
         'include_specials': False,
         'allow_mtime_fallback': True,
         'unmonitor_deleted': True,
+        # Off by default: re-monitoring an episode invites Sonarr to download it again.
+        'remonitor_widened': False,
     },
     'sidecars': {'enabled': True, 'extensions': list(SIDECAR_EXTENSIONS)},
     'delete_empty_dirs': True,
@@ -199,39 +203,94 @@ def validate_instance(raw, existing_keys=None) -> dict:
     }
 
 
-def validate_rule(raw, instance_ids) -> dict:
+def validate_conditions(raw, field_prefix='') -> dict:
+    """The three retention numbers plus the combine mode, shared by rules and profiles."""
+    keep_days = _whole(raw.get('keep_days'), f'{field_prefix}Keep days'.strip(), 1, 36500)
+    keep_episodes = _whole(raw.get('keep_episodes'), f'{field_prefix}Keep episodes'.strip(), 1, 100000)
+    keep_seasons = _whole(raw.get('keep_seasons'), f'{field_prefix}Keep seasons'.strip(), 1, 1000)
+    combine = _text(raw.get('combine'), 'Combine mode', 16) or 'earliest'
+    if combine not in COMBINE_MODES:
+        raise Rejected('Combine mode must be earliest, latest, or any')
+    return {'keep_days': keep_days, 'keep_episodes': keep_episodes,
+            'keep_seasons': keep_seasons, 'combine': combine}
+
+
+def validate_profile(raw) -> dict:
+    """A named preset such as "Keep 30 days", reusable across any number of shows."""
+    if not isinstance(raw, dict):
+        raise Rejected('Invalid retention preset')
+    conditions = validate_conditions(raw, 'Preset ')
+    if all(conditions[key] is None for key in ('keep_days', 'keep_episodes', 'keep_seasons')):
+        raise Rejected('A preset needs at least one of: keep days, keep episodes, keep seasons')
+    return dict(conditions,
+                id=_text(raw.get('id'), 'Preset id', 32) or new_id(),
+                name=_text(raw.get('name'), 'Preset name', 80, required=True))
+
+
+def profile_label(profile: dict) -> str:
+    """A short description of a preset, for menus and reports."""
+    parts = []
+    if profile.get('keep_days'):
+        parts.append(f'{profile["keep_days"]}d')
+    if profile.get('keep_episodes'):
+        parts.append(f'{profile["keep_episodes"]} eps')
+    if profile.get('keep_seasons'):
+        parts.append(f'{profile["keep_seasons"]} seasons')
+    return f'{profile.get("name", "")} ({", ".join(parts)}, {profile.get("combine", "earliest")})'
+
+
+def effective_rule(rule: dict, profiles) -> dict:
+    """Resolve a rule to the conditions a run should apply.
+
+    A rule that names a preset takes every condition from it, so raising a shared
+    "Keep 30 days" preset to 90 days widens every show using it at once. A rule with no
+    preset carries its own values.
+    """
+    resolved = dict(rule)
+    if rule.get('profile_id'):
+        profile = next((p for p in profiles or [] if p['id'] == rule['profile_id']), None)
+        if not profile:
+            raise Rejected(f'Rule "{rule.get("series_title") or rule.get("path")}" uses a '
+                           'retention preset that no longer exists.')
+        resolved.update({key: profile.get(key) for key in
+                         ('keep_days', 'keep_episodes', 'keep_seasons', 'combine')})
+        resolved['profile_name'] = profile['name']
+    return resolved
+
+
+def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
     if not isinstance(raw, dict):
         raise Rejected('Invalid rule')
     instance_id = _text(raw.get('instance_id'), 'Sonarr instance', 32, required=True)
     if instance_id not in instance_ids:
         raise Rejected('This rule points at a Sonarr instance that no longer exists')
-    keep_days = _whole(raw.get('keep_days'), 'Keep days', 1, 36500)
-    keep_episodes = _whole(raw.get('keep_episodes'), 'Keep episodes', 1, 100000)
-    keep_seasons = _whole(raw.get('keep_seasons'), 'Keep seasons', 1, 1000)
-    if keep_days is None and keep_episodes is None and keep_seasons is None:
-        raise Rejected('A rule needs at least one of: keep days, keep episodes, keep seasons')
-    combine = _text(raw.get('combine'), 'Combine mode', 16) or 'earliest'
-    if combine not in COMBINE_MODES:
-        raise Rejected('Combine mode must be earliest, latest, or any')
+    profile_id = _text(raw.get('profile_id'), 'Retention preset', 32)
+    if profile_id and profile_id not in profile_ids:
+        raise Rejected('This rule points at a retention preset that no longer exists')
+    conditions = validate_conditions(raw)
+    if not profile_id and all(conditions[key] is None for key in ('keep_days', 'keep_episodes', 'keep_seasons')):
+        raise Rejected('A rule needs a retention preset, or at least one of: '
+                       'keep days, keep episodes, keep seasons')
     series_id = _whole(raw.get('series_id'), 'Sonarr series id', 1, 2 ** 31 - 1)
-    rule = {
-        'id': _text(raw.get('id'), 'Rule id', 32) or new_id(),
-        'enabled': _flag(raw.get('enabled', True)),
-        'instance_id': instance_id,
-        'series_id': series_id,
-        'series_title': _text(raw.get('series_title'), 'Series title', 300),
-        'tvdb_id': _whole(raw.get('tvdb_id'), 'TVDB id', 1, 2 ** 31 - 1),
-        'path': validate_library_path(raw.get('path'), 'Series folder'),
-        'keep_days': keep_days,
-        'keep_episodes': keep_episodes,
-        'keep_seasons': keep_seasons,
-        'combine': combine,
-        'unmonitor': _flag(raw.get('unmonitor', True)),
+    rule = dict(
+        conditions,
+        id=_text(raw.get('id'), 'Rule id', 32) or new_id(),
+        enabled=_flag(raw.get('enabled', True)),
+        instance_id=instance_id,
+        profile_id=profile_id,
+        series_id=series_id,
+        series_title=_text(raw.get('series_title'), 'Series title', 300),
+        tvdb_id=_whole(raw.get('tvdb_id'), 'TVDB id', 1, 2 ** 31 - 1),
+        path=validate_library_path(raw.get('path'), 'Series folder'),
+        unmonitor=_flag(raw.get('unmonitor', True)),
         # Match state is owned by the backend; the UI cannot assert a rule is matched.
-        'match_status': 'matched' if series_id else 'unmatched',
-        'match_error': _text(raw.get('match_error'), 'Match error', 500),
-        'matched_at': _text(raw.get('matched_at'), 'Matched at', 40),
-    }
+        match_status='matched' if series_id else 'unmatched',
+        match_error=_text(raw.get('match_error'), 'Match error', 500),
+        matched_at=_text(raw.get('matched_at'), 'Matched at', 40),
+    )
+    if profile_id:
+        # Preset-driven rules store no numbers of their own, so there is one source of truth.
+        rule.update({'keep_days': None, 'keep_episodes': None, 'keep_seasons': None, 'combine': 'earliest'})
     if not rule['series_id']:
         rule['match_status'] = 'unmatched'
         rule['match_error'] = rule['match_error'] or 'Not linked to a Sonarr series yet'
@@ -257,10 +316,21 @@ def validate_settings(raw, previous=None) -> dict:
     if len({i['name'].lower() for i in instances}) != len(instances):
         raise Rejected('Sonarr instance names must be unique')
 
+    profiles = []
+    profile_ids = set()
+    for entry in raw.get('profiles') or []:
+        profile = validate_profile(entry)
+        if profile['id'] in profile_ids:
+            raise Rejected('Duplicate retention preset id')
+        profile_ids.add(profile['id'])
+        profiles.append(profile)
+    if len({p['name'].lower() for p in profiles}) != len(profiles):
+        raise Rejected('Retention preset names must be unique')
+
     rules = []
     rule_ids = set()
     for entry in raw.get('rules') or []:
-        rule = validate_rule(entry, seen)
+        rule = validate_rule(entry, seen, profile_ids)
         if rule['id'] in rule_ids:
             raise Rejected('Duplicate rule id')
         rule_ids.add(rule['id'])
@@ -308,6 +378,7 @@ def validate_settings(raw, previous=None) -> dict:
             'cron': validate_cron(schedule_raw.get('cron') or DEFAULTS['schedule']['cron']),
         },
         'instances': instances,
+        'profiles': profiles,
         'rules': rules,
         'tmdb': {'enabled': _flag(tmdb_raw.get('enabled', False)) and bool(tmdb_key), 'api_key': tmdb_key},
         'guards': {
@@ -319,6 +390,7 @@ def validate_settings(raw, previous=None) -> dict:
             'include_specials': _flag(retention_raw.get('include_specials', False)),
             'allow_mtime_fallback': _flag(retention_raw.get('allow_mtime_fallback', True)),
             'unmonitor_deleted': _flag(retention_raw.get('unmonitor_deleted', True)),
+            'remonitor_widened': _flag(retention_raw.get('remonitor_widened', False)),
         },
         'sidecars': {'enabled': _flag(sidecars_raw.get('enabled', True)), 'extensions': sorted(set(extensions))},
         'delete_empty_dirs': _flag(raw.get('delete_empty_dirs', True)),
@@ -383,6 +455,32 @@ def unmap_path(path: str, path_maps) -> str:
     """Translate an Unraid host path back to the path Sonarr knows."""
     inverted = [{'from': entry['to'], 'to': entry['from']} for entry in path_maps or []]
     return map_path(path, inverted)
+
+
+def derive_mappings(root_folders, mounts) -> list:
+    """Work out a container-to-host path mapping from Sonarr's roots and Docker's mounts.
+
+    Sonarr reports the paths it sees inside its container ("/tv/Series"); Docker knows
+    which host directory is mounted there ("/mnt/user/media/TV" at "/tv"). Pairing the two
+    gives the mapping without the operator having to type either path. Only the mounts
+    that actually cover a Sonarr root folder are proposed, so unrelated volumes such as
+    /config are ignored.
+    """
+    proposals = {}
+    for folder in root_folders or []:
+        target = normalise(folder)
+        best = None
+        for mount in mounts or []:
+            destination = normalise(mount.get('destination') or '')
+            source = normalise(mount.get('source') or '')
+            if not destination or not source or destination == '/':
+                continue
+            if target == destination or target.startswith(destination + '/'):
+                if best is None or len(destination) > len(normalise(best['destination'])):
+                    best = mount
+        if best:
+            proposals[normalise(best['destination'])] = normalise(best['source'])
+    return [{'from': source, 'to': target} for source, target in sorted(proposals.items())]
 
 
 # ---------------------------------------------------------------------------
@@ -588,3 +686,31 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
             )
             result['delete'] = []
     return result
+
+
+def select_remonitor(episodes, ledger_entries, rule, settings, now=None) -> list:
+    """Which previously-deleted episodes now fall back inside a widened rule.
+
+    When a rule's keep window grows — usually because a shared preset was raised from 30
+    to 90 days — episodes this plugin unmonitored may belong in the library again. They
+    are judged by replaying the current rule over the episodes still on disk *plus* the
+    ledger entries, so "keep the newest 20 episodes" counts the missing ones in their
+    proper order rather than pretending they never existed.
+
+    Only episodes this plugin unmonitored are ever considered; anything the operator
+    unmonitored by hand is untouched, because it was never written to the ledger.
+    """
+    if not ledger_entries:
+        return []
+    ghosts = []
+    for entry in ledger_entries:
+        ghost = dict(entry)
+        ghost['path'] = entry.get('path') or f'ledger:{entry.get("episode_id")}'
+        ghost['from_ledger'] = True
+        ghosts.append(ghost)
+    combined = list(episodes) + ghosts
+    # The guards protect deletions, not this read-only comparison.
+    relaxed = dict(settings, guards=dict(settings.get('guards', {}), max_percent_per_rule=100))
+    decision = evaluate(combined, rule, relaxed, now=now)
+    keepers = {item['path'] for item in decision['keep'] if item.get('from_ledger')}
+    return [entry for entry, ghost in zip(ledger_entries, ghosts) if ghost['path'] in keepers]

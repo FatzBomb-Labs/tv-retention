@@ -17,6 +17,8 @@ justified by real episode metadata rather than a file timestamp.
 - [Installing](#installing)
 - [First run](#first-run)
 - [Rules](#rules)
+- [Retention presets](#retention-presets)
+- [Re-monitoring when a rule is widened](#re-monitoring-when-a-rule-is-widened)
 - [Sonarr instances and path mapping](#sonarr-instances-and-path-mapping)
 - [Air dates and TMDB](#air-dates-and-tmdb)
 - [Safety](#safety)
@@ -93,12 +95,48 @@ such an episode; *any* deletes it on the strength of the other conditions.
 Example: `keep_days = 180`, `keep_episodes = 20`, combine `earliest` keeps everything
 from the last 180 days **and** the 20 newest episodes, whichever is more generous.
 
+## Retention presets
+
+Rather than typing the same numbers onto every show, create a named preset — *Keep 30
+days*, *Keep 2 seasons* — on the **Retention presets** tab. A show's retention is then a
+dropdown: pick a preset, or pick **Custom** and set values for that show alone.
+
+A preset is the single source of truth for every show pointing at it. Raise *Keep 30
+days* to 90 and all of them widen at once, with no rule-by-rule editing. The preset
+editor lists the shows that will change before you save, and a preset still in use cannot
+be deleted.
+
+## Re-monitoring when a rule is widened
+
+When the plugin deletes an episode it unmonitors it in Sonarr, and records that in a
+ledger. If the rule later widens — usually because a shared preset was raised — those
+episodes may belong in the library again. With **Re-monitor episodes again when a rule is
+widened** switched on, the next run puts them back on Sonarr's wanted list.
+
+The decision replays the current rule over the episodes still on disk *plus* the ledger
+entries, so "keep the newest 20 episodes" counts the missing ones in their proper place
+rather than pretending they never existed.
+
+Two limits are deliberate:
+
+- Only episodes **this plugin** unmonitored are ever considered. Anything you unmonitored
+  by hand was never written to the ledger, and is never touched.
+- The option is **off by default**, because re-monitoring invites Sonarr to download the
+  episodes again. A dry run reports exactly what would be re-monitored and changes
+  nothing, not even the ledger.
+
 ## Sonarr instances and path mapping
 
-Sonarr in a container reports its own paths. If Sonarr's `/tv` is Unraid's
-`/mnt/user/media/TV`, enter that pair as the mapping; the plugin translates every path
-Sonarr reports before touching the filesystem, and translates back when talking to
-Sonarr. Leave the mapping empty only if Sonarr runs with Unraid's own paths.
+Sonarr in a container reports the paths it sees inside that container, and they will not
+match Unraid's. If Sonarr's `/tv` is Unraid's `/mnt/user/media/TV`, enter that pair as a
+mapping; the plugin translates every path Sonarr reports before touching the filesystem,
+and translates back when talking to Sonarr. Add a row per root — a Sonarr with `/tv` and
+`/anime` gets two. Leave the mapping empty only if Sonarr runs with Unraid's own paths.
+
+**Detect roots** fills this in for you: it asks Sonarr for its root folders, inspects the
+running container that publishes the port in the instance URL, and pairs the two. On this
+server that turns Sonarr's `/tv/Series`, `/tv/Kids`, `/tv/News & Talk` and `/tv/Reality`
+into the single mapping `/tv` → `/mnt/user/media/TV`, and confirms the folder exists.
 
 Getting this wrong is the most common cause of trouble, so **Test connection** counts how
 many of Sonarr's series folders actually exist on this server and lists the ones that do
@@ -154,6 +192,7 @@ rather than queueing.
 | `<state folder>/state.json` | Run history and the last run report. |
 | `<state folder>/journal.jsonl` | Append-only audit trail. |
 | `<state folder>/tmdb-cache.json` | Cached TMDB air dates. |
+| `<state folder>/unmonitored.json` | The ledger of episodes this plugin unmonitored, used for re-monitoring. |
 
 The state folder defaults to `/mnt/user/appdata/tv-delete`, deliberately off the flash
 device. If the array is down it falls back to the flash config folder.
@@ -188,7 +227,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 67 tests
+python3 -m unittest discover -s tests -v   # 89 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

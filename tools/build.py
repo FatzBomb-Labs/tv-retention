@@ -28,9 +28,11 @@ SOURCE = ROOT / 'src' / NAME
 DIST = ROOT / 'dist'
 INSTALL = ROOT / 'install'
 BOOT = f'/boot/config/plugins/{NAME}'
-CHANGES = (f'{VERSION}: First release. Per-show retention by days, episodes, or seasons; '
-           'mandatory Sonarr matching across multiple instances; scheduled runs; dry run; '
-           'deletion guards; optional TMDB air dates; run journal and history.')
+CHANGES = (f'{VERSION}: First release. Per-show retention by days, episodes, or seasons, '
+           'set directly or through named presets; mandatory Sonarr matching across '
+           'multiple instances with auto-detected root path mapping; optional re-monitoring '
+           'when a rule is widened; scheduled runs; dry run; deletion guards; optional TMDB '
+           'air dates; run journal and history.')
 
 
 def build_package() -> str:
