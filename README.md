@@ -124,11 +124,14 @@ be deleted.
 
 ## Monitoring status
 
-Each matched show carries a pill showing how Sonarr’s monitored flags compare with that
-show’s keep frame. It is read from Sonarr on demand — per show, or with **Check all
-monitoring** — rather than on page load, so opening the tab stays instant on a large
-library. Because it reads live, anything you monitor or unmonitor by hand in Sonarr shows
-up straight away.
+Each matched show carries a pill beside its title showing how Sonarr’s monitored flags
+compare with that show’s keep frame. It is read from Sonarr on demand — per show, or with
+**Check all monitoring** — rather than on page load, so opening the tab stays instant on a
+large library. Because it reads live, anything you monitor or unmonitor by hand in Sonarr
+shows up straight away.
+
+The pill is a menu. Clicking it opens the options that apply to that particular state, so
+an aligned show is never offered a correction that would write nothing to Sonarr.
 
 | Pill | Meaning |
 |---|---|
@@ -138,12 +141,12 @@ up straight away.
 | **Episodes inside the keep frame are unmonitored** | Gaps inside the window will not fill. |
 | **Monitoring does not match the keep frame** | Both of the above. |
 
-Two corrections are offered per show, and neither is ever run automatically:
+Two corrections may appear in that menu, and neither is ever run automatically:
 
-- **Monitor all within keep frame**
-- **Unmonitor all outside keep frame**
+- **Monitor all within keep frame** — only when episodes inside it are unmonitored
+- **Unmonitor all outside keep frame** — only when episodes outside it are monitored
 
-**Details** lists the exact episodes behind the pill, including ones Sonarr has no file
+**Show the episodes…** lists the exact episodes behind the pill, including ones Sonarr has no file
 for — an episode’s monitored flag matters whether or not it is on disk. Episodes that
 have not aired yet always count as inside the frame, so a corrective action never strips
 monitoring from the next episode.
@@ -277,7 +280,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 119 tests
+python3 -m unittest discover -s tests -v   # 121 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

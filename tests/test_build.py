@@ -126,3 +126,13 @@ class Interface(unittest.TestCase):
 
     def test_a_typed_folder_is_checked_before_saving(self):
         self.assertRegex(self.js, r"await api\('browse'.*Checking the folder")
+
+    def test_the_monitoring_pill_sits_with_the_title(self):
+        self.assertRegex(self.js, r'head\.append\(monitorPill\(rule\)\)')
+
+    def test_the_pill_opens_a_menu_built_from_its_state(self):
+        self.assertIn('aria-haspopup', self.js)
+        self.assertIn('function monitorMenu', self.js)
+        # An aligned show must not be offered a correction that would write nothing.
+        self.assertRegex(self.js, r'if \(inside\) \{')
+        self.assertRegex(self.js, r'if \(outside\) \{')

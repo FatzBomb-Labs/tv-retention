@@ -103,13 +103,24 @@
 @keyframes tvd-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tvd-spinner { animation: none; } }
 
-/* Monitoring pills. Colour carries the same meaning as the rule border: green is the
-   state the plugin aims for, amber needs a decision, grey is not known yet. */
-.tvd-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
-  border: 1px solid var(--tvd-line); font-size: 11px; cursor: default; }
-.tvd-pill.aligned { border-color: var(--tvd-good); color: var(--tvd-good); background: rgba(46,158,91,.12); }
-.tvd-pill.warn { border-color: var(--tvd-warn); color: var(--tvd-warn); background: rgba(217,130,43,.12); }
-.tvd-pill.bad { border-color: var(--tvd-bad); color: var(--tvd-bad); background: rgba(192,57,43,.12); }
-.tvd-pill.unknown { opacity: .7; }
-.tvd-pill button { border: none; padding: 0; background: none; color: inherit; text-decoration: underline; font-size: 11px; }
-.tvd-monitor-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+/* Monitoring pill. It sits beside the show title and opens its own menu, so it is a
+   button, not a label. Colour matches the rule border: green is the state the plugin aims
+   for, amber wants a decision, red is both problems at once, grey is not read yet. */
+.tvd-pill-holder { position: relative; display: inline-block; }
+#tv-delete button.tvd-pill { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--tvd-line);
+  font-size: 11px; line-height: 1.6; background: transparent; white-space: nowrap; }
+#tv-delete button.tvd-pill:hover { filter: brightness(1.15); }
+#tv-delete button.tvd-pill.aligned { border-color: var(--tvd-good); color: var(--tvd-good); background: rgba(46,158,91,.12); }
+#tv-delete button.tvd-pill.warn { border-color: var(--tvd-warn); color: var(--tvd-warn); background: rgba(217,130,43,.12); }
+#tv-delete button.tvd-pill.bad { border-color: var(--tvd-bad); color: var(--tvd-bad); background: rgba(192,57,43,.12); }
+#tv-delete button.tvd-pill.unknown { opacity: .75; }
+
+.tvd-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 60; min-width: 260px;
+  display: flex; flex-direction: column; align-items: stretch; padding: 4px;
+  border: 1px solid var(--tvd-line); border-radius: 6px;
+  background: var(--background-color, #1c1c1c); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.tvd-menu-heading { padding: 6px 10px; font-size: 11px; opacity: .7; border-bottom: 1px solid var(--tvd-line);
+  margin-bottom: 4px; white-space: normal; }
+#tv-delete .tvd-menu button { text-align: left; border: none; border-radius: 4px; padding: 7px 10px; font-size: 12px; }
+#tv-delete .tvd-menu button:hover { background: var(--tvd-soft); }

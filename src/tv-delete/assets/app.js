@@ -201,13 +201,17 @@
       const matched = rule.match_status === 'matched';
       const card = el('div', { className: `tvd-rule ${matched ? 'matched' : 'unmatched'}${rule.enabled ? '' : ' disabled'}` });
       const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
-      card.append(el('div', { className: 'tvd-rule-head' }, [
+      const head = el('div', { className: 'tvd-rule-head' }, [
         el('span', { className: 'tvd-rule-title', textContent: rule.series_title || '(unmatched folder)' }),
         el('span', { className: `tvd-badge ${matched ? 'ok' : 'bad'}`, textContent: matched ? 'matched' : 'not matched' }),
         rule.enabled ? el('span', { className: 'tvd-badge off', textContent: 'enabled' })
                      : el('span', { className: 'tvd-badge off', textContent: 'disabled' }),
         el('span', { className: 'tvd-chip', textContent: instance ? instance.name : 'unknown instance' }),
-      ]));
+      ]);
+      // Monitoring sits with the title, because it is a fact about the show rather than
+      // an action on the rule.
+      if (matched) head.append(monitorPill(rule));
+      card.append(head);
       card.append(el('div', { className: 'tvd-rule-path', textContent: rule.path }));
       const body = el('div', { className: 'tvd-rule-body' });
       ruleSummary(rule).forEach((text) => body.append(el('span', { className: 'tvd-chip on', textContent: text })));
@@ -234,7 +238,6 @@
       body.append(actions);
       card.append(body);
       if (!matched && rule.match_error) card.append(el('div', { className: 'tvd-error', textContent: rule.match_error }));
-      if (matched) renderMonitorPill(rule, card);
       container.append(card);
     });
   }
@@ -252,51 +255,88 @@
     in_frame_unmonitored: 'warn', mixed: 'bad', unmatched: 'bad', empty: 'unknown',
   };
 
-  function monitorDetail(state) {
-    const parts = [];
-    if (state.out_frame_monitored && state.out_frame_monitored.length) {
-      parts.push(`${state.out_frame_monitored.length} monitored outside the frame`);
-    }
-    if (state.in_frame_unmonitored && state.in_frame_unmonitored.length) {
-      parts.push(`${state.in_frame_unmonitored.length} unmonitored inside it`);
-    }
-    return parts.join(', ');
+  function pillText(state) {
+    // Short enough to sit beside a show title; the menu carries the full sentence.
+    const outside = (state.out_frame_monitored || []).length;
+    const inside = (state.in_frame_unmonitored || []).length;
+    if (state.status === 'aligned') return 'Monitoring aligned';
+    if (state.status === 'empty') return 'No episodes';
+    if (state.status === 'all_monitored') return `All ${state.total} monitored`;
+    if (outside && inside) return `${outside} outside · ${inside} in frame`;
+    if (outside) return `${outside} monitored outside frame`;
+    if (inside) return `${inside} unmonitored in frame`;
+    return state.label;
   }
 
-  function renderMonitorPill(rule, card) {
-    const state = monitoring[rule.id];
-    const holder = el('div', { className: 'tvd-monitor-actions' });
-    if (!state) {
-      const check = el('button', { type: 'button', textContent: 'Check monitoring' });
-      check.addEventListener('click', () => guarded('', () => checkMonitoring([rule.id])));
-      holder.append(check);
-      card.append(holder);
-      return;
-    }
-    const pill = el('span', { className: `tvd-pill ${PILL_CLASS[state.status] || 'unknown'}`, textContent: state.label });
-    holder.append(pill);
-    if (!state.ok) {
-      card.append(holder);
-      return;
-    }
-    const detail = monitorDetail(state);
-    if (detail) holder.append(el('span', { className: 'tvd-chip', textContent: detail }));
-    holder.append(el('span', { className: 'tvd-chip', textContent: `${state.monitored}/${state.total} monitored` }));
+  let openMenu = null;
+  function closeMenu() {
+    if (openMenu) { openMenu.remove(); openMenu = null; }
+  }
+  document.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMenu(); });
 
-    if ((state.in_frame_unmonitored || []).length) {
-      const button = el('button', { type: 'button', textContent: 'Monitor all within keep frame' });
-      button.addEventListener('click', () => applyMonitoring(rule, 'monitor-in-frame', state.in_frame_unmonitored.length));
-      holder.append(button);
+  function menu(anchor, items) {
+    closeMenu();
+    const box = el('div', { className: 'tvd-menu', role: 'menu' });
+    items.forEach((item) => {
+      if (item.heading) {
+        box.append(el('div', { className: 'tvd-menu-heading', textContent: item.heading }));
+        return;
+      }
+      const button = el('button', { type: 'button', role: 'menuitem', textContent: item.label });
+      if (item.danger) button.className = 'tvd-danger';
+      button.addEventListener('click', (event) => { event.stopPropagation(); closeMenu(); item.run(); });
+      box.append(button);
+    });
+    anchor.append(box);
+    openMenu = box;
+  }
+
+  function monitorPill(rule) {
+    const state = monitoring[rule.id];
+    const holder = el('span', { className: 'tvd-pill-holder' });
+    const label = state ? pillText(state) : 'Monitoring: not checked';
+    const kind = state ? (PILL_CLASS[state.status] || 'unknown') : 'unknown';
+    const pill = el('button', {
+      type: 'button', className: `tvd-pill ${kind}`, textContent: `${label} ▾`,
+      title: state ? state.label : 'Read this show’s monitoring from Sonarr',
+    });
+    pill.setAttribute('aria-haspopup', 'menu');
+    pill.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (openMenu && holder.contains(openMenu)) { closeMenu(); return; }
+      menu(holder, monitorMenu(rule, state));
+    });
+    holder.append(pill);
+    return holder;
+  }
+
+  // The options follow the pill: only corrections that would actually change something
+  // are offered, so an aligned show cannot be "corrected" into a pointless Sonarr write.
+  function monitorMenu(rule, state) {
+    if (!state) {
+      return [{ heading: 'Monitoring not read yet' },
+              { label: 'Check monitoring', run: () => guarded('', () => checkMonitoring([rule.id])) }];
     }
-    if ((state.out_frame_monitored || []).length) {
-      const button = el('button', { type: 'button', textContent: 'Unmonitor all outside keep frame' });
-      button.addEventListener('click', () => applyMonitoring(rule, 'unmonitor-out-frame', state.out_frame_monitored.length));
-      holder.append(button);
+    if (!state.ok) {
+      return [{ heading: state.error || state.label },
+              { label: 'Re-check monitoring', run: () => guarded('', () => checkMonitoring([rule.id])) }];
     }
-    const details = el('button', { type: 'button', textContent: 'Details' });
-    details.addEventListener('click', () => showMonitoring(rule, state));
-    holder.append(details);
-    card.append(holder);
+    const items = [{ heading: state.label }];
+    const inside = (state.in_frame_unmonitored || []).length;
+    const outside = (state.out_frame_monitored || []).length;
+    if (inside) {
+      items.push({ label: `Monitor all within keep frame (${inside})`,
+                   run: () => applyMonitoring(rule, 'monitor-in-frame', inside) });
+    }
+    if (outside) {
+      items.push({ label: `Unmonitor all outside keep frame (${outside})`,
+                   run: () => applyMonitoring(rule, 'unmonitor-out-frame', outside) });
+    }
+    if (inside || outside) items.push({ label: 'Show the episodes…', run: () => showMonitoring(rule, state) });
+    items.push({ label: `Re-check monitoring (${state.monitored}/${state.total} monitored)`,
+                 run: () => guarded('', () => checkMonitoring([rule.id])) });
+    return items;
   }
 
   async function checkMonitoring(ruleIds) {
