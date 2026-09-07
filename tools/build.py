@@ -39,6 +39,14 @@ def build_package() -> str:
     DIST.mkdir(exist_ok=True)
     target = DIST / PACKAGE
     with tarfile.open(target, 'w:xz') as archive:
+        # The page reads this to cache-bust its assets after an upgrade.
+        version_info = tarfile.TarInfo(f'usr/local/emhttp/plugins/{NAME}/VERSION')
+        version_data = f'{VERSION}\n'.encode()
+        version_info.size = len(version_data)
+        version_info.mtime = 0
+        version_info.uid = version_info.gid = 0
+        version_info.mode = 0o644
+        archive.addfile(version_info, io.BytesIO(version_data))
         for path in sorted(SOURCE.rglob('*')):
             if not path.is_file() or '__pycache__' in path.parts or path.suffix == '.pyc':
                 continue

@@ -83,3 +83,26 @@ class Interface(unittest.TestCase):
 
     def test_the_busy_overlay_starts_hidden(self):
         self.assertRegex(self.html, r'id="tvd-busy"[^>]*hidden')
+
+    def test_assets_are_cache_busted(self):
+        page = (ROOT / 'src' / 'tv-delete' / 'TVDelete.page').read_text()
+        self.assertIn('app.css?v=', page)
+        self.assertIn('app.js?v=', page)
+
+    def test_the_package_ships_a_version_file(self):
+        version = (ROOT / 'VERSION').read_text().strip()
+        package = ROOT / 'dist' / f'tv-delete-{version}-noarch-1.txz'
+        with tarfile.open(package) as archive:
+            self.assertIn('usr/local/emhttp/plugins/tv-delete/VERSION', archive.getnames())
+
+    def test_every_element_the_script_addresses_exists_in_the_markup(self):
+        import re
+        for identifier in sorted(set(re.findall(r"\$\('([a-z0-9-]+)'\)", self.js))):
+            self.assertIn(f'id="{identifier}"', self.html, f'{identifier} is addressed but not in the markup')
+
+    def test_requests_cannot_hang_forever(self):
+        self.assertIn('AbortController', self.js)
+        self.assertIn('DEFAULT_TIMEOUT', self.js)
+
+    def test_a_failed_start_clears_the_overlay(self):
+        self.assertRegex(self.js, r"refresh\(\)\.catch")

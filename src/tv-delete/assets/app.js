@@ -31,18 +31,42 @@
     if (on && text) $('tvd-busy-text').textContent = text;
   }
 
+  // A request must always settle. Without this, one stalled call leaves the busy overlay
+  // covering the page with no way to dismiss it and nothing on screen explaining why.
+  const TIMEOUTS = { run: 3600000, preview: 900000, series: 120000, 'test-instance': 90000,
+                     'detect-mappings': 90000, match: 300000, 'test-tmdb': 60000 };
+  const DEFAULT_TIMEOUT = 60000;
+
   async function api(action, payload, label) {
     busy(true, label);
+    const controller = new AbortController();
+    const limit = TIMEOUTS[action] || DEFAULT_TIMEOUT;
+    const timer = setTimeout(() => controller.abort(), limit);
     try {
       const body = new URLSearchParams();
       body.set('csrf_token', CSRF);
       body.set('payload', JSON.stringify(Object.assign({ action }, payload || {})));
-      const response = await fetch(API, { method: 'POST', body, credentials: 'same-origin' });
+      let response;
+      try {
+        response = await fetch(API, { method: 'POST', body, credentials: 'same-origin', signal: controller.signal });
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`The server did not answer "${action}" within ${Math.round(limit / 1000)}s. `
+                          + 'Check the plugin worker in the system log.');
+        }
+        throw new Error(`Could not reach the TV Delete backend (${error.message}). Reload the page.`);
+      }
       let data;
-      try { data = await response.json(); } catch (error) { data = { ok: false, error: 'The backend sent an unreadable reply.' }; }
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = { ok: false, error: `The backend replied with HTTP ${response.status} and no usable JSON. `
+                                   + 'If this says 403, reload the Unraid page to refresh the session token.' };
+      }
       if (!data.ok) throw new Error(data.error || 'Request failed');
       return data;
     } finally {
+      clearTimeout(timer);
       busy(false);
     }
   }
@@ -817,5 +841,12 @@
   }));
 
   // -- start -------------------------------------------------------------
-  guarded('', refresh);
+  // Whatever happens, the page must end up interactive with a readable message.
+  refresh().catch((error) => {
+    busyDepth = 0;
+    $('tvd-busy').hidden = true;
+    notice(`TV Delete could not load: ${error.message}`, 'bad');
+  });
+  window.addEventListener('error', () => { busyDepth = 0; $('tvd-busy').hidden = true; });
+  window.addEventListener('unhandledrejection', () => { busyDepth = 0; $('tvd-busy').hidden = true; });
 })();
