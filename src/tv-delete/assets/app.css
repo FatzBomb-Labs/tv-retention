@@ -102,3 +102,14 @@
   border-radius: 50%; animation: tvd-spin .8s linear infinite; }
 @keyframes tvd-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tvd-spinner { animation: none; } }
+
+/* Monitoring pills. Colour carries the same meaning as the rule border: green is the
+   state the plugin aims for, amber needs a decision, grey is not known yet. */
+.tvd-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+  border: 1px solid var(--tvd-line); font-size: 11px; cursor: default; }
+.tvd-pill.aligned { border-color: var(--tvd-good); color: var(--tvd-good); background: rgba(46,158,91,.12); }
+.tvd-pill.warn { border-color: var(--tvd-warn); color: var(--tvd-warn); background: rgba(217,130,43,.12); }
+.tvd-pill.bad { border-color: var(--tvd-bad); color: var(--tvd-bad); background: rgba(192,57,43,.12); }
+.tvd-pill.unknown { opacity: .7; }
+.tvd-pill button { border: none; padding: 0; background: none; color: inherit; text-decoration: underline; font-size: 11px; }
+.tvd-monitor-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }

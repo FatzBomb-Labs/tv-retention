@@ -714,3 +714,75 @@ def select_remonitor(episodes, ledger_entries, rule, settings, now=None) -> list
     decision = evaluate(combined, rule, relaxed, now=now)
     keepers = {item['path'] for item in decision['keep'] if item.get('from_ledger')}
     return [entry for entry, ghost in zip(ledger_entries, ghosts) if ghost['path'] in keepers]
+
+
+MONITOR_STATUS = {
+    'empty': 'Sonarr lists no episodes',
+    'aligned': 'In frame monitored, outside unmonitored',
+    'all_monitored': 'All episodes monitored',
+    'outside_monitored': 'Episodes outside the keep frame are still monitored',
+    'in_frame_unmonitored': 'Episodes inside the keep frame are unmonitored',
+    'mixed': 'Monitoring does not match the keep frame',
+}
+
+
+def classify_monitoring(episodes, rule, settings, now=None) -> dict:
+    """Compare Sonarr's monitored flags against a rule's keep frame.
+
+    This reads Sonarr live every time, so anything monitored or unmonitored by hand shows
+    up immediately — including the state a library is in before this plugin has ever run.
+    Episodes that have not aired yet are always treated as inside the frame: you want the
+    next episode, whatever the retention rule says about the old ones.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    today = now.date()
+    unaired, aired = [], []
+    for episode in episodes:
+        date, _ = effective_date(episode, allow_mtime_fallback=False)
+        # No air date and no file means Sonarr does not know when it airs; treat it as
+        # forthcoming rather than as something to strip the monitoring from.
+        if date is None or date > today:
+            unaired.append(episode)
+        else:
+            aired.append(episode)
+
+    # The percentage guard exists to stop mass deletion, not to limit a read-only view.
+    relaxed = dict(settings, guards=dict(settings.get('guards', {}), max_percent_per_rule=100))
+    decision = evaluate(aired, rule, relaxed, now=now)
+    out_frame = decision['delete']
+    in_frame = decision['keep'] + decision['protected'] + unaired
+
+    in_frame_unmonitored = [e for e in in_frame if not e.get('monitored')]
+    out_frame_monitored = [e for e in out_frame if e.get('monitored')]
+    monitored = [e for e in episodes if e.get('monitored')]
+
+    if not episodes:
+        status = 'empty'
+    elif not in_frame_unmonitored and not out_frame_monitored:
+        status = 'aligned'
+    elif len(monitored) == len(episodes):
+        status = 'all_monitored'
+    elif in_frame_unmonitored and out_frame_monitored:
+        status = 'mixed'
+    elif out_frame_monitored:
+        status = 'outside_monitored'
+    else:
+        status = 'in_frame_unmonitored'
+
+    def summarise(entries):
+        return [{'episode_id': e.get('episode_id'), 'season': e.get('season'),
+                 'episode': e.get('episode'), 'title': e.get('title'),
+                 'air_date': e.get('air_date'), 'has_file': e.get('has_file', True)}
+                for e in sorted(entries, key=lambda e: (e.get('season') or 0, e.get('episode') or 0))]
+
+    return {
+        'status': status,
+        'label': MONITOR_STATUS[status],
+        'total': len(episodes),
+        'monitored': len(monitored),
+        'in_frame': len(in_frame),
+        'out_frame': len(out_frame),
+        'unaired': len(unaired),
+        'in_frame_unmonitored': summarise(in_frame_unmonitored),
+        'out_frame_monitored': summarise(out_frame_monitored),
+    }

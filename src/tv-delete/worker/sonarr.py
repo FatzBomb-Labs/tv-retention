@@ -102,8 +102,13 @@ class Sonarr:
         results.sort(key=lambda item: item['sort_title'].lower())
         return results
 
-    def episodes(self, series_id: int) -> list:
-        """Episodes with their files, normalised into the shape core.evaluate expects."""
+    def episodes(self, series_id: int, files_only: bool = True) -> list:
+        """Episodes normalised into the shape core.evaluate expects.
+
+        With files_only off, episodes Sonarr has no file for are included too. Deletion
+        only ever looks at episodes with files; the monitoring view needs all of them,
+        because an episode's monitored flag matters whether or not it is on disk.
+        """
         payload = self._request('GET', 'episode', {'seriesId': series_id, 'includeEpisodeFile': 'true'})
         if not isinstance(payload, list):
             raise SonarrError(f'{self.name}: unexpected episode response for series {series_id}')
@@ -111,7 +116,8 @@ class Sonarr:
         for entry in payload:
             file_info = entry.get('episodeFile') or {}
             file_id = entry.get('episodeFileId') or file_info.get('id')
-            if not entry.get('hasFile') or not file_id or not file_info.get('path'):
+            has_file = bool(entry.get('hasFile') and file_id and file_info.get('path'))
+            if files_only and not has_file:
                 continue
             air = entry.get('airDateUtc') or entry.get('airDate')
             air_date = None
@@ -122,7 +128,8 @@ class Sonarr:
                     air_date = None
             episodes.append({
                 'episode_id': entry.get('id'),
-                'file_id': file_id,
+                'file_id': file_id if has_file else None,
+                'has_file': has_file,
                 'series_id': series_id,
                 'season': entry.get('seasonNumber'),
                 'episode': entry.get('episodeNumber'),
@@ -130,8 +137,9 @@ class Sonarr:
                 'air_date': air_date.isoformat() if air_date else None,
                 'air_source': 'sonarr' if air_date else '',
                 'monitored': bool(entry.get('monitored')),
-                'sonarr_path': normalise(file_info['path']),
-                'path': map_path(file_info['path'], self.path_maps),
+                'sonarr_path': normalise(file_info['path']) if has_file else '',
+                # A fileless episode still needs a stable key for the retention pass.
+                'path': map_path(file_info['path'], self.path_maps) if has_file else f'sonarr:episode:{entry.get("id")}',
                 'size': file_info.get('size') or 0,
             })
         return episodes

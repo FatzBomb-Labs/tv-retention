@@ -26,7 +26,8 @@ sys.path.insert(0, str(HERE))
 
 from core import (DEFAULTS, VERSION, Rejected, atomic_json, derive_mappings,
                   effective_rule, empty_directories, evaluate, new_id, normalise, redact,
-                  scan_media, select_remonitor, sidecars_for, validate_cron, validate_settings)
+                  scan_media, select_remonitor, sidecars_for, validate_cron, validate_settings,
+                  classify_monitoring)
 from sonarr import Sonarr, SonarrError, match_rule
 from tmdb import TMDB, TMDBError, fill_air_dates
 
@@ -44,15 +45,35 @@ MAX_BROWSE_ENTRIES = 500
 # Configuration and state
 # ---------------------------------------------------------------------------
 
+def default_state_dir() -> str:
+    """Where to keep journals and caches on a fresh install.
+
+    Unraid records the appdata share in docker.cfg, which is where container and plugin
+    working data belongs on this server. The compiled-in default is only a fallback for a
+    system that has never configured Docker.
+    """
+    try:
+        for line in Path('/boot/config/docker.cfg').read_text().splitlines():
+            if line.startswith('DOCKER_APP_CONFIG_PATH='):
+                share = line.split('=', 1)[1].strip().strip('"').rstrip('/')
+                if share.startswith('/mnt/'):
+                    return f'{share}/{NAME}'
+    except OSError:
+        pass
+    return DEFAULTS['state_dir']
+
+
 def load_settings() -> dict:
     if not CONFIG.exists():
-        return json.loads(json.dumps(DEFAULTS))
+        return dict(json.loads(json.dumps(DEFAULTS)), state_dir=default_state_dir())
     try:
         stored = json.loads(CONFIG.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise Rejected(f'Settings file is unreadable ({error}). Fix or remove {CONFIG}.')
     merged = json.loads(json.dumps(DEFAULTS))
     merged.update(stored if isinstance(stored, dict) else {})
+    if not (stored or {}).get('state_dir'):
+        merged['state_dir'] = default_state_dir()
     return merged
 
 
@@ -725,6 +746,80 @@ def action_series(settings, request):
                             in_use=entry['path'] in used) for entry in catalogue]}
 
 
+def monitoring_for(settings: dict, rule: dict) -> dict:
+    """Live monitoring status for one rule, or an explanation of why it cannot be read."""
+    base = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'], 'ok': True}
+    if rule.get('match_status') != 'matched':
+        return dict(base, ok=False, error=rule.get('match_error') or 'Rule is not matched to a Sonarr series',
+                    status='unmatched', label='Not matched to Sonarr')
+    try:
+        active = effective_rule(rule, settings.get('profiles'))
+        client = client_for(settings, rule['instance_id'])
+        episodes = client.episodes(rule['series_id'], files_only=False)
+    except Rejected as error:
+        return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
+    return dict(base, **classify_monitoring(episodes, active, settings))
+
+
+def action_monitoring(settings, request):
+    """Status for the requested rules. The UI asks per card, or for all of them at once."""
+    wanted = set(request.get('rule_ids') or [])
+    rules = [r for r in settings.get('rules', []) if not wanted or r['id'] in wanted]
+    return {'monitoring': [monitoring_for(settings, rule) for rule in rules]}
+
+
+def action_monitor_apply(settings, request):
+    """Bring one rule's monitoring into line with its keep frame.
+
+    Two explicit, opposite corrections, never run on a schedule. "monitor-in-frame" arms
+    the episodes the rule would keep; "unmonitor-out-frame" disarms the ones it would
+    remove, so Sonarr stops fetching what the next run would delete again.
+    """
+    mode = str(request.get('mode') or '')
+    if mode not in ('monitor-in-frame', 'unmonitor-out-frame'):
+        raise Rejected('Unknown monitoring action')
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if not rule:
+        raise Rejected('That rule no longer exists.')
+    status = monitoring_for(settings, rule)
+    if not status.get('ok'):
+        raise Rejected(status.get('error') or 'This rule is not matched to a Sonarr series.')
+
+    targets = status['in_frame_unmonitored'] if mode == 'monitor-in-frame' else status['out_frame_monitored']
+    ids = [entry['episode_id'] for entry in targets if entry.get('episode_id')]
+    if not ids:
+        return {'changed': 0, 'monitoring': monitoring_for(settings, rule),
+                'ok_message': 'Nothing to change; monitoring already matches the keep frame.'}
+    client = client_for(settings, rule['instance_id'])
+    client.set_monitored(ids, mode == 'monitor-in-frame')
+
+    if mode == 'unmonitor-out-frame':
+        # Recorded like any other unmonitoring this plugin performs, so widening the rule
+        # later can put these episodes back.
+        ledger = load_ledger(settings)
+        entries = ledger.get(rule['id'], [])
+        known = {entry.get('episode_id') for entry in entries}
+        for target in targets:
+            if target['episode_id'] in known:
+                continue
+            entries.append({'episode_id': target['episode_id'], 'season': target['season'],
+                            'episode': target['episode'], 'title': target['title'],
+                            'air_date': target['air_date'], 'air_source': 'sonarr',
+                            'mtime': None, 'path': '', 'unmonitored_at': now_iso()})
+        ledger[rule['id']] = entries
+        save_ledger(settings, ledger)
+    else:
+        # Monitored again by hand: the ledger no longer speaks for these episodes.
+        ledger = load_ledger(settings)
+        restored = {entry['episode_id'] for entry in targets}
+        ledger[rule['id']] = [e for e in ledger.get(rule['id'], []) if e.get('episode_id') not in restored]
+        save_ledger(settings, ledger)
+
+    verb = 'monitored' if mode == 'monitor-in-frame' else 'unmonitored'
+    return {'changed': len(ids), 'monitoring': monitoring_for(settings, rule),
+            'ok_message': f'{len(ids)} episode(s) {verb} in Sonarr.'}
+
+
 def action_browse(settings, request):
     """Directory listing for the folder picker. Read-only, and confined to /mnt."""
     from core import validate_path
@@ -787,6 +882,8 @@ ACTIONS = {
     'test-instance': action_test_instance,
     'detect-mappings': action_detect_mappings,
     'series': action_series,
+    'monitoring': action_monitoring,
+    'monitor-apply': action_monitor_apply,
     'browse': action_browse,
     'match': action_match,
     'preview': action_preview,

@@ -18,6 +18,7 @@ justified by real episode metadata rather than a file timestamp.
 - [First run](#first-run)
 - [Rules](#rules)
 - [Retention presets](#retention-presets)
+- [Monitoring status](#monitoring-status)
 - [Re-monitoring when a rule is widened](#re-monitoring-when-a-rule-is-widened)
 - [Sonarr instances and path mapping](#sonarr-instances-and-path-mapping)
 - [Air dates and TMDB](#air-dates-and-tmdb)
@@ -105,6 +106,35 @@ A preset is the single source of truth for every show pointing at it. Raise *Kee
 days* to 90 and all of them widen at once, with no rule-by-rule editing. The preset
 editor lists the shows that will change before you save, and a preset still in use cannot
 be deleted.
+
+## Monitoring status
+
+Each matched show carries a pill showing how Sonarr’s monitored flags compare with that
+show’s keep frame. It is read from Sonarr on demand — per show, or with **Check all
+monitoring** — rather than on page load, so opening the tab stays instant on a large
+library. Because it reads live, anything you monitor or unmonitor by hand in Sonarr shows
+up straight away.
+
+| Pill | Meaning |
+|---|---|
+| **In frame monitored, outside unmonitored** | The tidy state. Nothing to do. |
+| **All episodes monitored** | Nothing has been unmonitored yet — the usual state before this plugin has run. |
+| **Episodes outside the keep frame are still monitored** | Sonarr may re-fetch what the next run deletes. |
+| **Episodes inside the keep frame are unmonitored** | Gaps inside the window will not fill. |
+| **Monitoring does not match the keep frame** | Both of the above. |
+
+Two corrections are offered per show, and neither is ever run automatically:
+
+- **Monitor all within keep frame**
+- **Unmonitor all outside keep frame**
+
+**Details** lists the exact episodes behind the pill, including ones Sonarr has no file
+for — an episode’s monitored flag matters whether or not it is on disk. Episodes that
+have not aired yet always count as inside the frame, so a corrective action never strips
+monitoring from the next episode.
+
+Setting this is optional. The plugin unmonitors what it deletes regardless; the pill
+exists so the state a library is already in is visible and fixable in one click.
 
 ## Re-monitoring when a rule is widened
 
@@ -194,8 +224,11 @@ rather than queueing.
 | `<state folder>/tmdb-cache.json` | Cached TMDB air dates. |
 | `<state folder>/unmonitored.json` | The ledger of episodes this plugin unmonitored, used for re-monitoring. |
 
-The state folder defaults to `/mnt/user/appdata/tv-delete`, deliberately off the flash
-device. If the array is down it falls back to the flash config folder.
+The **app storage folder** is set in *Schedule & safety*, with a folder picker. On a fresh
+install it defaults to a `tv-delete` folder inside the appdata share this server has
+configured for Docker (`DOCKER_APP_CONFIG_PATH` in `docker.cfg`, `/mnt/user/appdata` here),
+deliberately off the flash device. If the array is down it falls back to the flash config
+folder.
 
 API keys are stored in `settings.json` and are never sent to the browser; the UI shows a
 mask, and echoing the mask back means "keep the stored key".
@@ -227,7 +260,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 89 tests
+python3 -m unittest discover -s tests -v   # 108 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

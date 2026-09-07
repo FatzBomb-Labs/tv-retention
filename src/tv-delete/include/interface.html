@@ -41,6 +41,7 @@
       <option value="unmatched">Unmatched only</option>
     </select>
     <span class="tvd-spacer"></span>
+    <button type="button" id="tvd-check-monitoring" class="tvd-secondary">Check all monitoring</button>
     <button type="button" id="tvd-rematch" class="tvd-secondary">Re-check Sonarr matches</button>
     <button type="button" id="tvd-add" class="tvd-primary">Add show</button>
   </div>
@@ -118,7 +119,10 @@
 
   <h2 class="tvd-h2">Housekeeping</h2>
   <div class="tvd-card">
-    <label class="tvd-field"><span>Journal and cache folder</span><input type="text" id="tvd-state-dir" spellcheck="false"><small>Kept off the flash device. Holds run journals and the TMDB cache.</small></label>
+    <div class="tvd-row">
+      <label class="tvd-field"><span>App storage folder</span><input type="text" id="tvd-state-dir" spellcheck="false"><small>Kept off the flash device. Holds run journals, the unmonitored ledger, and the TMDB cache. Defaults to a folder in this server’s appdata share.</small></label>
+      <button type="button" id="tvd-browse-state">Browse…</button>
+    </div>
     <label class="tvd-field"><span>Runs kept in history</span><input type="number" id="tvd-history-size" min="1" max="500"></label>
     <label class="tvd-check"><input type="checkbox" id="tvd-notify"> Send an Unraid notification after each run</label>
   </div>

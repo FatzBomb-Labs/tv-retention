@@ -234,12 +234,123 @@
       body.append(actions);
       card.append(body);
       if (!matched && rule.match_error) card.append(el('div', { className: 'tvd-error', textContent: rule.match_error }));
+      if (matched) renderMonitorPill(rule, card);
       container.append(card);
     });
   }
 
   $('tvd-search').addEventListener('input', renderRules);
   $('tvd-filter').addEventListener('change', renderRules);
+
+  // -- monitoring --------------------------------------------------------
+  // Read from Sonarr on demand rather than on page load: one call per show would make
+  // opening the tab crawl on a large library.
+  let monitoring = {};
+
+  const PILL_CLASS = {
+    aligned: 'aligned', all_monitored: 'warn', outside_monitored: 'warn',
+    in_frame_unmonitored: 'warn', mixed: 'bad', unmatched: 'bad', empty: 'unknown',
+  };
+
+  function monitorDetail(state) {
+    const parts = [];
+    if (state.out_frame_monitored && state.out_frame_monitored.length) {
+      parts.push(`${state.out_frame_monitored.length} monitored outside the frame`);
+    }
+    if (state.in_frame_unmonitored && state.in_frame_unmonitored.length) {
+      parts.push(`${state.in_frame_unmonitored.length} unmonitored inside it`);
+    }
+    return parts.join(', ');
+  }
+
+  function renderMonitorPill(rule, card) {
+    const state = monitoring[rule.id];
+    const holder = el('div', { className: 'tvd-monitor-actions' });
+    if (!state) {
+      const check = el('button', { type: 'button', textContent: 'Check monitoring' });
+      check.addEventListener('click', () => guarded('', () => checkMonitoring([rule.id])));
+      holder.append(check);
+      card.append(holder);
+      return;
+    }
+    const pill = el('span', { className: `tvd-pill ${PILL_CLASS[state.status] || 'unknown'}`, textContent: state.label });
+    holder.append(pill);
+    if (!state.ok) {
+      card.append(holder);
+      return;
+    }
+    const detail = monitorDetail(state);
+    if (detail) holder.append(el('span', { className: 'tvd-chip', textContent: detail }));
+    holder.append(el('span', { className: 'tvd-chip', textContent: `${state.monitored}/${state.total} monitored` }));
+
+    if ((state.in_frame_unmonitored || []).length) {
+      const button = el('button', { type: 'button', textContent: 'Monitor all within keep frame' });
+      button.addEventListener('click', () => applyMonitoring(rule, 'monitor-in-frame', state.in_frame_unmonitored.length));
+      holder.append(button);
+    }
+    if ((state.out_frame_monitored || []).length) {
+      const button = el('button', { type: 'button', textContent: 'Unmonitor all outside keep frame' });
+      button.addEventListener('click', () => applyMonitoring(rule, 'unmonitor-out-frame', state.out_frame_monitored.length));
+      holder.append(button);
+    }
+    const details = el('button', { type: 'button', textContent: 'Details' });
+    details.addEventListener('click', () => showMonitoring(rule, state));
+    holder.append(details);
+    card.append(holder);
+  }
+
+  async function checkMonitoring(ruleIds) {
+    const data = await api('monitoring', ruleIds ? { rule_ids: ruleIds } : {},
+                           ruleIds && ruleIds.length === 1 ? 'Reading Sonarr…' : 'Reading monitoring from Sonarr…');
+    data.monitoring.forEach((state) => { monitoring[state.rule_id] = state; });
+    renderRules();
+  }
+
+  function applyMonitoring(rule, mode, count) {
+    return guarded('', async () => {
+      const what = mode === 'monitor-in-frame'
+        ? `Monitor ${plural(count, 'episode')} inside the keep frame for ${rule.series_title}? Sonarr may download them.`
+        : `Unmonitor ${plural(count, 'episode')} outside the keep frame for ${rule.series_title}? No files are deleted.`;
+      if (!window.confirm(what)) return;
+      const data = await api('monitor-apply', { rule_id: rule.id, mode }, 'Updating Sonarr…');
+      monitoring[rule.id] = data.monitoring;
+      renderRules();
+      notice(data.ok_message, 'ok');
+    });
+  }
+
+  function showMonitoring(rule, state) {
+    dialog(`${rule.series_title}: monitoring`, (body) => {
+      body.append(el('p', { textContent: `${state.label}. ${state.total} episode(s) in Sonarr: `
+        + `${state.in_frame} inside the keep frame (${state.unaired} not yet aired), ${state.out_frame} outside it.` }));
+      const table = (title, rows) => {
+        if (!rows.length) return;
+        body.append(el('h3', { textContent: `${title} (${rows.length})` }));
+        const element = el('table', { className: 'tvd-table' });
+        element.append(el('thead', { innerHTML: '<tr><th>Episode</th><th>Aired</th><th>File</th></tr>' }));
+        const tbody = el('tbody');
+        rows.slice(0, 200).forEach((row) => {
+          const tr = el('tr');
+          tr.append(el('td', { textContent: `S${String(row.season).padStart(2, '0')}E${String(row.episode).padStart(2, '0')} — ${row.title || ''}` }));
+          tr.append(el('td', { textContent: row.air_date || 'unknown' }));
+          tr.append(el('td', { textContent: row.has_file ? 'on disk' : 'missing' }));
+          tbody.append(tr);
+        });
+        element.append(tbody);
+        body.append(el('div', { className: 'tvd-scroll' }, [element]));
+      };
+      table('Monitored, outside the keep frame', state.out_frame_monitored || []);
+      table('Unmonitored, inside the keep frame', state.in_frame_unmonitored || []);
+      return {};
+    }, null, 'Close');
+  }
+
+  $('tvd-check-monitoring').addEventListener('click', () => guarded('', async () => {
+    const matched = (settings.rules || []).filter((rule) => rule.match_status === 'matched');
+    if (!matched.length) throw new Error('No matched rules to check.');
+    await checkMonitoring(matched.map((rule) => rule.id));
+    notice(`Monitoring read for ${plural(matched.length, 'show')}.`, 'ok');
+  }));
 
   // -- retention presets -------------------------------------------------
   function presetSummary(preset) {
@@ -690,6 +801,10 @@
     $('tvd-recycle-path-field').hidden = !usesFolder;
     $('tvd-recycle-days-field').hidden = !usesFolder;
   }
+  // The app storage folder is picked the same way a show folder is.
+  $('tvd-browse-state').addEventListener('click', () => {
+    browseFolder($('tvd-state-dir').value || '/mnt/user/appdata', (picked) => { $('tvd-state-dir').value = picked; });
+  });
   $('tvd-recycle-mode').addEventListener('change', applyRecycleVisibility);
   $('tvd-schedule-preset').addEventListener('change', () => {
     if ($('tvd-schedule-preset').value !== 'custom') $('tvd-schedule-cron').value = $('tvd-schedule-preset').value;
