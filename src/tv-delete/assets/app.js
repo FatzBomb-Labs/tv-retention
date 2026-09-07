@@ -411,6 +411,41 @@
     tick();
   }
 
+  // -- heartbeat ---------------------------------------------------------
+  // One small question to Sonarr — what changed? — and the series it names are re-read
+  // through the same queue a manual refresh uses, so each card is seen being read. The
+  // cron tick asks the same question every minute whether or not anyone is here, which is
+  // why a notification never waits for someone to open this page.
+  const WATCH_SECONDS = 15;
+  let watchStamp = '';
+
+  async function watchTick() {
+    if (document.hidden || checkRunning || checkQueue.length || pollTimer) return;
+    if (!snapshot || !snapshot.array_ready) return;
+    let data;
+    try {
+      data = await api('watch', {}, '', true);
+    } catch (error) {
+      return;  // a heartbeat that misses a beat is not worth interrupting anyone for
+    }
+    if (!data.array_ready) return;
+    if ((data.progress || {}).running) { startPolling(); return; }
+    // Re-rendering on a timer would fight with whatever is being read on screen, so it
+    // only happens when the reply actually differs from the last one.
+    const stamp = JSON.stringify([data.alerts, data.plan, data.stale_rules,
+                                  Object.values((data.health || {}).rules || {}).map((r) => r.checked_at)]);
+    if (stamp === watchStamp) return;
+    watchStamp = stamp;
+    applyHealth(data.health);
+    applyAlerts(data.alerts);
+    snapshot.plan = data.plan;
+    render();
+    if ((data.stale_rules || []).length) queueChecks(data.stale_rules);
+  }
+
+  setInterval(watchTick, WATCH_SECONDS * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) watchTick(); });
+
   const CHECK_PHASE = { instances: 'verifying the Sonarr instances',
                         matching: 'matching series to Sonarr', rules: 'reading series' };
 

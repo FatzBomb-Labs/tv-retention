@@ -323,3 +323,107 @@ class HistoryQuery(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Heartbeat(unittest.TestCase):
+    """The per-minute tick's share of the work: ask, re-read what changed, announce it."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = validate_settings({
+            'instances': [INSTANCE],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                       'series_title': 'A', 'keep_days': 30},
+                      {'id': 'r2', 'instance_id': 'i1', 'series_id': 2, 'path': '/tv/B',
+                       'series_title': 'B', 'keep_days': 30}],
+        })
+        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
+        self.checked = []
+        self.notified = []
+        self.touched = set()
+        watcher = self
+
+        class Stub:
+            def __init__(self, instance):
+                pass
+
+            def changes_since(self, since):
+                return set(watcher.touched)
+
+        self.originals = (main.Sonarr, main.check_one_rule, main.notify)
+        main.Sonarr = Stub
+        main.check_one_rule = lambda settings, rule, *a, **k: self.checked.append(rule['id'])
+        main.notify = lambda settings, subject, description, importance='normal', event='errors': \
+            self.notified.append((subject, importance, event))
+
+    def tearDown(self):
+        main.Sonarr, main.check_one_rule, main.notify = self.originals
+        self.temp.cleanup()
+
+    def test_nothing_changed_means_nothing_is_re_read(self):
+        main.watch_and_recheck(self.settings, min_interval=0)   # first look, sets the cursor
+        self.assertEqual(main.watch_and_recheck(self.settings, min_interval=0), 0)
+        self.assertEqual(self.checked, [])
+
+    def test_only_the_series_sonarr_named_are_re_read(self):
+        main.watch_and_recheck(self.settings, min_interval=0)
+        self.touched = {2}
+        self.assertEqual(main.watch_and_recheck(self.settings, min_interval=0), 1)
+        self.assertEqual(self.checked, ['r2'])
+
+    def test_a_disabled_rule_is_left_alone_however_much_it_changed(self):
+        self.settings['rules'][1]['enabled'] = False
+        main.watch_and_recheck(self.settings, min_interval=0)
+        self.touched = {2}
+        main.watch_and_recheck(self.settings, min_interval=0)
+        self.assertEqual(self.checked, [])
+
+    def test_a_new_problem_is_announced(self):
+        """Otherwise the page is the only thing that ever knows, which defeats the point."""
+        import alerts as alert_module
+        before = [alert_module.make('unmatched', rule_id='r1', detail='was already wrong')]
+        after = before + [alert_module.make('path-changed', rule_id='r2', detail='moved')]
+        fresh = main.announce_alerts(self.settings, before, after)
+        self.assertEqual([alert['kind'] for alert in fresh], ['path-changed'])
+        self.assertEqual(len(self.notified), 1)
+
+    def test_a_problem_that_was_already_there_is_not_announced_again(self):
+        import alerts as alert_module
+        standing = [alert_module.make('unmatched', rule_id='r1', detail='still wrong')]
+        self.assertEqual(main.announce_alerts(self.settings, standing, standing), [])
+        self.assertEqual(self.notified, [])
+
+    def test_a_notice_is_not_worth_a_notification(self):
+        import alerts as alert_module
+        after = [alert_module.make('ended-expired', rule_id='r1')]
+        self.assertEqual(main.announce_alerts(self.settings, [], after), [])
+        self.assertEqual(self.notified, [])
+
+    def test_asking_for_zero_means_now_not_the_default(self):
+        # `or` turns an explicit zero into the default, and zero is exactly what a caller
+        # passes when it means "ask now".
+        main.action_watch(self.settings, {'min_interval': 0})
+        first = main.load_health(self.settings)['watch']['i1']['checked_at']
+        main.action_watch(self.settings, {'min_interval': 0})
+        self.assertNotEqual(main.load_health(self.settings)['watch']['i1']['checked_at'], first)
+
+    def test_the_work_itself_is_never_announced(self):
+        """Retention is the job, not the news.
+
+        Nothing about episodes being scheduled for deletion, or monitoring being brought
+        into line with a keep window, is an alert kind at all — those live in the plan,
+        which is never notified. This pins the other half: only structural problems carry
+        the notify flag, so a kind added later cannot quietly start announcing the work.
+        """
+        import alerts as alert_module
+        announced = {kind for kind, spec in alert_module.KINDS.items() if spec.get('notify')}
+        self.assertEqual(announced, {'unmatched', 'path-changed', 'sonarr-unreachable',
+                                     'no-recycle-bin', 'run-aborted'})
+        for spec in alert_module.KINDS.values():
+            self.assertIn('notify', spec, 'every kind must say whether it is worth a notification')
+
+    def test_an_ended_series_is_announced_once_not_twice(self):
+        # Sonarr reporting it ended is the news; the rule having nothing left to do is the
+        # consequence, and saying both would say it twice.
+        import alerts as alert_module
+        self.assertFalse(alert_module.KINDS['ended-expired']['notify'])

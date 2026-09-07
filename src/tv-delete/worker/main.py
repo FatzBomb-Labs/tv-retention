@@ -965,6 +965,53 @@ def watch_sonarr(settings: dict, health: dict, min_interval: int = 30) -> bool:
     return moved
 
 
+def watch_and_recheck(settings: dict, min_interval: int = 30, limit: int = 25) -> int:
+    """Ask what changed, re-read only that, and say so if it needs saying.
+
+    This is what the per-minute tick runs, so a problem reaches the notification before
+    anyone opens the page — rather than because they did, which would leave the page as
+    the only thing that ever knew. The question itself is a query, not a download: over a
+    ninety second window it is two calls and no records at all.
+    """
+    health = load_health(settings)
+    if not watch_sonarr(settings, health, min_interval=min_interval):
+        return 0
+    write_cache(settings, 'health.json', health)
+    dirty = [rule for rule in settings.get('rules', [])
+             if rule.get('enabled') and rule['id'] in (health.get('dirty') or [])][:limit]
+    if not dirty:
+        return 0
+    previous = list(health.get('alerts') or [])
+    for rule in dirty:
+        with contextlib.suppress(Rejected, SonarrError):
+            check_one_rule(settings, rule)
+    announce_alerts(settings, previous, load_health(settings).get('alerts') or [])
+    return len(dirty)
+
+
+def announce_alerts(settings: dict, previous: list, current: list) -> list:
+    """Notify about problems that were not there before.
+
+    Alerts are keyed and carry their own first-seen date, so "new" is a question about the
+    keys, not about the check that happened to find them: a condition that has been true
+    since Tuesday is not announced again on Wednesday.
+
+    What is worth announcing is a property of the alert's kind: something structurally
+    wrong — a series that cannot be found, a binding that moved, a Sonarr that will not
+    answer. Never the retention itself, which is the job, not the news.
+    """
+    known = {alert['key'] for alert in previous or []}
+    fresh = [alert for alert in current or []
+             if alert['key'] not in known and alerts.notifies(alert)]
+    for alert in fresh:
+        notify(settings, f'TV Delete: {alert["title"]}',
+               f'{alert.get("detail") or alert.get("help") or ""}'.strip()[:600],
+               'warning' if alert['severity'] == alerts.ERROR else 'normal',
+               event='health_problems')
+        log_line(settings, 'warning', f'{alert["title"]} — {alert.get("detail", "")}')
+    return fresh
+
+
 def invalidate_catalogue(settings: dict, instance_id: str = '') -> None:
     cache = read_cache(settings, 'catalogue.json')
     if instance_id:
@@ -1463,6 +1510,13 @@ def tick() -> int:
             state = job_state(settings)
             state['last_run'] = now_iso()
 
+    # Every minute: what has Sonarr changed? Only the series it names are re-read, so this
+    # costs two small queries in the common case where the answer is "nothing".
+    with contextlib.suppress(Rejected, SonarrError):
+        watched = watch_and_recheck(settings, min_interval=45)
+        if watched:
+            actions.append(f'sonarr reported {watched} changed series')
+
     match_schedule = (settings.get('health') or {}).get('series_match') or {}
     if schedules.is_due(match_schedule, now, state.get('last_series_match')):
         actions.append('series match check')
@@ -1499,7 +1553,9 @@ def action_snapshot(settings, request):
     health = load_health(settings)
     # One small question — "what changed?" — in place of re-reading every series to find
     # out. Rate limited, and it only ever adds to what must be re-read.
-    if array_ready() and watch_sonarr(settings, health, min_interval=int(request.get('watch_seconds') or 30)):
+    requested = request.get('watch_seconds')
+    if array_ready() and watch_sonarr(settings, health,
+                                      min_interval=30 if requested is None else int(requested)):
         write_cache(settings, 'health.json', health)
         health = load_health(settings)
     return {
@@ -1523,6 +1579,30 @@ def action_snapshot(settings, request):
         'plan': plan_summary(settings, load_health(settings)),
         'test_mode': bool((settings.get('schedule') or {}).get('test_mode', True)),
     }
+
+
+def action_watch(settings, request):
+    """The open page's heartbeat, and nothing more.
+
+    It asks Sonarr what changed and marks what that affects. It deliberately does not
+    re-read those series here: the page has a queue for that which shows each card being
+    read, and a heartbeat that blocks for several seconds is not a heartbeat.
+    """
+    if not array_ready():
+        return {'array_ready': False, 'stale_rules': []}
+    health = load_health(settings)
+    # `or` would turn an explicit zero into the default, and zero is the one value a
+    # caller passes when it means "ask now".
+    requested = request.get('min_interval')
+    if watch_sonarr(settings, health, min_interval=15 if requested is None else int(requested)):
+        write_cache(settings, 'health.json', health)
+        health = load_health(settings)
+    return {'array_ready': True,
+            'progress': read_progress(settings),
+            'health': trim_health(health),
+            'alerts': health.get('alerts') or [],
+            'stale_rules': stale_rule_ids(settings, health),
+            'plan': plan_summary(settings, health)}
 
 
 def action_health(settings, request):
@@ -1886,6 +1966,7 @@ ACTIONS = {
     'alert-action': action_alert_action,
     'enable-recycle-bin': action_enable_recycle_bin,
     'check-rule': action_check_rule,
+    'watch': action_watch,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

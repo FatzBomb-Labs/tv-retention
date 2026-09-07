@@ -172,6 +172,20 @@ class Interface(unittest.TestCase):
         self.assertIn('isChecking(rule.id)', self.js)
         self.assertRegex(self.js, r'button\.disabled = true')
 
+    def test_the_page_has_a_heartbeat_that_never_blocks_it(self):
+        # It must not raise the busy overlay, must stand aside for a sweep, and must not
+        # re-render on a timer for its own sake.
+        self.assertRegex(self.js, r"api\('watch'[^;]*, true\)")
+        self.assertIn('if (document.hidden || checkRunning || checkQueue.length || pollTimer) return;', self.js)
+        self.assertIn('if (stamp === watchStamp) return;', self.js)
+
+    def test_the_tick_asks_what_changed_whether_or_not_anyone_is_looking(self):
+        # A problem the page discovers first is a notification that never fired.
+        worker = (ROOT / 'src' / 'tv-delete' / 'worker' / 'main.py').read_text()
+        tick = worker.split('def tick()')[1].split('\ndef ')[0]
+        self.assertIn('watch_and_recheck', tick)
+        self.assertIn("'watch': action_watch", worker)
+
     def test_a_background_sweep_is_watched_not_duplicated(self):
         self.assertIn('startPolling', self.js)
         self.assertIn('data.busy', self.js)

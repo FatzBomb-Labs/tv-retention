@@ -22,32 +22,40 @@ SEVERITIES = [ERROR, WARNING, NOTICE]
 # What each kind of alert means, whether it stops the series from being processed, and the
 # action offered against it. Blocking is a property of the kind, not a judgement made at
 # the call site, so the same condition always has the same consequence.
+#
+# `notify` is the same idea applied to Unraid's notifications, and it is deliberately
+# narrow: a notification is for something structurally wrong — a series that cannot be
+# found, a binding that moved, a Sonarr that will not answer. Retention itself is the
+# plugin's job, so episodes being scheduled for deletion and monitoring being brought into
+# line are never announced. Being told about them is the thing you installed this to avoid.
 KINDS = {
     'unmatched': {
         'severity': ERROR, 'blocking': True, 'scope': 'series',
         'title': 'Not matched to a Sonarr series',
         'help': 'This rule no longer resolves to exactly one series. It is skipped by every '
                 'run until it does.',
-        'action': 'rematch',
+        'action': 'rematch', 'notify': True,
     },
     'path-changed': {
         'severity': WARNING, 'blocking': False, 'scope': 'series',
         'title': 'Sonarr has moved this series',
         'help': 'The series resolves by id, but Sonarr now reports a different folder. '
                 'Accepting stores the new path.',
-        'action': 'accept-path',
+        'action': 'accept-path', 'notify': True,
     },
     'ended-expired': {
         'severity': NOTICE, 'blocking': False, 'scope': 'series',
         'title': 'Ended, and nothing is left inside the keep window',
         'help': 'This rule has nothing further to do. You can remove it, or remove the show.',
-        'action': 'remove-rule',
+        # The series ending is worth telling someone about, and it already is, once, when
+        # Sonarr first reports it. Announcing this as well would say it twice.
+        'action': 'remove-rule', 'notify': False,
     },
     'sonarr-unreachable': {
         'severity': ERROR, 'blocking': True, 'scope': 'system',
         'title': 'Sonarr is unreachable',
         'help': 'Scheduled runs are held until it answers, then released automatically.',
-        'action': 'test-instance',
+        'action': 'test-instance', 'notify': True,
     },
     'no-recycle-bin': {
         'severity': WARNING, 'blocking': False, 'scope': 'system',
@@ -55,13 +63,13 @@ KINDS = {
         'help': 'Sonarr deletes files outright. Giving it a recycle bin makes every deletion '
                 'recoverable for a while, including the ones this plugin asks for. It applies '
                 'to everything Sonarr deletes, not only to TV Delete.',
-        'action': 'enable-recycle-bin',
+        'action': 'enable-recycle-bin', 'notify': True,
     },
     'run-aborted': {
         'severity': ERROR, 'blocking': False, 'scope': 'system',
         'title': 'A run was stopped by a guard',
         'help': 'The plan exceeded a safety limit and nothing was deleted.',
-        'action': '',
+        'action': '', 'notify': True,
     },
 }
 
@@ -88,6 +96,14 @@ def make(kind: str, *, rule_id: str = '', instance_id: str = '', detail: str = '
         'count': count,
         'data': data or {},
     }
+
+
+def notifies(alert) -> bool:
+    """Whether this alert is worth an Unraid notification.
+
+    A property of the kind, so the answer cannot differ between the two places that ask.
+    """
+    return bool(KINDS.get(alert.get('kind'), {}).get('notify'))
 
 
 def merge(existing, current) -> list:
