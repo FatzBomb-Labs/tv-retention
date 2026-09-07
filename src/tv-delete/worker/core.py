@@ -18,6 +18,9 @@ from pathlib import Path
 
 VERSION = '2026.09.06'
 SETTINGS_VERSION = 1
+# Bumped whenever a cached health result gains a field. It rides in the fingerprint, so an
+# upgrade retires results written by an older shape instead of showing them missing a value.
+CACHE_SCHEMA = 2
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
@@ -928,6 +931,7 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
     retention = settings.get('retention') or {}
     guards = settings.get('guards') or {}
     material = {
+        'cache_schema': CACHE_SCHEMA,
         'keep_days': active.get('keep_days'),
         'keep_episodes': active.get('keep_episodes'),
         'keep_seasons': active.get('keep_seasons'),

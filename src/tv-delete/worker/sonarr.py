@@ -98,6 +98,9 @@ class Sonarr:
                 'tmdb_id': entry.get('tmdbId'),
                 'year': entry.get('year'),
                 'monitored': bool(entry.get('monitored')),
+                # Lifecycle: Sonarr sets both, and describe_lifecycle reads both.
+                'ended': bool(entry.get('ended')),
+                'status': entry.get('status') or '',
                 'episode_file_count': int(statistics.get('episodeFileCount') or 0),
                 'size_on_disk': int(statistics.get('sizeOnDisk') or 0),
                 'sonarr_path': normalise(path) if path else '',

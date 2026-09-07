@@ -394,7 +394,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 177 tests
+python3 -m unittest discover -s tests -v   # 188 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```
