@@ -84,10 +84,25 @@ class Interface(unittest.TestCase):
     def test_the_busy_overlay_starts_hidden(self):
         self.assertRegex(self.html, r'id="tvd-busy"[^>]*hidden')
 
-    def test_assets_are_cache_busted(self):
+    def test_the_cache_key_comes_from_asset_contents(self):
+        """A timestamp-based key is worthless here.
+
+        The package ships every file with mtime 0 to keep builds reproducible, so a key
+        built from filemtime() is the same string for every release: after an upgrade the
+        browser keeps serving the previous script from cache. That presented as the whole
+        configuration vanishing, since a stale script cannot render the new data.
+        """
         page = (ROOT / 'src' / 'tv-delete' / 'TVDelete.page').read_text()
-        self.assertIn('app.css?v=', page)
+        self.assertIn('md5_file', page)
+        self.assertNotIn('filemtime', page)
         self.assertIn('app.js?v=', page)
+        self.assertIn('app.css?v=', page)
+
+    def test_the_package_ships_reproducible_timestamps(self):
+        # The reason the key cannot use mtime; asserted so the two stay consistent.
+        version = (ROOT / 'VERSION').read_text().strip()
+        with tarfile.open(ROOT / 'dist' / f'tv-delete-{version}-noarch-1.txz') as archive:
+            self.assertTrue(all(member.mtime == 0 for member in archive.getmembers()))
 
     def test_the_package_ships_a_version_file(self):
         version = (ROOT / 'VERSION').read_text().strip()

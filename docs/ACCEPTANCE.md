@@ -8,6 +8,9 @@ read-only or reversible.
 - [ ] Plugins → Install Plugin → path to `install/tv-delete.plg`. Installation reports
       the SHA256 check passing.
 - [ ] **Tools → TV Delete** loads, shows the version, and reports *Dry run is on*.
+- [ ] After an upgrade, the page loads the new script without a manual cache clear. The
+      asset URLs carry a content hash, so a stale script cannot survive a reinstall — that
+      failure presented as every show and setting having vanished.
 - [ ] The Plugins page row shows the **TV Delete** description and a trash icon that opens
       the page when clicked. Verify the icon is actually **visible**, not merely present:
       an icon name with no glyph behind it renders as an empty, zero-sized element, so the

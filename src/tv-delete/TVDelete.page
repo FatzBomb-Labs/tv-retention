@@ -6,15 +6,17 @@ Icon="trash"
 <?php
 $tvdBase = '/usr/local/emhttp/plugins/tv-delete';
 $tvdToken = htmlspecialchars($var['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8');
-// Cache key for the assets. The package ships with a fixed mtime so rebuilds stay
-// reproducible, which means the version has to carry the change; the mtimes are folded in
-// as well so a file replaced in place is picked up without a reinstall.
-$tvdVersion = trim((string)@file_get_contents("$tvdBase/VERSION"));
-$tvdStamp = max((int)@filemtime("$tvdBase/assets/app.css"), (int)@filemtime("$tvdBase/assets/app.js"));
-$tvdAsset = rawurlencode(($tvdVersion ?: 'dev') . '-' . $tvdStamp);
+// Cache key derived from the asset contents, never from their timestamps. The package
+// deliberately ships every file with mtime 0 so builds stay reproducible, which means a
+// timestamp-based key collapses to the same string for every release and a browser then
+// serves a stale script after an upgrade. Hashing ~60KB per render is cheap and is right
+// whether the files arrived from a package, an upgrade, or a hand copy.
+$tvdAsset = @md5_file("$tvdBase/assets/app.js") . @md5_file("$tvdBase/assets/app.css");
+$tvdAsset = $tvdAsset ? substr($tvdAsset, 0, 12)
+                      : trim((string)@file_get_contents("$tvdBase/VERSION"));
 ?>
-<link rel="stylesheet" href="/plugins/tv-delete/assets/app.css?v=<?=$tvdAsset?>">
+<link rel="stylesheet" href="/plugins/tv-delete/assets/app.css?v=<?=rawurlencode($tvdAsset)?>">
 <div id="tv-delete" data-csrf="<?=$tvdToken?>" data-api="/plugins/tv-delete/include/api.php">
 <?php readfile("$tvdBase/include/interface.html"); ?>
 </div>
-<script src="/plugins/tv-delete/assets/app.js?v=<?=$tvdAsset?>"></script>
+<script src="/plugins/tv-delete/assets/app.js?v=<?=rawurlencode($tvdAsset)?>"></script>
