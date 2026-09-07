@@ -340,3 +340,15 @@
 .tvd-inline-row input, .tvd-inline-row select { flex: 1 1 240px; }
 .tvd-inline-label { font-weight: 600; flex: 0 0 auto; min-width: 130px; }
 .tvd-instance-line .tvd-spacer { flex: 1; }
+
+/* Every scheduled change is a link to itself: the total opens all of them, each line
+   opens only what it names. */
+.tvd-plan-header { display: grid; gap: 2px; justify-items: start; }
+#tv-delete button.tvd-plan-total { border: none; background: none; padding: 0; font-weight: 600;
+  text-decoration: underline; border-radius: 0; }
+#tv-delete button.tvd-plan { border: none; background: none; padding: 0; font-size: 12px;
+  text-align: left; text-decoration: underline; border-radius: 0; }
+#tv-delete button.tvd-plan:hover { background: none; filter: brightness(1.15); }
+#tv-delete button.tvd-plan.delete { color: var(--tvd-bad); }
+#tv-delete button.tvd-plan.unmonitor { color: var(--tvd-warn); }
+#tv-delete button.tvd-plan.monitor { color: var(--tvd-good); }

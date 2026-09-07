@@ -160,6 +160,26 @@ class Sonarr:
         """Delete through Sonarr so its database stays correct and its recycle bin applies."""
         self._request('DELETE', f'episodefile/{int(file_id)}')
 
+    def first_acquired(self, series_id: int) -> dict:
+        """When each episode of a series was first acquired, from Sonarr's history.
+
+        The oldest record for an episode does not move when the file is later upgraded,
+        which is what makes this steadier than the file's own dateAdded. The response is
+        large — several megabytes for a long-running series — so callers only ask when an
+        episode has no air date from any other source, which is rare.
+        """
+        payload = self._request('GET', 'history/series',
+                                {'seriesId': int(series_id), 'includeEpisode': 'false'})
+        records = payload if isinstance(payload, list) else (payload or {}).get('records') or []
+        earliest = {}
+        for record in records:
+            episode_id, stamp = record.get('episodeId'), record.get('date')
+            if not episode_id or not stamp:
+                continue
+            if episode_id not in earliest or stamp < earliest[episode_id]:
+                earliest[episode_id] = stamp
+        return earliest
+
     def set_monitored(self, episode_ids, monitored: bool) -> None:
         ids = [int(value) for value in episode_ids if value]
         if not ids:

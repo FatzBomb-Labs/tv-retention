@@ -354,3 +354,24 @@ class Interface(unittest.TestCase):
         self.assertIsNotNone(card)
         for word in ('Remove', 'Delete'):
             self.assertNotIn(f"textContent: '{word}", card.group(1))
+
+    def test_shows_is_only_used_where_it_is_defined(self):
+        """A helper referenced outside its closure throws at runtime, not at parse time.
+
+        `shows` belongs to the scheduled-changes dialog; the run-result dialog renders the
+        same shape of data and once picked it up by mistake.
+        """
+        import re
+        for match in re.finditer(r'function (\w+)\([^)]*\)\s*\{', self.js):
+            name = match.group(1)
+            if name != 'changeList':
+                continue
+            start = match.end()
+            depth, index = 1, start
+            while depth and index < len(self.js):
+                depth += {'{': 1, '}': -1}.get(self.js[index], 0)
+                index += 1
+            inside = self.js[start:index]
+            outside = self.js[:start] + self.js[index:]
+            self.assertIn("shows('delete')", inside)
+            self.assertNotIn("shows('delete')", outside, 'shows() escaped changeList')

@@ -261,6 +261,32 @@ def bind_rules(settings: dict, force: bool = False) -> list:
     return report
 
 
+def fill_from_history(client, series_id: int, episodes) -> int:
+    """Date undated episodes from when Sonarr first acquired them.
+
+    Reached only when a series has no dated episode at all, so interpolation had nothing
+    to work from. Unlike the file's dateAdded, the oldest history record survives an
+    upgrade, which is the flaw that made dateAdded a poor last resort.
+    """
+    missing = [episode for episode in episodes
+               if not episode.get('air_date') and episode.get('has_file') and episode.get('episode_id')]
+    if not missing:
+        return 0
+    try:
+        earliest = client.first_acquired(series_id)
+    except SonarrError:
+        return 0
+    filled = 0
+    for episode in missing:
+        stamp = earliest.get(episode['episode_id'])
+        if not stamp:
+            continue
+        episode['air_date'] = str(stamp)[:10]
+        episode['air_source'] = 'acquired'
+        filled += 1
+    return filled
+
+
 def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
     """Sonarr's episode files for one rule.
 
@@ -272,7 +298,8 @@ def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
     if tmdb and rule.get('tvdb_id'):
         with contextlib.suppress(TMDBError):
             fill_air_dates(episodes, tmdb, rule['tvdb_id'])
-    interpolate_air_dates(episodes)
+    if not interpolate_air_dates(episodes):
+        fill_from_history(client, rule['series_id'], episodes)
     return episodes, [], []
 
 
@@ -1380,7 +1407,8 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
         episodes = client.episodes(rule['series_id'], files_only=False)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
-    interpolate_air_dates(episodes)
+    if not interpolate_air_dates(episodes):
+        fill_from_history(client, rule['series_id'], episodes)
 
     state = dict(base, **classify_monitoring(episodes, active, settings))
     series = next((entry for entry in catalogue_for(settings, rule['instance_id'])
