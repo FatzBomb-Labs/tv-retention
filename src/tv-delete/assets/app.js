@@ -431,6 +431,7 @@
   // Each line opens exactly what it names. The total replaces the old button: a count you
   // can read is more use than a button that only promises one.
   const PLAN_KINDS = [
+    ['remove', 'delete', (plan) => `${plural(plan.remove, 'series')} will be removed`],
     ['delete', 'delete', (plan) => `${plural(plan.delete, 'episode')} scheduled for deletion (${bytes(plan.delete_bytes)})`],
     ['monitor', 'monitor', (plan) => `${plural(plan.monitor, 'episode')} will be set to monitored`],
     ['unmonitor', 'unmonitor', (plan) => `${plural(plan.unmonitor, 'episode')} will be set to unmonitored`],
@@ -724,6 +725,17 @@
     }));
   }
 
+  // Opens the series where it actually lives. Sonarr's own slug, so no URL is guessed.
+  function sonarrLink(rule) {
+    const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
+    if (!instance || !rule.slug) return null;
+    const link = el('a', { className: 'tvd-sonarr-link', target: '_blank', rel: 'noopener',
+                           href: `${instance.url.replace(/\/+$/, '')}/series/${encodeURIComponent(rule.slug)}`,
+                           title: `Open ${rule.series_title} in Sonarr` });
+    link.append(el('i', { className: 'fa fa-external-link' }));
+    return link;
+  }
+
   function renderRules() {
     const container = $('tvd-rules');
     const rules = visibleRules();
@@ -755,6 +767,8 @@
       }
       if (rule.include_specials === true) retention.append(el('span', { className: 'tvd-chip', textContent: 'specials in' }));
       if (rule.include_specials === false) retention.append(el('span', { className: 'tvd-chip', textContent: 'specials out' }));
+      const link = sonarrLink(rule);
+      if (link) head.insertBefore(link, head.children[2]);
       head.append(retention);
       head.append(enableToggle(rule));
       card.append(head);
@@ -856,44 +870,37 @@
   // A small mark before each problem, sized and coloured by rule. Geometric characters
   // rather than emoji: these have no colour-emoji presentation to fall back to, so they
   // render at the size the stylesheet asks for on every platform.
-  const SEVERITY_MARK = { error: '×', warning: '!', notice: 'i' };
-
   function alertItem(alert) {
     const item = el('div', { className: 'tvd-alert-item' });
     const line = el('div', { className: 'tvd-alert-line' }, [
-      el('span', { className: `tvd-sev ${alert.severity}`, textContent: SEVERITY_MARK[alert.severity] || '' }),
+      el('span', { className: `tvd-sev ${alert.severity}`, title: alert.severity }),
       el('span', { className: 'tvd-alert-kind', textContent: ALERT_TAG[alert.kind] || alert.title }),
       el('span', { className: 'tvd-alert-detail', textContent: alert.detail }),
     ]);
     if (alert.blocking) line.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocks runs' }));
     line.append(el('span', { className: 'tvd-alert-age', textContent: ago(alert.first_seen) }));
     item.append(line);
-
-    const help = el('p', { className: 'tvd-alert-help', textContent: alert.help, hidden: true });
-    const files = el('div', { className: 'tvd-alert-files', hidden: true });
-    ((alert.data || {}).files || []).slice(0, 10).forEach((path) =>
-      files.append(el('div', { className: 'tvd-mono', textContent: path })));
+    // The explanation is the point of a notice — hiding it behind a link left one saying
+    // nothing at all. It is short, so it stays on the page.
+    item.append(el('p', { className: 'tvd-alert-help', textContent: alert.help }));
 
     const foot = el('div', { className: 'tvd-alert-foot' });
     if (alert.action) {
-      // Named as an action and coloured as one, so it cannot be mistaken for more prose.
       const button = el('button', { type: 'button', className: 'tvd-action',
                                     textContent: `Quick action: ${ACTION_LABEL[alert.action] || 'Fix'}` });
       button.addEventListener('click', () => runAlertAction(alert));
       foot.append(button);
     }
-    const why = el('button', { type: 'button', className: 'tvd-link', textContent: 'What does this mean?' });
-    why.addEventListener('click', () => {
-      help.hidden = !help.hidden;
-      why.textContent = help.hidden ? 'What does this mean?' : 'Hide explanation';
-    });
-    foot.append(why);
     if ((alert.data || {}).files) {
+      const files = el('div', { className: 'tvd-alert-files', hidden: true });
+      ((alert.data || {}).files || []).slice(0, 10).forEach((path) =>
+        files.append(el('div', { className: 'tvd-mono', textContent: path })));
       const show = el('button', { type: 'button', className: 'tvd-link', textContent: `List ${alert.count} file(s)` });
       show.addEventListener('click', () => { files.hidden = !files.hidden; });
       foot.append(show);
+      item.append(files);
     }
-    item.append(foot, help, files);
+    if (foot.children.length) item.append(foot);
     return item;
   }
 
@@ -1369,6 +1376,9 @@
         confirmField.hidden = !word;
         confirm.placeholder = word || '';
         confirmField.querySelector('span').textContent = word ? `Type ${word} to confirm` : 'Confirm';
+        // The button itself is unavailable until the word matches; throwing after a click
+        // tells you the same thing later and less kindly.
+        $('tvd-dialog-ok').disabled = !!word && confirm.value.trim() !== word;
         if (!word) return;
         warning.replaceChildren(
           el('strong', { textContent: 'Sonarr will delete this series.' }),
@@ -1378,8 +1388,10 @@
             : ' The files stay on disk; only Sonarr’s record of the series is removed.' }));
       };
       action.addEventListener('change', review);
+      confirm.addEventListener('input', review);
       body.append(field('Sonarr action', action,
                         'What Sonarr should do as the series leaves TV Delete.'), warning, confirmField);
+      review();
       return { action, confirm };
     }, async (context) => {
       const word = REMOVAL_CONFIRM[context.action.value];

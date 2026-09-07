@@ -161,3 +161,27 @@ class CatalogueCacheShape(unittest.TestCase):
                 self.assertEqual(main.catalogue_for(settings, 'i1')[0]['title'], 'Cached')
             finally:
                 main.client_for = original
+
+
+class SlugMapping(unittest.TestCase):
+    """Sonarr's own URL segment, so a link is never guessed."""
+
+    def test_the_slug_survives_the_mapping(self):
+        client = Sonarr(INSTANCE)
+        client._request = lambda method, path, query=None, body=None: [
+            dict(PAYLOAD[0], titleSlug='firefly')]
+        self.assertEqual(client.series()[0]['slug'], 'firefly')
+
+    def test_a_series_without_one_maps_to_empty_rather_than_missing(self):
+        client = Sonarr(INSTANCE)
+        client._request = lambda method, path, query=None, body=None: [PAYLOAD[0]]
+        self.assertEqual(client.series()[0]['slug'], '')
+
+    def test_adding_a_mapped_field_requires_a_cache_bump(self):
+        """The catalogue caches mapped series, so a new field is absent until it is retired.
+
+        Adding `slug` without bumping CACHE_SCHEMA left every cached series without one,
+        and the links silently did not appear. This records the coupling.
+        """
+        from core import CACHE_SCHEMA
+        self.assertGreaterEqual(CACHE_SCHEMA, 7)

@@ -93,6 +93,8 @@ class Sonarr:
                 'series_id': entry.get('id'),
                 'title': entry.get('title') or '',
                 'sort_title': entry.get('sortTitle') or entry.get('title') or '',
+                # Sonarr's own URL segment, so the interface can link straight to it.
+                'slug': entry.get('titleSlug') or '',
                 'tvdb_id': entry.get('tvdbId'),
                 'tmdb_id': entry.get('tmdbId'),
                 'year': entry.get('year'),

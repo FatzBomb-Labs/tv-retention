@@ -340,7 +340,8 @@ class Interface(unittest.TestCase):
         # A tag tinted per severity is what made a page of warnings read as solid orange.
         for severity in ('error', 'warning', 'notice'):
             self.assertNotRegex(css, rf'\.tvd-tag\.{severity}\s*\{{')
-        self.assertRegex(css, r'\.tvd-sev\.warning\s*\{[^}]*color')
+        self.assertRegex(css, r'\.tvd-sev\.warning\s*\{[^}]*background')
+
     def test_delete_lives_in_the_editor_action_row(self):
         # Bottom left, beside Cancel and Save — not on the card, where it invites a slip.
         self.assertIn("tvd-dialog-extra", self.js)

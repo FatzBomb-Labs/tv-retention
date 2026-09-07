@@ -99,3 +99,35 @@ class UnmonitorOnDelete(unittest.TestCase):
         self.assertIn('client.unmonitor(deleted_ids)', block)
         self.assertNotIn('auto_unmonitor', block)
         self.assertNotIn("rule.get('unmonitor')", block)
+
+
+class LoadNormalises(unittest.TestCase):
+    def test_a_rule_written_before_a_field_existed_still_gets_it(self):
+        """Validation runs on load, not only on save.
+
+        Merging a stored document over the defaults leaves rules exactly as last written,
+        so a field added since is simply absent and the interface has nowhere to put it.
+        That is how queued removals silently failed to persist.
+        """
+        import json
+        import tempfile
+        from pathlib import Path
+        import main
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'settings.json'
+            path.write_text(json.dumps({
+                'settings_version': 4,
+                'instances': [{'id': 'i1', 'name': 'S', 'url': 'http://s:8989', 'api_key': 'a' * 32}],
+                # A rule as an older release would have written it: no queue, no overrides.
+                'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                           'keep_days': 30}],
+            }))
+            original = main.CONFIG
+            main.CONFIG = path
+            try:
+                rule = main.load_settings()['rules'][0]
+            finally:
+                main.CONFIG = original
+            self.assertIn('queue', rule)
+            self.assertEqual(rule['queue'], {'removal': None, 'fixes': []})
+            self.assertIn('monitor_missing', rule)

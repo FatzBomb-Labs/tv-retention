@@ -37,6 +37,8 @@ there. The suite is 196 tests with no expected failures.
 - Dry run defaults to on, and every new install starts with no retention schedule. The
   health check is read-only and defaults to on.
 - A cached reading is always shown with its age; nothing cached may be presented as live.
+- Settings are validated on load, not only on save: a rule written before a field existed
+  must still arrive with it, or the interface has nowhere to put the value.
 - Both caches store mapped objects. Changing what the Sonarr mapping produces means
   bumping CACHE_SCHEMA, or the new field reads as absent until the cache expires.
 - Sonarr reads happen in the background, per show. They must never raise the busy overlay,

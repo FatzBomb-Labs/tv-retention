@@ -70,7 +70,16 @@ def default_state_dir() -> str:
 
 
 def load_settings() -> dict:
-    """Read settings, upgrading their shape if they were written by an older release."""
+    """Read settings, upgrading and normalising them to the current shape.
+
+    Validation runs on load, not only on save. Merging a stored document over the defaults
+    leaves rules exactly as they were last written, so a field added since — the removal
+    queue, for one — is simply absent, and the interface has nowhere to put it. Validating
+    guarantees the shape in memory always matches the model regardless of the file's age.
+
+    A document that cannot be validated is returned as it was rather than raising: the
+    interface must still load so the problem can be seen and fixed.
+    """
     if not CONFIG.exists():
         return dict(json.loads(json.dumps(DEFAULTS)), state_dir=default_state_dir())
     try:
@@ -82,7 +91,11 @@ def load_settings() -> dict:
     merged.update(stored)
     if not stored.get('state_dir'):
         merged['state_dir'] = default_state_dir()
-    return merged
+    try:
+        return validate_settings(merged, previous=merged)
+    except Rejected as error:
+        print(f'tv-delete: stored settings did not validate ({error})', file=sys.stderr)
+        return merged
 
 
 def save_settings(settings: dict) -> None:
@@ -247,6 +260,7 @@ def bind_rules(settings: dict, force: bool = False) -> list:
                 'series_id': found['series_id'],
                 'series_title': found['title'],
                 'tvdb_id': found['tvdb_id'],
+                'slug': found.get('slug') or '',
                 'path': found['path'] or rule['path'],
                 'match_status': 'matched',
                 'match_error': '',
@@ -1162,11 +1176,16 @@ def plan_summary(settings: dict, health: dict) -> dict:
     at all, because "nothing to do" is only as trustworthy as the checks behind it. The
     interface must not hide the Run button on an answer it cannot vouch for.
     """
-    totals = {'delete': 0, 'delete_bytes': 0, 'unmonitor': 0, 'monitor': 0,
+    totals = {'delete': 0, 'delete_bytes': 0, 'unmonitor': 0, 'monitor': 0, 'remove': 0,
               'series': 0, 'unknown': 0, 'blocked': 0, 'oldest': None}
     alerts_now = health.get('alerts') or []
     blocking = {alert['rule_id'] for alert in alerts_now if alert.get('blocking') and alert.get('rule_id')}
     for rule in settings.get('rules', []):
+        # A queued removal counts wherever the rule stands: it is a change the run makes.
+        if (rule.get('queue') or {}).get('removal'):
+            totals['remove'] += 1
+            totals['series'] += 1
+            continue
         if not rule.get('enabled'):
             continue
         if rule['id'] in blocking:
@@ -1184,7 +1203,8 @@ def plan_summary(settings: dict, health: dict) -> dict:
         stamp = entry.get('checked_at')
         if stamp and (totals['oldest'] is None or stamp < totals['oldest']):
             totals['oldest'] = stamp
-    totals['actionable'] = totals['delete'] + totals['unmonitor'] + totals['monitor']
+    totals['actionable'] = (totals['delete'] + totals['unmonitor'] + totals['monitor']
+                            + totals['remove'])
     # Only a complete, unblocked picture may be called up to date.
     totals['trustworthy'] = totals['unknown'] == 0
     return totals

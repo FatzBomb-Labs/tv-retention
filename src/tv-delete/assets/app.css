@@ -237,11 +237,6 @@
 
 /* Only two things carry severity: this mark, and the left edge of the card. Everything
    else stays the page colour, so a list of warnings is readable rather than orange. */
-.tvd-sev { display: inline-grid; place-items: center; width: 14px; flex: 0 0 14px;
-  font-size: 12px; font-weight: 700; line-height: 1; }
-.tvd-sev.error { color: var(--tvd-bad); }
-.tvd-sev.warning { color: var(--tvd-warn); }
-.tvd-sev.notice { color: var(--tvd-notice); }
 .tvd-alert-kind { font-weight: 600; }
 .tvd-alert-count { font-size: 11px; opacity: .6; }
 .tvd-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
@@ -352,3 +347,13 @@
 #tv-delete button.tvd-plan.delete { color: var(--tvd-bad); }
 #tv-delete button.tvd-plan.unmonitor { color: var(--tvd-warn); }
 #tv-delete button.tvd-plan.monitor { color: var(--tvd-good); }
+
+/* Severity as a dot, with no character to be sized by the font. */
+.tvd-sev { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%;
+  background: var(--tvd-line); }
+.tvd-sev.error { background: var(--tvd-bad); }
+.tvd-sev.warning { background: var(--tvd-warn); }
+.tvd-sev.notice { background: var(--tvd-notice); }
+.tvd-alert-line { align-items: center; }
+#tv-delete .tvd-sonarr-link { opacity: .5; font-size: 11px; text-decoration: none; color: inherit; }
+#tv-delete .tvd-sonarr-link:hover { opacity: 1; }

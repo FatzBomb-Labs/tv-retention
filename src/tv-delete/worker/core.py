@@ -23,7 +23,7 @@ SETTINGS_VERSION = 4
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
-CACHE_SCHEMA = 6
+CACHE_SCHEMA = 7
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
@@ -382,6 +382,7 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         series_id=series_id,
         series_title=_text(raw.get('series_title'), 'Series title', 300),
         tvdb_id=_whole(raw.get('tvdb_id'), 'TVDB id', 1, 2 ** 31 - 1),
+        slug=_text(raw.get('slug'), 'Sonarr slug', 200),
         # Sonarr's own path, stored for display and for matching. The plugin no longer
         # resolves it locally: Sonarr owns the filesystem.
         path=validate_path(raw.get('path'), 'Series folder'),
