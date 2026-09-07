@@ -5,12 +5,12 @@
     <p>Keep a set number of days, episodes, or seasons per series. Every rule is bound to a Sonarr series, and deletions go through Sonarr so its database and monitoring stay correct.</p>
   </div>
   <div class="tvd-head-actions">
-    <button type="button" id="tvd-run" class="tvd-primary">Run now</button>
-    <div class="tvd-head-plan">
+    <div class="tvd-head-run">
       <button type="button" id="tvd-refresh-all" class="tvd-icon-button tvd-icon-large" title="Re-read every series from Sonarr"><i class="fa fa-refresh"></i></button>
-      <span id="tvd-uptodate" class="tvd-uptodate" hidden></span>
-      <div id="tvd-plan-header" class="tvd-plan-header"></div>
+      <button type="button" id="tvd-run" class="tvd-primary">Run now</button>
     </div>
+    <span id="tvd-uptodate" class="tvd-uptodate" hidden></span>
+    <div id="tvd-plan-header" class="tvd-plan-header"></div>
   </div>
 </header>
 
@@ -27,7 +27,7 @@
 </section>
 
 <nav class="tvd-tabs" aria-label="TV Delete views">
-  <button type="button" class="active" data-tab="series">Series</button>
+  <button type="button" class="active" data-tab="series">Series <span class="tvd-tab-badge" id="tvd-series-badge" hidden></span></button>
   <button type="button" data-tab="alerts">Alerts <span class="tvd-tab-badge" id="tvd-tab-badge" hidden></span></button>
   <button type="button" data-tab="presets">Presets</button>
   <button type="button" data-tab="schedule">Schedule</button>
@@ -62,6 +62,7 @@
     <button type="button" id="tvd-disable-all" class="tvd-small">Disable shown</button>
     <button type="button" id="tvd-add" class="tvd-primary">Add series</button>
   </div>
+  <button type="button" id="tvd-series-rollup" class="tvd-rollup" hidden></button>
   <div id="tvd-rules" class="tvd-rules"></div>
   <p id="tvd-rules-empty" class="tvd-empty">No series yet. Choose <strong>Add series</strong> to pick one from Sonarr.</p>
 </section>
@@ -78,7 +79,6 @@
     <span class="tvd-spacer"></span>
     <button type="button" id="tvd-recheck-all" class="tvd-secondary">Re-check everything</button>
   </div>
-  <button type="button" id="tvd-alert-rollup" class="tvd-rollup" hidden></button>
   <h2 class="tvd-h2">System</h2>
   <div id="tvd-alerts-system" class="tvd-rules"></div>
   <p id="tvd-alerts-system-empty" class="tvd-empty">Nothing wrong with the installation.</p>

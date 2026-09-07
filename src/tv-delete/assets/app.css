@@ -324,11 +324,42 @@
    three lines, each naming a verb and a count. */
 .tvd-plan-list { display: grid; gap: 2px; }
 .tvd-plan { font-size: 12px; }
+/* On a series card the lines are supporting detail, not the headline. */
+.tvd-rule .tvd-plan-list, .tvd-rule .tvd-plan-quiet { font-size: 11px; }
+#tv-delete .tvd-rule button.tvd-plan, #tv-delete .tvd-rule button.tvd-plan-total,
+.tvd-rule .tvd-plan { font-size: 11px; }
 .tvd-plan.delete { color: var(--tvd-bad); }
 .tvd-plan.unmonitor { color: var(--tvd-warn); }
 .tvd-plan.monitor { color: var(--tvd-good); }
 .tvd-plan-summary { padding: 10px 12px; border: 1px solid var(--tvd-line); border-radius: 6px; }
-.tvd-change-series { padding: 10px 0; border-top: 1px solid var(--tvd-line); display: grid; gap: 4px; }
+/* A series and what happens to it read as one block: the title on the left, everything it
+   causes indented under it against a rule, and the whole list a size down so a long plan
+   stays scannable. */
+.tvd-change-series { padding: 6px 0; border-top: 1px solid var(--tvd-line); display: grid; gap: 2px; }
+.tvd-change-series > strong { font-size: 13px; }
+.tvd-change-series > .tvd-changes, .tvd-change-series > .tvd-error, .tvd-change-series > small {
+  margin-left: 14px; padding-left: 10px; border-left: 2px solid var(--tvd-line); }
+.tvd-change-series .tvd-change { font-size: 11px; padding: 1px 0; }
+.tvd-change-series .tvd-change-why { font-size: 10px; }
+.tvd-change-series .tvd-plan { font-size: 11px; }
+
+/* The list of affected series beside the detail, so who is touched can be read without
+   scrolling through what happens to each of them. */
+.tvd-change-view { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: start; }
+.tvd-change-view.solo { grid-template-columns: 1fr; }
+.tvd-change-view.solo .tvd-change-nav { display: none; }
+.tvd-change-nav { position: sticky; top: 0; display: grid; gap: 1px; align-self: start;
+  max-height: 60vh; overflow: auto; }
+#tv-delete button.tvd-change-jump { display: flex; gap: 6px; align-items: baseline; width: 100%;
+  text-align: left; padding: 2px 6px; border: none; background: none; border-radius: 3px;
+  font-size: 11px; line-height: 1.25; border-left: 2px solid transparent; }
+#tv-delete button.tvd-change-jump:hover { background: rgba(127,127,127,.14); }
+#tv-delete button.tvd-change-jump.active { background: rgba(127,127,127,.2); }
+#tv-delete button.tvd-change-jump.delete { border-left-color: var(--tvd-bad); }
+#tv-delete button.tvd-change-jump.unmonitor { border-left-color: var(--tvd-warn); }
+#tv-delete button.tvd-change-jump.monitor { border-left-color: var(--tvd-good); }
+.tvd-change-jump-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvd-change-jump-count { opacity: .55; }
 
 /* One label, one control, one action — the shape a single setting should have. */
 .tvd-inline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -347,15 +378,17 @@
 #tv-delete .tvd-sonarr-link { opacity: .5; font-size: 11px; text-decoration: none; color: inherit; }
 #tv-delete .tvd-sonarr-link:hover { opacity: 1; }
 
-/* Scheduled changes: tight lines under the run button, right aligned, with the refresh
-   control beside them rather than above. Every line opens what it names. */
+/* Scheduled changes: single-spaced lines under the run button, every one of them right
+   aligned, with the refresh control beside the button it belongs to. Each line opens
+   what it names. */
 .tvd-head-actions { flex-direction: column; align-items: flex-end; gap: 6px; }
-.tvd-head-plan { display: flex; align-items: flex-start; gap: 8px; }
+.tvd-head-run { display: flex; align-items: center; gap: 8px; }
 .tvd-plan-header { display: grid; gap: 0; justify-items: end; text-align: right; }
 .tvd-plan-list { display: grid; gap: 0; }
-.tvd-plan, .tvd-plan-quiet { line-height: 1.35; }
+.tvd-plan-header .tvd-plan-list { justify-items: end; }
+.tvd-plan, .tvd-plan-quiet, .tvd-plan-total { line-height: 1.15; }
 #tv-delete button.tvd-plan-total { border: none; background: none; padding: 0; font-weight: 600;
-  text-decoration: underline; border-radius: 0; line-height: 1.35; }
+  text-decoration: underline; border-radius: 0; line-height: 1.15; text-align: right; }
 #tv-delete button.tvd-plan { border: none; background: none; padding: 0; font-size: 12px;
   text-align: inherit; text-decoration: underline; border-radius: 0; }
 #tv-delete button.tvd-plan:hover { background: none; filter: brightness(1.15); }

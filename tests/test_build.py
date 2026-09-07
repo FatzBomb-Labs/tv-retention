@@ -371,3 +371,38 @@ class Interface(unittest.TestCase):
         for name in ('function changeSummary', 'function changeLines', 'function changeRows'):
             self.assertIn(name, self.js)
         self.assertNotIn('function planLines', self.js)
+
+    def test_series_is_its_own_plural(self):
+        """`plural(3, 'series')` produced "3 seriess" everywhere it was used."""
+        self.assertRegex(self.js, r"const plural = .*endsWith\('s'\)")
+        self.assertNotRegex(self.js, r"\$\{count\} \$\{word\}\$\{count === 1 \? '' : 's'\}")
+
+    def test_series_problems_are_counted_on_the_series_tab_only(self):
+        # The roll-up sits on the tab that acts on it, and the Alerts tab counts only
+        # what is wrong with the installation.
+        panels = self.html.split('id="tvd-panel-')
+        series_panel = next(part for part in panels if part.startswith('series"'))
+        alerts_panel = next(part for part in panels if part.startswith('alerts"'))
+        self.assertIn('id="tvd-series-rollup"', series_panel)
+        self.assertNotIn('rollup', alerts_panel)
+        self.assertIn('id="tvd-series-badge"', self.html)
+        self.assertIn("setBadge($('tvd-series-badge'), seriesList)", self.js)
+        self.assertIn("setBadge($('tvd-tab-badge'), systemAlerts)", self.js)
+
+    def test_a_sweep_clears_the_list_while_it_runs(self):
+        # A card left standing during a re-read reads as a fresh result, and it is not one.
+        self.assertIn('bulkChecking', self.js)
+        self.assertRegex(self.js, r'if \(bulkChecking\) \{\s*\n\s*\$\(.tvd-rules-empty.\)\.hidden = true;')
+        self.assertIn('bulkChecking = false;', self.js)
+
+    def test_the_change_view_offers_a_list_of_the_series_it_covers(self):
+        self.assertIn('tvd-change-nav', self.js)
+        self.assertIn('scrollIntoView', self.js)
+        self.assertIn('.tvd-change-view', self.css)
+        self.assertIn('.tvd-change-jump', self.css)
+
+    def test_the_refresh_control_sits_beside_the_run_button(self):
+        head = self.html.split('</header>')[0]
+        self.assertLess(head.index('tvd-refresh-all'), head.index('tvd-run'))
+        self.assertIn('.tvd-head-run', self.css)
+        self.assertNotIn('tvd-head-plan', self.html)

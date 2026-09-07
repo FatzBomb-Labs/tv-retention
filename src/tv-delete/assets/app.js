@@ -102,7 +102,8 @@
     return `${size.toFixed(size < 10 && index > 0 ? 1 : 0)} ${units[index]}`;
   };
   const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
-  const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  // "series" is already plural; nothing ending in s takes another one.
+  const plural = (count, word) => `${count} ${word}${count === 1 || word.endsWith('s') ? '' : 's'}`;
   function ago(stamp) {
     if (!stamp) return 'never checked';
     const seconds = Math.max(0, (Date.now() - new Date(stamp).getTime()) / 1000);
@@ -290,6 +291,7 @@
   const checking = new Set();
   let checkQueue = [];
   let checkRunning = false;
+  let bulkChecking = false;
   let pollTimer = null;
 
   const isChecking = (ruleId) => checking.has(ruleId);
@@ -321,6 +323,7 @@
   }
 
   const seriesAlerts = (ruleId) => alertsByRule[ruleId] || [];
+  const seriesAlertList = () => Object.values(alertsByRule).reduce((all, list) => all.concat(list), []);
   const isBlocked = (ruleId) => seriesAlerts(ruleId).some((alert) => alert.blocking);
   const worstSeverity = (list) => (list.some((a) => a.severity === 'error') ? 'error'
     : list.some((a) => a.severity === 'warning') ? 'warning'
@@ -331,6 +334,9 @@
     if (!wanted.length) return;
     checkQueue = checkQueue.concat(wanted);
     wanted.forEach((id) => checking.add(id));
+    // A sweep empties the list: a card left standing during a re-read looks like a
+    // result, and it would be a stale one.
+    if (checking.size > 1) bulkChecking = true;
     renderRules();
     drainChecks();
   }
@@ -366,6 +372,8 @@
       }
     } finally {
       checkRunning = false;
+      bulkChecking = false;
+      renderRules();
     }
   }
 
@@ -378,6 +386,7 @@
         const progress = data.progress || {};
         checking.clear();
         if (progress.running && progress.current) checking.add(progress.current);
+        bulkChecking = !!progress.running;
         const fresh = await api('alerts', {}, '', true);
         applyAlerts(fresh.alerts);
         renderRules();
@@ -537,18 +546,24 @@
     box.append(changeLines(plan, open));
   }
 
+  function setBadge(badge, list) {
+    badge.hidden = list.length === 0;
+    badge.textContent = list.length || '';
+    badge.className = `tvd-tab-badge ${worstSeverity(list) || 'notice'}`;
+  }
+
   function renderStats() {
     const rules = settings.rules || [];
     $('tvd-stat-rules').textContent = rules.length;
     $('tvd-stat-rules-sub').textContent = `${rules.filter((r) => r.enabled).length} enabled`;
-    const summary = snapshot.alert_summary || { total: 0, error: 0, blocking: 0 };
-    $('tvd-stat-alerts').textContent = summary.total || 0;
-    $('tvd-stat-alerts-sub').textContent = summary.blocking
-      ? `${plural(summary.blocking, 'series')} blocked` : 'nothing blocking';
-    const badge = $('tvd-tab-badge');
-    badge.hidden = !summary.total;
-    badge.textContent = summary.total || '';
-    badge.className = `tvd-tab-badge ${summary.error ? 'error' : (summary.warning ? 'warning' : 'notice')}`;
+    // Two badges for two audiences: the Series tab carries what is wrong with a series,
+    // the Alerts tab what is wrong with the installation. Neither counts the other's.
+    const seriesList = seriesAlertList();
+    const blocked = rules.filter((rule) => isBlocked(rule.id)).length;
+    $('tvd-stat-alerts').textContent = seriesList.length + systemAlerts.length;
+    $('tvd-stat-alerts-sub').textContent = blocked ? `${plural(blocked, 'series')} blocked` : 'nothing blocking';
+    setBadge($('tvd-series-badge'), seriesList);
+    setBadge($('tvd-tab-badge'), systemAlerts);
     const last = (snapshot.runs || [])[0];
     $('tvd-stat-last').textContent = last ? when(last.started) : 'Never';
     $('tvd-stat-last-sub').textContent = last
@@ -585,18 +600,43 @@
       totals.actionable = totals.delete + totals.monitor + totals.unmonitor + removals.length;
       body.append(el('div', { className: 'tvd-plan-summary' }, [changeLines(totals, null)]));
 
+      // A list of the affected series down the side: the quickest read of who is touched,
+      // and a way to reach one without scrolling past the episodes of everything before it.
+      const view = el('div', { className: 'tvd-change-view' });
+      const side = el('div', { className: 'tvd-change-nav' });
+      const main = el('div', { className: 'tvd-change-main' });
+      const jump = (name, card, count, tone) => {
+        const entry = el('button', { type: 'button', className: `tvd-change-jump ${tone}` }, [
+          el('span', { className: 'tvd-change-jump-name', textContent: name }),
+          el('span', { className: 'tvd-change-jump-count', textContent: String(count) }),
+        ]);
+        entry.addEventListener('click', () => {
+          card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+          [...side.children].forEach((other) => other.classList.toggle('active', other === entry));
+        });
+        side.append(entry);
+      };
       removals.forEach((record) => {
-        body.append(el('div', { className: 'tvd-change-series' }, [
+        const card = el('div', { className: 'tvd-change-series' }, [
           el('strong', { textContent: record.series_title }),
-          el('div', { className: 'tvd-plan delete', textContent: record.label }),
-        ]));
+          el('div', { className: 'tvd-changes' }, [
+            el('div', { className: 'tvd-plan delete', textContent: record.label })]),
+        ]);
+        main.append(card);
+        jump(record.series_title, card, 1, (record.action || '').startsWith('delete') ? 'delete' : 'unmonitor');
       });
       rows.forEach((rule) => {
         const card = el('div', { className: 'tvd-change-series' });
         card.append(el('strong', { textContent: rule.series_title }));
         card.append(changeRows(rule, shows));
-        body.append(card);
+        main.append(card);
+        jump(rule.series_title, card, card.querySelectorAll('.tvd-change').length,
+             (shows('delete') && rule.deleted.length) ? 'delete'
+             : ((shows('unmonitor') && (rule.unmonitor_list || []).length) ? 'unmonitor' : 'monitor'));
       });
+      if (removals.length + rows.length < 2) view.classList.add('solo');
+      view.append(side, main);
+      body.append(view);
       return {};
     }, null, 'Close');
   }
@@ -767,13 +807,36 @@
     return link;
   }
 
+  // Series problems are acted on from the series card, so their roll-up belongs on this
+  // tab — and for the same reason the Alerts tab never counts them.
+  function renderSeriesRollup() {
+    const rollup = $('tvd-series-rollup');
+    const list = seriesAlertList();
+    rollup.hidden = bulkChecking || list.length === 0;
+    if (rollup.hidden) return;
+    const affected = new Set(list.map((alert) => alert.rule_id)).size;
+    const bySeverity = { error: 0, warning: 0, notice: 0 };
+    list.forEach((alert) => { bySeverity[alert.severity] += 1; });
+    rollup.replaceChildren(
+      el('strong', { textContent: `${plural(list.length, 'alert')} need to be addressed` }),
+      el('span', { textContent: ` across ${plural(affected, 'series')} — ${bySeverity.error} critical, `
+        + `${bySeverity.warning} warning, ${bySeverity.notice} notice. Open this to show only those series.` }));
+  }
+
   function renderRules() {
+    renderSeriesRollup();
     const container = $('tvd-rules');
     const rules = visibleRules();
     $('tvd-enable-all').textContent = `Enable shown (${rules.length})`;
     $('tvd-disable-all').textContent = `Disable shown (${rules.length})`;
     container.replaceChildren();
     $('tvd-rules-empty').hidden = (settings.rules || []).length > 0;
+    if (bulkChecking) {
+      $('tvd-rules-empty').hidden = true;
+      container.append(el('div', { className: 'tvd-empty' }, [
+        el('span', { className: 'tvd-spinner' }), text(' Reading from Sonarr…')]));
+      return;
+    }
     rules.forEach((rule) => {
       // A queued series shows its intent instead of its retention: nothing about the
       // keep window matters once you have decided to stop managing it.
@@ -1049,19 +1112,6 @@
       $(`tvd-count-${severity}`).textContent = counts[severity] || 0;
     });
 
-    const rollup = $('tvd-alert-rollup');
-    const seriesList = (snapshot.alerts || []).filter((alert) => alert.scope !== 'system');
-    rollup.hidden = seriesList.length === 0;
-    if (seriesList.length) {
-      const affected = new Set(seriesList.map((alert) => alert.rule_id)).size;
-      const bySeverity = { error: 0, warning: 0, notice: 0 };
-      seriesList.forEach((alert) => { bySeverity[alert.severity] += 1; });
-      rollup.replaceChildren(
-        el('strong', { textContent: `${plural(seriesList.length, 'alert')} need to be addressed` }),
-        el('span', { textContent: ` across ${plural(affected, 'series')} — ${bySeverity.error} critical, `
-          + `${bySeverity.warning} warning, ${bySeverity.notice} notice. Open the Series tab to act on them.` }));
-    }
-
     const matches = (alert) => severityFilter === 'all' || alert.severity === severityFilter;
     const systemBox = $('tvd-alerts-system');
     systemBox.replaceChildren();
@@ -1076,8 +1126,7 @@
     byInstance.forEach((list, name) => systemBox.append(systemAlertCard(name, list)));
   }
 
-  $('tvd-alert-rollup').addEventListener('click', () => {
-    document.querySelector('.tvd-tabs button[data-tab="series"]').click();
+  $('tvd-series-rollup').addEventListener('click', () => {
     $('tvd-filter').value = 'attention';
     $('tvd-search').value = '';
     renderRules();
