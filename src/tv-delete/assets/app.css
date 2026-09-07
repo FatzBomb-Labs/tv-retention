@@ -187,59 +187,70 @@
   .tvd-root-row { grid-template-columns: 1fr; }
 }
 
-/* Counts are circles, not sentences. One sits left of every series title: coloured when
-   something needs attention, quiet when nothing does, and never wider than two digits. */
-.tvd-dot-badge { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
-  border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 1; padding: 0;
-  border: 1px solid var(--tvd-line); background: var(--tvd-soft); color: inherit; }
+
+/* Counts are circles, not sentences. Every property is written under #tv-delete because
+   the generic button rule above outranks a bare class — that is what turned these into
+   grey rectangles with the number pushed off centre. */
+#tv-delete .tvd-dot-badge, #tv-delete button.tvd-dot-badge {
+  display: inline-grid; place-items: center; box-sizing: border-box;
+  width: 20px; height: 20px; min-width: 20px; flex: 0 0 20px;
+  padding: 0; margin: 0; border-radius: 50%; border: 1px solid var(--tvd-line);
+  font-size: 11px; font-weight: 700; line-height: 1; text-align: center;
+  background: var(--tvd-soft); color: inherit; }
 #tv-delete button.tvd-dot-badge { cursor: pointer; }
-#tv-delete button.tvd-dot-badge:hover { filter: brightness(1.2); }
-.tvd-dot-badge.clear { width: 10px; height: 10px; flex-basis: 10px; border-color: var(--tvd-good);
-  background: var(--tvd-good); opacity: .55; }
-.tvd-dot-badge.unknown { width: 10px; height: 10px; flex-basis: 10px; opacity: .45; }
-.tvd-dot-badge.checking { width: 10px; height: 10px; flex-basis: 10px; border-color: var(--tvd-accent);
-  background: var(--tvd-accent); animation: tvd-pulse 1.2s ease-in-out infinite; }
-.tvd-dot-badge.error { border-color: var(--tvd-bad); background: var(--tvd-bad); color: #fff; }
-.tvd-dot-badge.warning { border-color: var(--tvd-warn); background: var(--tvd-warn); color: #1a1a1a; }
-.tvd-dot-badge.notice { border-color: var(--tvd-notice); background: var(--tvd-notice); color: #1a1a1a; }
-.tvd-dot-badge.blocked { box-shadow: 0 0 0 2px rgba(192,57,43,.35); }
-.tvd-dot-badge.tvd-static { width: 10px; height: 10px; flex-basis: 10px; }
+#tv-delete button.tvd-dot-badge:hover { filter: brightness(1.2); background: var(--tvd-soft); }
+#tv-delete .tvd-dot-badge.clear, #tv-delete .tvd-dot-badge.unknown,
+#tv-delete .tvd-dot-badge.checking, #tv-delete .tvd-dot-badge.tvd-static {
+  width: 10px; height: 10px; min-width: 10px; flex-basis: 10px; font-size: 0; }
+#tv-delete .tvd-dot-badge.clear { border-color: var(--tvd-good); background: var(--tvd-good); opacity: .5; }
+#tv-delete .tvd-dot-badge.unknown { opacity: .4; }
+#tv-delete .tvd-dot-badge.checking { border-color: var(--tvd-accent); background: var(--tvd-accent);
+  animation: tvd-pulse 1.2s ease-in-out infinite; }
+#tv-delete .tvd-dot-badge.error { border-color: var(--tvd-bad); background: var(--tvd-bad); color: #fff; }
+#tv-delete .tvd-dot-badge.warning { border-color: var(--tvd-warn); background: var(--tvd-warn); color: #1a1a1a; }
+#tv-delete .tvd-dot-badge.notice { border-color: var(--tvd-notice); background: var(--tvd-notice); color: #1a1a1a; }
+#tv-delete .tvd-dot-badge.blocked { box-shadow: 0 0 0 2px rgba(192,57,43,.35); }
 @keyframes tvd-pulse { 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .tvd-dot-badge.checking { animation: none; } }
+@media (prefers-reduced-motion: reduce) { #tv-delete .tvd-dot-badge.checking { animation: none; } }
 
-/* Alerts read as a list of short statements, not a wall of cards. The explanation is
-   there when asked for and out of the way when not. */
-.tvd-alert { border: 1px solid var(--tvd-line); border-left-width: 3px; border-radius: 6px;
-  padding: 10px 12px; display: grid; gap: 4px; }
-.tvd-alert.error { border-left-color: var(--tvd-bad); }
-.tvd-alert.warning { border-left-color: var(--tvd-warn); }
-.tvd-alert.notice { border-left-color: var(--tvd-notice); }
-.tvd-alert-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tvd-alert-title { font-weight: 600; }
-.tvd-alert-detail { margin: 0; opacity: .85; }
-.tvd-alert-help { margin: 2px 0 0; opacity: .7; font-size: 12px; border-left: 2px solid var(--tvd-line);
-  padding-left: 8px; }
-.tvd-alert-age { margin-left: auto; font-size: 11px; opacity: .55; white-space: nowrap; }
-.tvd-alert-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+/* One card per series. Severity is the left edge and the badge; the card itself stays the
+   same colour as everything else on the page. */
+.tvd-alert-card { border: 1px solid var(--tvd-line); border-left: 3px solid var(--tvd-line);
+  border-radius: 6px; padding: 12px 14px; display: grid; gap: 10px; }
+.tvd-alert-card.error { border-left-color: var(--tvd-bad); }
+.tvd-alert-card.warning { border-left-color: var(--tvd-warn); }
+.tvd-alert-card.notice { border-left-color: var(--tvd-notice); }
+.tvd-alert-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tvd-alert-item { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--tvd-line); }
+.tvd-alert-card-head + .tvd-alert-item { border-top: none; padding-top: 0; }
+.tvd-alert-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tvd-alert-detail { opacity: .85; }
+.tvd-alert-help { margin: 0; opacity: .7; font-size: 12px; border-left: 2px solid var(--tvd-line); padding-left: 8px; }
+.tvd-alert-age { margin-left: auto; font-size: 11px; opacity: .5; white-space: nowrap; }
 .tvd-alert-files { display: grid; gap: 2px; padding: 6px 8px; border-radius: 4px; background: var(--tvd-soft); }
-.tvd-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--tvd-line); opacity: .8; }
-.tvd-tag.blocking { border-color: var(--tvd-bad); color: var(--tvd-bad); opacity: 1; }
-#tv-delete button.tvd-small { padding: 4px 10px; font-size: 12px; }
+.tvd-alert-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* Tags name the kind of problem. They are the only tinted thing, and only faintly. */
+.tvd-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--tvd-line); opacity: .9; }
+.tvd-tag.error { border-color: var(--tvd-bad); color: var(--tvd-bad); }
+.tvd-tag.warning { border-color: var(--tvd-warn); color: var(--tvd-warn); }
+.tvd-tag.notice { border-color: var(--tvd-notice); color: var(--tvd-notice); }
+.tvd-tag.blocking { border-color: var(--tvd-bad); color: var(--tvd-bad); font-weight: 600; }
+
+#tv-delete button.tvd-small { padding: 4px 10px; font-size: 12px; border-radius: 4px; }
 #tv-delete button.tvd-link { border: none; padding: 2px 0; font-size: 12px; text-decoration: underline;
-  opacity: .7; background: none; }
+  opacity: .65; background: none; border-radius: 0; }
 #tv-delete button.tvd-link:hover { opacity: 1; background: none; }
-
-.tvd-status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 12px;
-  border-radius: 6px; border: 1px solid var(--tvd-line); }
-.tvd-status.ok { border-color: var(--tvd-good); background: rgba(46,158,91,.10); }
-.tvd-status.bad { border-color: var(--tvd-bad); background: rgba(192,57,43,.10); }
-
-/* A question anyone can ask, rather than a paragraph everyone must read. */
-#tv-delete button.tvd-hint { width: 17px; height: 17px; padding: 0; border-radius: 50%; font-size: 10px;
-  line-height: 1; opacity: .6; flex: 0 0 17px; }
+.tvd-status { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 12px;
+  border-radius: 6px; border: 1px solid var(--tvd-line); border-left-width: 3px; }
+.tvd-status.ok { border-left-color: var(--tvd-good); }
+.tvd-status.bad { border-left-color: var(--tvd-bad); }
+#tv-delete button.tvd-hint { width: 17px; height: 17px; min-width: 17px; padding: 0; border-radius: 50%;
+  font-size: 10px; line-height: 1; opacity: .55; flex: 0 0 17px; display: inline-grid; place-items: center; }
 #tv-delete button.tvd-hint:hover { opacity: 1; }
 .tvd-three-label { display: flex; align-items: center; gap: 6px; }
 .tvd-notify-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .tvd-notify-row { padding: 4px 0; }
-.tvd-danger-box { border: 1px solid var(--tvd-bad); border-left-width: 4px; border-radius: 6px;
-  padding: 10px 12px; background: rgba(192,57,43,.12); }
+.tvd-danger-box { border: 1px solid var(--tvd-line); border-left: 3px solid var(--tvd-bad);
+  border-radius: 6px; padding: 10px 12px; }

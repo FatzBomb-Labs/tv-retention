@@ -662,49 +662,54 @@
   $('tvd-sort').addEventListener('change', renderRules);
 
   // -- alerts ------------------------------------------------------------
-  const SEVERITY_LABEL = { error: 'Error', warning: 'Warning', notice: 'Notice' };
+  // One card per series, not one per problem. The series is the thing you act on, so it
+  // owns the card; each problem inside it is a short labelled line. Severity is carried by
+  // the card frame and the badge, and nowhere else — a card tinted end to end says nothing
+  // a coloured edge does not.
+  const ALERT_TAG = {
+    'unmatched': 'No Sonarr match',
+    'folder-missing': 'Folder missing',
+    'path-changed': 'Series moved',
+    'monitored-outside-frame': 'Monitored outside window',
+    'unmonitored-inside-frame': 'Unmonitored inside window',
+    'unknown-files': 'Unknown files',
+    'ended-expired': 'Series ended',
+    'sonarr-unreachable': 'Sonarr unreachable',
+    'mapping-broken': 'Root folder missing',
+    'run-aborted': 'Run stopped',
+  };
+  const ACTION_LABEL = {
+    'monitor-in-frame': 'Monitor inside the window',
+    'unmonitor-out-frame': 'Unmonitor outside the window',
+    'rematch': 'Re-check against Sonarr',
+    'accept-path': 'Accept the new folder',
+    'remove-rule': 'Remove from TV Delete',
+    'open-instance': 'Open Sonarr settings',
+    'test-instance': 'Test the connection',
+  };
   let severityFilter = 'all';
 
-  function alertRow(alert, config) {
-    const options = config || {};
-    const rule = (settings.rules || []).find((r) => r.id === alert.rule_id);
-    const row = el('div', { className: `tvd-alert ${alert.severity}` });
+  function alertItem(alert) {
+    const item = el('div', { className: 'tvd-alert-item' });
+    const line = el('div', { className: 'tvd-alert-line' }, [
+      el('span', { className: `tvd-tag ${alert.severity}`, textContent: ALERT_TAG[alert.kind] || alert.title }),
+      el('span', { className: 'tvd-alert-detail', textContent: alert.detail }),
+    ]);
+    if (alert.blocking) line.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocks runs' }));
+    line.append(el('span', { className: 'tvd-alert-age', textContent: ago(alert.first_seen) }));
+    item.append(line);
 
-    const heading = el('div', { className: 'tvd-alert-head' });
-    heading.append(el('span', { className: `tvd-dot-badge ${alert.severity} tvd-static`, textContent: '' }));
-    heading.append(el('span', { className: 'tvd-alert-title', textContent: alert.title }));
-    if (alert.blocking) heading.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocks runs' }));
-    if (rule && !options.hideSeries) heading.append(el('span', { className: 'tvd-tag', textContent: rule.series_title || rule.path }));
-    heading.append(el('span', { className: 'tvd-alert-age', textContent: `since ${ago(alert.first_seen)}` }));
-    row.append(heading);
-
-    row.append(el('p', { className: 'tvd-alert-detail', textContent: alert.detail }));
     const help = el('p', { className: 'tvd-alert-help', textContent: alert.help, hidden: true });
-    row.append(help);
+    const files = el('div', { className: 'tvd-alert-files', hidden: true });
+    ((alert.data || {}).files || []).slice(0, 10).forEach((path) =>
+      files.append(el('div', { className: 'tvd-mono', textContent: path })));
 
     const foot = el('div', { className: 'tvd-alert-foot' });
     if (alert.action) {
-      const label = {
-        'monitor-in-frame': 'Monitor inside the window',
-        'unmonitor-out-frame': 'Unmonitor outside the window',
-        'rematch': 'Re-check against Sonarr',
-        'accept-path': 'Accept the new folder',
-        'remove-rule': 'Remove from TV Delete',
-        'open-instance': 'Open Sonarr settings',
-        'test-instance': 'Test the connection',
-      }[alert.action] || 'Fix';
-      const button = el('button', { type: 'button', className: 'tvd-primary tvd-small', textContent: label });
+      const button = el('button', { type: 'button', className: 'tvd-primary tvd-small',
+                                    textContent: ACTION_LABEL[alert.action] || 'Fix' });
       button.addEventListener('click', () => runAlertAction(alert));
       foot.append(button);
-    }
-    if (rule && !options.hideSeries) {
-      const open = el('button', { type: 'button', className: 'tvd-small', textContent: 'Show series' });
-      open.addEventListener('click', () => {
-        document.querySelector('.tvd-tabs button[data-tab="series"]').click();
-        $('tvd-search').value = rule.series_title || rule.path;
-        renderRules();
-      });
-      foot.append(open);
     }
     const why = el('button', { type: 'button', className: 'tvd-link', textContent: 'What does this mean?' });
     why.addEventListener('click', () => {
@@ -713,16 +718,54 @@
     });
     foot.append(why);
     if ((alert.data || {}).files) {
-      const files = el('div', { className: 'tvd-alert-files', hidden: true });
-      (alert.data.files || []).slice(0, 10).forEach((path) =>
-        files.append(el('div', { className: 'tvd-mono', textContent: path })));
       const show = el('button', { type: 'button', className: 'tvd-link', textContent: `List ${alert.count} file(s)` });
       show.addEventListener('click', () => { files.hidden = !files.hidden; });
       foot.append(show);
-      row.append(files);
     }
-    row.append(foot);
-    return row;
+    item.append(foot, help, files);
+    return item;
+  }
+
+  function seriesAlertCard(rule, list, config) {
+    const options = config || {};
+    const severity = worstSeverity(list);
+    const blocked = list.some((alert) => alert.blocking);
+    const card = el('div', { className: `tvd-alert-card ${severity}` });
+    const head = el('div', { className: 'tvd-alert-card-head' }, [
+      el('span', { className: `tvd-dot-badge ${severity}`, textContent: String(list.length) }),
+      el('span', { className: 'tvd-rule-title', textContent: rule.series_title || rule.path }),
+    ]);
+    if (blocked) head.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocked' }));
+    const state = monitoring[rule.id];
+    head.append(el('span', { className: 'tvd-alert-age', textContent: state ? `checked ${ago(state.checked_at)}` : 'not checked' }));
+    card.append(head);
+    list.forEach((alert) => card.append(alertItem(alert)));
+    const foot = el('div', { className: 'tvd-alert-foot' });
+    if (!options.hideOpen) {
+      const open = el('button', { type: 'button', className: 'tvd-small', textContent: 'Show in Series' });
+      open.addEventListener('click', () => {
+        document.querySelector('.tvd-tabs button[data-tab="series"]').click();
+        $('tvd-search').value = rule.series_title || rule.path;
+        renderRules();
+      });
+      foot.append(open);
+    }
+    const recheck = el('button', { type: 'button', className: 'tvd-small', textContent: 'Re-check now' });
+    recheck.addEventListener('click', () => { $('tvd-dialog').close('cancel'); queueChecks([rule.id]); });
+    foot.append(recheck);
+    card.append(foot);
+    return card;
+  }
+
+  function systemAlertCard(alert) {
+    const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
+    const card = el('div', { className: `tvd-alert-card ${alert.severity}` });
+    card.append(el('div', { className: 'tvd-alert-card-head' }, [
+      el('span', { className: `tvd-dot-badge ${alert.severity}`, textContent: '!' }),
+      el('span', { className: 'tvd-rule-title', textContent: instance ? instance.name : 'TV Delete' }),
+    ]));
+    card.append(alertItem(alert));
+    return card;
   }
 
   function runAlertAction(alert) {
@@ -746,42 +789,43 @@
   }
 
   function showSeriesAlerts(rule) {
-    const list = seriesAlerts(rule.id);
-    const blocked = isBlocked(rule.id);
     dialog(rule.series_title || rule.path, (body) => {
-      const state = monitoring[rule.id];
+      const list = seriesAlerts(rule.id);
+      const blocked = isBlocked(rule.id);
       body.append(el('div', { className: `tvd-status ${blocked ? 'bad' : 'ok'}` }, [
         el('strong', { textContent: blocked ? 'Blocked' : 'Runs normally' }),
         el('span', { textContent: blocked
           ? 'Skipped by every run until the errors below are resolved.'
           : 'The items below are advisory and do not stop this series.' }),
-        el('span', { className: 'tvd-alert-age', textContent: state ? `checked ${ago(state.checked_at)}` : 'not checked yet' }),
       ]));
-      list.forEach((alert) => body.append(alertRow(alert, { hideSeries: true })));
-      const recheck = el('button', { type: 'button', className: 'tvd-small', textContent: 'Re-check this series now' });
-      recheck.addEventListener('click', () => { $('tvd-dialog').close('cancel'); queueChecks([rule.id]); });
-      body.append(recheck);
+      body.append(seriesAlertCard(rule, list, { hideOpen: true }));
       return {};
     }, null, 'Close');
   }
 
   function renderAlerts() {
-    const all = (snapshot.alerts || []).filter((alert) => severityFilter === 'all' || alert.severity === severityFilter);
     const summary = snapshot.alert_summary || { error: 0, warning: 0, notice: 0, total: 0 };
     $('tvd-count-all').textContent = summary.total || 0;
     ['error', 'warning', 'notice'].forEach((severity) => {
       $(`tvd-count-${severity}`).textContent = summary[severity] || 0;
     });
-    const system = all.filter((alert) => alert.scope === 'system');
-    const series = all.filter((alert) => alert.scope !== 'system');
+    const matches = (alert) => severityFilter === 'all' || alert.severity === severityFilter;
+
     const systemBox = $('tvd-alerts-system');
     systemBox.replaceChildren();
+    const system = systemAlerts.filter(matches);
     $('tvd-alerts-system-empty').hidden = system.length > 0;
-    system.forEach((alert) => systemBox.append(alertRow(alert)));
+    system.forEach((alert) => systemBox.append(systemAlertCard(alert)));
+
     const seriesBox = $('tvd-alerts-series');
     seriesBox.replaceChildren();
-    $('tvd-alerts-series-empty').hidden = series.length > 0;
-    series.forEach((alert) => seriesBox.append(alertRow(alert)));
+    const grouped = (settings.rules || [])
+      .map((rule) => [rule, seriesAlerts(rule.id).filter(matches)])
+      .filter(([, list]) => list.length)
+      .sort((a, b) => ATTENTION_RANK[worstSeverity(a[1])] - ATTENTION_RANK[worstSeverity(b[1])]
+        || (a[0].series_title || '').localeCompare(b[0].series_title || ''));
+    $('tvd-alerts-series-empty').hidden = grouped.length > 0;
+    grouped.forEach(([rule, list]) => seriesBox.append(seriesAlertCard(rule, list)));
   }
 
   document.querySelectorAll('.tvd-seg button').forEach((button) => {

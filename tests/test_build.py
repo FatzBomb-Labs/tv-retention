@@ -247,3 +247,32 @@ class Interface(unittest.TestCase):
     def test_a_refused_toggle_is_reverted(self):
         # Leaving the switch showing a state the backend rejected would be a lie.
         self.assertRegex(self.js, r'target\.enabled = !wanted')
+
+    def test_badge_styling_outranks_the_generic_button_rule(self):
+        """`#tv-delete button` outranks a bare class, which is not obvious and bit once.
+
+        The badge is a button, so every property that shapes it — padding, radius, size —
+        has to be written under #tv-delete or the generic rule wins and it renders as a
+        grey rectangle with the number pushed off centre.
+        """
+        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        import re
+        shaping = re.search(r'#tv-delete \.tvd-dot-badge[^{]*\{([^}]*)\}', css)
+        self.assertIsNotNone(shaping, 'the badge must be styled under #tv-delete')
+        for property_name in ('padding', 'border-radius', 'width', 'height'):
+            self.assertIn(property_name, shaping.group(1))
+        # A bare `.tvd-dot-badge {` rule would silently lose to the generic button rule.
+        self.assertNotRegex(css, r'(?m)^\.tvd-dot-badge\s*\{')
+
+    def test_severity_is_carried_by_the_frame_not_a_colour_wash(self):
+        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        import re
+        for match in re.finditer(r'\.tvd-alert-card\.(error|warning|notice)[^{]*\{([^}]*)\}', css):
+            self.assertNotIn('background', match.group(2),
+                             'an alert card must not be tinted end to end')
+
+    def test_alerts_are_grouped_by_series(self):
+        # The series is what you act on, so it owns the card and its problems are lines.
+        self.assertIn('function seriesAlertCard', self.js)
+        self.assertIn('ALERT_TAG', self.js)
+        self.assertNotIn('function alertRow', self.js)
