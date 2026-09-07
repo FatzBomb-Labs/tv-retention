@@ -2,7 +2,7 @@
    are inherited from the active Unraid theme wherever possible. */
 #tv-delete { --tvd-line: rgba(128,128,128,.32); --tvd-soft: rgba(128,128,128,.10);
   --tvd-warn: #d9822b; --tvd-bad: #c0392b; --tvd-good: #2e9e5b; --tvd-accent: #ff8c2b;
-  --tvd-notice: #c9a227; --tvd-info: #6a7f97;
+  --tvd-notice: #c9a227; --tvd-info: #6a7f97; --tvd-action: #3d7ebf;
   max-width: 1180px; font-size: 13px; line-height: 1.5; }
 #tv-delete * { box-sizing: border-box; }
 /* An author display rule outranks the browser's [hidden] { display: none }, so any element
@@ -59,8 +59,13 @@
 .tvd-stats small { opacity: .6; }
 
 .tvd-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--tvd-line); margin-bottom: 14px; }
-.tvd-tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 14px; opacity: .7; }
-.tvd-tabs button.active { border-bottom-color: var(--tvd-accent); opacity: 1; font-weight: 600; }
+/* Written under #tv-delete: the generic button rule outranks a bare `.tvd-tabs button`,
+   which is why the active underline was lost inside a full box border. */
+#tv-delete .tvd-tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0;
+  padding: 8px 14px; opacity: .65; background: transparent; }
+#tv-delete .tvd-tabs button:hover { opacity: .9; background: var(--tvd-soft); }
+#tv-delete .tvd-tabs button.active { opacity: 1; font-weight: 600; background: var(--tvd-soft);
+  border-bottom: 2px solid var(--tvd-accent); color: inherit; }
 .tvd-tab-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px;
   font-size: 10px; line-height: 16px; text-align: center; background: var(--tvd-info); color: #fff; }
 .tvd-tab-badge.error { background: var(--tvd-bad); }
@@ -230,13 +235,18 @@
 .tvd-alert-files { display: grid; gap: 2px; padding: 6px 8px; border-radius: 4px; background: var(--tvd-soft); }
 .tvd-alert-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
-/* Tags name the kind of problem. They are the only tinted thing, and only faintly. */
+/* Only two things carry severity: this mark, and the left edge of the card. Everything
+   else stays the page colour, so a list of warnings is readable rather than orange. */
+.tvd-sev { display: inline-grid; place-items: center; width: 14px; flex: 0 0 14px;
+  font-size: 12px; font-weight: 700; line-height: 1; }
+.tvd-sev.error { color: var(--tvd-bad); }
+.tvd-sev.warning { color: var(--tvd-warn); }
+.tvd-sev.notice { color: var(--tvd-notice); }
+.tvd-alert-kind { font-weight: 600; }
+.tvd-alert-count { font-size: 11px; opacity: .6; }
 .tvd-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
-  border: 1px solid var(--tvd-line); opacity: .9; }
-.tvd-tag.error { border-color: var(--tvd-bad); color: var(--tvd-bad); }
-.tvd-tag.warning { border-color: var(--tvd-warn); color: var(--tvd-warn); }
-.tvd-tag.notice { border-color: var(--tvd-notice); color: var(--tvd-notice); }
-.tvd-tag.blocking { border-color: var(--tvd-bad); color: var(--tvd-bad); font-weight: 600; }
+  border: 1px solid var(--tvd-line); opacity: .8; }
+.tvd-tag.blocking { border-color: var(--tvd-bad); color: var(--tvd-bad); opacity: 1; }
 
 #tv-delete button.tvd-small { padding: 4px 10px; font-size: 12px; border-radius: 4px; }
 #tv-delete button.tvd-link { border: none; padding: 2px 0; font-size: 12px; text-decoration: underline;
@@ -262,3 +272,9 @@
 #tv-delete .tvd-result { font-size: 12px; opacity: .8; }
 #tv-delete .tvd-result.ok { color: var(--tvd-good); }
 #tv-delete .tvd-result.bad { color: var(--tvd-bad); }
+
+/* An action, not more prose. Orange is the page's own accent and reads as decoration
+   next to an orange warning, so a fix is blue and says what it will do. */
+#tv-delete button.tvd-action { background: var(--tvd-action); border-color: var(--tvd-action);
+  color: #fff; font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
+#tv-delete button.tvd-action:hover { filter: brightness(1.1); background: var(--tvd-action); }

@@ -285,6 +285,8 @@ class Interface(unittest.TestCase):
         wrong. Words, or a count, behave predictably. The "?" hint is exempt: it is a
         control with its own size, radius and font-size written under #tv-delete.
         """
+        # The severity marks are exempt: geometric characters with no emoji presentation,
+        # in a span with an explicit width and font-size.
         for glyph in ('📁', '⬑', '✓', '✗', '▾', '★', '⚠'):
             self.assertNotIn(glyph, self.js, f'{glyph} renders unpredictably; use a word')
         self.assertNotRegex(self.js, r"textContent: '!'", 'a bare "!" badge; use a count')
@@ -293,3 +295,26 @@ class Interface(unittest.TestCase):
     def test_system_alerts_are_grouped_like_series_ones(self):
         self.assertRegex(self.js, r'function systemAlertCard\(instanceName, list\)')
         self.assertIn('byInstance', self.js)
+
+    def test_tab_styling_outranks_the_generic_button_rule(self):
+        """Same trap as the badge: a bare `.tvd-tabs button` loses to `#tv-delete button`.
+
+        The active underline was drawn on an element that also had the generic 1px box
+        border, so nothing looked selected.
+        """
+        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        self.assertNotRegex(css, r'(?m)^\.tvd-tabs button')
+        self.assertRegex(css, r'#tv-delete \.tvd-tabs button\.active[^{]*\{[^}]*border-bottom')
+
+    def test_a_fix_is_presented_as_an_action(self):
+        self.assertIn('Quick action: ', self.js)
+        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        self.assertRegex(css, r'#tv-delete button\.tvd-action[^{]*\{[^}]*--tvd-action')
+
+    def test_only_the_mark_and_the_card_edge_carry_severity(self):
+        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        import re
+        # A tag tinted per severity is what made a page of warnings read as solid orange.
+        for severity in ('error', 'warning', 'notice'):
+            self.assertNotRegex(css, rf'\.tvd-tag\.{severity}\s*\{{')
+        self.assertRegex(css, r'\.tvd-sev\.warning\s*\{[^}]*color')

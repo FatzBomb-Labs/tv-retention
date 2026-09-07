@@ -689,10 +689,16 @@
   };
   let severityFilter = 'all';
 
+  // A small mark before each problem, sized and coloured by rule. Geometric characters
+  // rather than emoji: these have no colour-emoji presentation to fall back to, so they
+  // render at the size the stylesheet asks for on every platform.
+  const SEVERITY_MARK = { error: '×', warning: '!', notice: 'i' };
+
   function alertItem(alert) {
     const item = el('div', { className: 'tvd-alert-item' });
     const line = el('div', { className: 'tvd-alert-line' }, [
-      el('span', { className: `tvd-tag ${alert.severity}`, textContent: ALERT_TAG[alert.kind] || alert.title }),
+      el('span', { className: `tvd-sev ${alert.severity}`, textContent: SEVERITY_MARK[alert.severity] || '' }),
+      el('span', { className: 'tvd-alert-kind', textContent: ALERT_TAG[alert.kind] || alert.title }),
       el('span', { className: 'tvd-alert-detail', textContent: alert.detail }),
     ]);
     if (alert.blocking) line.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocks runs' }));
@@ -706,8 +712,9 @@
 
     const foot = el('div', { className: 'tvd-alert-foot' });
     if (alert.action) {
-      const button = el('button', { type: 'button', className: 'tvd-primary tvd-small',
-                                    textContent: ACTION_LABEL[alert.action] || 'Fix' });
+      // Named as an action and coloured as one, so it cannot be mistaken for more prose.
+      const button = el('button', { type: 'button', className: 'tvd-action',
+                                    textContent: `Quick action: ${ACTION_LABEL[alert.action] || 'Fix'}` });
       button.addEventListener('click', () => runAlertAction(alert));
       foot.append(button);
     }
@@ -732,8 +739,8 @@
     const blocked = list.some((alert) => alert.blocking);
     const card = el('div', { className: `tvd-alert-card ${severity}` });
     const head = el('div', { className: 'tvd-alert-card-head' }, [
-      el('span', { className: `tvd-dot-badge ${severity}`, textContent: String(list.length) }),
       el('span', { className: 'tvd-rule-title', textContent: rule.series_title || rule.path }),
+      el('span', { className: 'tvd-alert-count', textContent: plural(list.length, 'issue') }),
     ]);
     if (blocked) head.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocked' }));
     const state = monitoring[rule.id];
@@ -761,8 +768,8 @@
     const severity = worstSeverity(list);
     const card = el('div', { className: `tvd-alert-card ${severity}` });
     card.append(el('div', { className: 'tvd-alert-card-head' }, [
-      el('span', { className: `tvd-dot-badge ${severity}`, textContent: String(list.length) }),
       el('span', { className: 'tvd-rule-title', textContent: instanceName }),
+      el('span', { className: 'tvd-alert-count', textContent: plural(list.length, 'issue') }),
     ]));
     list.forEach((alert) => card.append(alertItem(alert)));
     return card;
