@@ -8,11 +8,7 @@ NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 
 
 def settings():
-    return {'retention': dict(DEFAULTS['retention']),
-            'guards': {'max_deletes_per_run': {'enabled': True, 'value': 1000},
-                       'max_percent_per_rule': {'enabled': True, 'value': 50},
-                       'min_file_age_hours': {'enabled': True, 'value': 0},
-                       'allow_import_date_fallback': {'enabled': True}}}
+    return {'retention': dict(DEFAULTS['retention'])}
 
 
 def episode(number, days_ago):

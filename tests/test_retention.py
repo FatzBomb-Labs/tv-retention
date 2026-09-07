@@ -10,10 +10,6 @@ NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 def settings(**overrides):
     document = {
         'retention': dict(DEFAULTS['retention']),
-        'guards': {'max_deletes_per_run': {'enabled': True, 'value': 1000},
-                   'max_percent_per_rule': {'enabled': True, 'value': 100},
-                   'min_file_age_hours': {'enabled': True, 'value': 0},
-                   'allow_import_date_fallback': {'enabled': True}},
     }
     for key, value in overrides.items():
         if isinstance(value, dict) and key in document:
@@ -70,7 +66,7 @@ class KeepDays(unittest.TestCase):
 
     def test_undated_episode_survives_without_the_mtime_fallback(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False)]
-        document = settings(guards={'allow_import_date_fallback': {'enabled': False}})
+        document = settings(retention={'allow_estimated_dates': False})
         result = evaluate(episodes, {'keep_days': 180, 'combine': 'earliest'}, document, now=NOW)
         self.assertEqual(result['delete'], [])
         self.assertIn('No air date', result['keep'][0]['reason'])
@@ -118,13 +114,13 @@ class Combine(unittest.TestCase):
 
     def test_latest_never_acts_on_an_unknown(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False), episode(1, 2, days_ago=10)]
-        document = settings(guards={'allow_import_date_fallback': {'enabled': False}})
+        document = settings(retention={'allow_estimated_dates': False})
         rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'latest'}
         self.assertEqual(evaluate(episodes, rule, document, now=NOW)['delete'], [])
 
     def test_any_ignores_an_unknown_and_uses_the_rest(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False), episode(1, 2, days_ago=10)]
-        document = settings(guards={'allow_import_date_fallback': {'enabled': False}})
+        document = settings(retention={'allow_estimated_dates': False})
         rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'any'}
         result = evaluate(episodes, rule, document, now=NOW)
         self.assertEqual(paths(result['delete']), [episodes[0]['path']])
@@ -143,34 +139,13 @@ class Protection(unittest.TestCase):
         result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, document, now=NOW)
         self.assertEqual(len(result['delete']), 1)
 
-    def test_recent_files_are_protected(self):
-        episodes = [episode(1, 1, days_ago=4000, mtime_days=0)]
-        document = settings(guards={'min_file_age_hours': 6})
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, document, now=NOW)
-        self.assertEqual(result['delete'], [])
-        self.assertIn('Modified within', result['protected'][0]['reason'])
 
 
-class Guards(unittest.TestCase):
-    def test_a_rule_stops_above_its_percentage_cap(self):
-        episodes = [episode(1, index, days_ago=4000) for index in range(1, 11)]
-        document = settings(guards={'max_percent_per_rule': 50})
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, document, now=NOW)
-        self.assertEqual(result['delete'], [])
-        self.assertIn('Guard stopped this rule', result['blocked'])
-
-    def test_a_rule_inside_the_cap_proceeds(self):
-        episodes = [episode(1, index, days_ago=4000) for index in range(1, 5)]
-        episodes += [episode(1, index, days_ago=1) for index in range(5, 11)]
-        document = settings(guards={'max_percent_per_rule': 50})
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, document, now=NOW)
-        self.assertEqual(len(result['delete']), 4)
-        self.assertIsNone(result['blocked'])
-
+class Reasons(unittest.TestCase):
     def test_every_decision_carries_a_reason(self):
         episodes = [episode(1, 1, days_ago=4000)]
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, settings(), now=NOW)
-        self.assertIn('older than 30 days', result['delete'][0]['reason'])
+        result = evaluate(episodes, {"keep_days": 30, "combine": "earliest"}, settings(), now=NOW)
+        self.assertIn("older than 30 days", result["delete"][0]["reason"])
 
 
 if __name__ == '__main__':

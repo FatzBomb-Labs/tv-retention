@@ -63,11 +63,6 @@ class Settings(unittest.TestCase):
         with self.assertRaises(Rejected):
             validate_settings(document)
 
-    def test_library_paths_must_be_deep_enough(self):
-        document = base()
-        document['rules'][0]['path'] = '/mnt/user'
-        with self.assertRaises(Rejected):
-            validate_settings(document)
 
     def test_traversal_is_rejected(self):
         document = base()
@@ -90,22 +85,8 @@ class Settings(unittest.TestCase):
     def test_redaction_hides_keys(self):
         self.assertEqual(redact(validate_settings(base()))['instances'][0]['api_key'], '********')
 
-    def test_video_extension_cannot_be_a_sidecar(self):
-        with self.assertRaises(Rejected):
-            validate_settings(base(sidecars={'enabled': True, 'extensions': ['mkv']}))
 
-    def test_plugin_recycle_requires_a_folder(self):
-        with self.assertRaises(Rejected):
-            validate_settings(base(recycle={'mode': 'plugin', 'path': ''}))
 
-    def test_guard_bounds_are_enforced(self):
-        with self.assertRaises(Rejected):
-            validate_settings(base(guards={'max_percent_per_rule': {'enabled': True, 'value': 500}}))
-
-    def test_a_guard_can_be_switched_off_without_losing_its_number(self):
-        settings = validate_settings(base(guards={'max_deletes_per_run': {'enabled': False, 'value': 200}}))
-        self.assertFalse(settings['guards']['max_deletes_per_run']['enabled'])
-        self.assertEqual(settings['guards']['max_deletes_per_run']['value'], 200)
 
     def test_combine_mode_is_checked(self):
         document = base()

@@ -11,8 +11,7 @@ import context  # noqa: F401
 from core import describe_lifecycle, describe_selectability
 from sonarr import Sonarr
 
-INSTANCE = {'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32,
-            'roots': [{'sonarr_path': '/tv', 'unraid_path': '/mnt/user/media/TV', 'enabled': True}]}
+INSTANCE = {'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32}
 
 # Trimmed from a real /api/v3/series response.
 PAYLOAD = [
@@ -42,8 +41,9 @@ class SeriesMapping(unittest.TestCase):
         self.assertEqual(self.series[7]['status'], 'ended')
         self.assertEqual(self.series[8]['status'], 'upcoming')
 
-    def test_paths_are_mapped_to_this_server(self):
-        self.assertEqual(self.series[7]['path'], '/mnt/user/media/TV/Series/Firefly (2002) {tvdb-78874}')
+    def test_sonarrs_own_path_is_kept_verbatim(self):
+        # No mapping layer: Sonarr owns the filesystem, and its path is the only path.
+        self.assertEqual(self.series[7]['path'], '/tv/Series/Firefly (2002) {tvdb-78874}')
 
     def test_file_counts_survive_the_mapping(self):
         self.assertEqual(self.series[7]['episode_file_count'], 14)
@@ -69,13 +69,13 @@ class SeriesMapping(unittest.TestCase):
         self.assertEqual(outcome['lifecycle'], '')
 
     def test_a_mapped_series_drives_selectability(self):
-        outcome = describe_selectability(self.series[8], exists=False, in_use=False)
+        outcome = describe_selectability(self.series[8], in_use=False)
         self.assertTrue(outcome['selectable'])
         self.assertTrue(outcome['awaiting'])
 
     def test_every_field_the_consumers_read_is_present(self):
         # Guards the whole class of bug: a consumer reading a key the mapping never sets.
-        required = {'series_id', 'title', 'tvdb_id', 'path', 'sonarr_path', 'monitored',
+        required = {'series_id', 'title', 'tvdb_id', 'path', 'monitored',
                     'ended', 'status', 'episode_file_count', 'size_on_disk', 'year'}
         for entry in self.series.values():
             self.assertEqual(required - set(entry), set())

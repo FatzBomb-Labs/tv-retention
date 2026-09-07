@@ -19,11 +19,11 @@ from pathlib import Path
 import schedules
 
 VERSION = '2026.09.06'
-SETTINGS_VERSION = 3
+SETTINGS_VERSION = 4
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
-CACHE_SCHEMA = 5
+CACHE_SCHEMA = 6
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
@@ -58,29 +58,16 @@ DEFAULTS = {
     'rules': [],
     # An API key is the switch: nobody enters one they do not want used.
     'tmdb': {'api_key': ''},
-    'guards': {
-        'max_deletes_per_run': {'enabled': True, 'value': 200},
-        'max_percent_per_rule': {'enabled': True, 'value': 50},
-        'min_file_age_hours': {'enabled': True, 'value': 6},
-        # A safety switch rather than a number: with it off, an episode with no known air
-        # date is never deleted rather than being judged on when Sonarr imported it.
-        'allow_import_date_fallback': {'enabled': True},
-    },
     'retention': {
         # One decision: specials are kept, and counted in monitoring, together or not at all.
         'include_specials': False,
-        'auto_unmonitor': True,
-        # Off by default: re-monitoring an episode invites Sonarr to download it again.
-        'auto_monitor': False,
+        # Sonarr's air date, then TMDB, then a date estimated from the episodes either
+        # side. With this off, an episode none of those can date is never deleted.
+        'allow_estimated_dates': True,
         # Monitoring an episode does not fetch it until Sonarr's next RSS pass. Searching
-        # closes that gap, and can turn a metadata change into a great many downloads, so
-        # it stays off until asked for.
+        # closes that gap, and can turn a metadata change into a great many downloads.
         'search_after_monitor': False,
     },
-    # With no extensions listed, every sidecar sharing an episode's name is removed.
-    'sidecars': {'enabled': True, 'extensions': []},
-    'delete_empty_dirs': True,
-    'recycle': {'mode': 'sonarr', 'path': '', 'retention_days': 14},
     'notifications': {
         'run_started': False,
         'run_completed': True,
@@ -224,16 +211,6 @@ def validate_library_path(value, field='Folder') -> str:
 LOG_LEVELS = ['minimal', 'error', 'warning', 'verbose']
 
 
-def _guard(raw, field, low, high, fallback) -> dict:
-    """A guard is a number that can be switched off without losing the number."""
-    raw = raw if isinstance(raw, dict) else {'enabled': True, 'value': raw}
-    value = raw.get('value')
-    if value in (None, ''):
-        value = fallback
-    return {'enabled': _flag(raw.get('enabled', True)),
-            'value': _whole(value, field, low, high, allow_none=False)}
-
-
 def validate_schedule(raw, field='Schedule') -> dict:
     """A structured schedule. Cron is one option among several, not the storage format."""
     raw = raw or {}
@@ -265,18 +242,6 @@ def validate_schedule(raw, field='Schedule') -> dict:
     return result
 
 
-def validate_root(raw) -> dict:
-    """One Sonarr root folder and where it lives on this server."""
-    if not isinstance(raw, dict):
-        raise Rejected('Invalid root folder')
-    sonarr_path = validate_path(raw.get('sonarr_path'), 'Sonarr path')
-    unraid_path = _text(raw.get('unraid_path'), 'Unraid path', 1024)
-    if unraid_path:
-        unraid_path = validate_library_path(unraid_path, 'Unraid path')
-    return {'sonarr_path': sonarr_path, 'unraid_path': unraid_path,
-            'enabled': _flag(raw.get('enabled', True))}
-
-
 def validate_instance(raw, existing_keys=None) -> dict:
     if not isinstance(raw, dict):
         raise Rejected('Invalid Sonarr instance')
@@ -289,13 +254,6 @@ def validate_instance(raw, existing_keys=None) -> dict:
         raise Rejected('A Sonarr API key is required')
     if not re.match(r'^[A-Za-z0-9]{16,128}$', key):
         raise Rejected('Sonarr API keys are 16+ letters and digits')
-    roots, seen_roots = [], set()
-    for entry in raw.get('roots') or []:
-        root = validate_root(entry)
-        if root['sonarr_path'] in seen_roots:
-            raise Rejected(f'Duplicate root folder {root["sonarr_path"]}')
-        seen_roots.add(root['sonarr_path'])
-        roots.append(root)
     return {
         'id': identifier,
         'name': _text(raw.get('name'), 'Instance name', 80, required=True),
@@ -303,9 +261,8 @@ def validate_instance(raw, existing_keys=None) -> dict:
         'api_key': key,
         'enabled': _flag(raw.get('enabled', True)),
         'verify_tls': _flag(raw.get('verify_tls', True)),
-        # Set by a successful connection test; the editor gates its other fields on it.
+        # Set by a successful connection test.
         'verified_at': _text(raw.get('verified_at'), 'Verified at', 40),
-        'roots': roots,
     }
 
 
@@ -425,12 +382,14 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         series_id=series_id,
         series_title=_text(raw.get('series_title'), 'Series title', 300),
         tvdb_id=_whole(raw.get('tvdb_id'), 'TVDB id', 1, 2 ** 31 - 1),
-        path=validate_library_path(raw.get('path'), 'Series folder'),
-        unmonitor=_flag(raw.get('unmonitor', True)),
+        # Sonarr's own path, stored for display and for matching. The plugin no longer
+        # resolves it locally: Sonarr owns the filesystem.
+        path=validate_path(raw.get('path'), 'Series folder'),
         # Per show, because one series' specials are worth keeping and another's are not.
         include_specials=_tristate(raw.get('include_specials'), 'Include specials'),
-        auto_unmonitor=_tristate(raw.get('auto_unmonitor'), 'Auto unmonitor'),
-        auto_monitor=_tristate(raw.get('auto_monitor'), 'Auto monitor'),
+        # Monitoring episodes inside the window that have no file starts downloads, so it
+        # is a decision per series rather than a global default.
+        monitor_missing=_flag(raw.get('monitor_missing', False)),
         queue=validate_queue(raw.get('queue')),
         # Match state is owned by the backend; the UI cannot assert a rule is matched.
         match_status='matched' if series_id else 'unmatched',
@@ -490,10 +449,7 @@ def validate_settings(raw, previous=None) -> dict:
 
     schedule_raw = raw.get('schedule') or {}
     health_raw = raw.get('health') or {}
-    guards_raw = raw.get('guards') or {}
     retention_raw = raw.get('retention') or {}
-    sidecars_raw = raw.get('sidecars') or {}
-    recycle_raw = raw.get('recycle') or {}
     tmdb_raw = raw.get('tmdb') or {}
     notify_raw = raw.get('notifications') or {}
     logging_raw = raw.get('logging') or {}
@@ -503,24 +459,6 @@ def validate_settings(raw, previous=None) -> dict:
         tmdb_key = previous_tmdb
     if tmdb_key and not re.match(r'^[A-Za-z0-9._\-]{16,128}$', tmdb_key):
         raise Rejected('TMDB API key looks malformed')
-
-    extensions = []
-    for value in sidecars_raw.get('extensions', []) or []:
-        value = _text(value, 'Sidecar extension', 12).lower().lstrip('.')
-        if not value:
-            continue
-        if not re.match(r'^[a-z0-9]{1,10}$', value):
-            raise Rejected(f'Invalid sidecar extension "{value}"')
-        if value in MEDIA_EXTENSIONS:
-            raise Rejected(f'"{value}" is a video extension and cannot be a sidecar')
-        extensions.append(value)
-
-    recycle_mode = _text(recycle_raw.get('mode'), 'Recycle mode', 16) or 'sonarr'
-    if recycle_mode not in ('sonarr', 'plugin', 'none'):
-        raise Rejected('Recycle mode must be sonarr, plugin, or none')
-    recycle_path = _text(recycle_raw.get('path'), 'Recycle folder', 1024)
-    if recycle_mode == 'plugin':
-        recycle_path = validate_library_path(recycle_path, 'Recycle folder')
 
     level = _text(logging_raw.get('level'), 'Log level', 16) or 'warning'
     if level not in LOG_LEVELS:
@@ -546,25 +484,10 @@ def validate_settings(raw, previous=None) -> dict:
         'profiles': profiles,
         'rules': rules,
         'tmdb': {'api_key': tmdb_key},
-        'guards': {
-            'max_deletes_per_run': _guard(guards_raw.get('max_deletes_per_run'), 'Max deletes per run', 1, 100000, 200),
-            'max_percent_per_rule': _guard(guards_raw.get('max_percent_per_rule'), 'Max percent per rule', 1, 100, 50),
-            'min_file_age_hours': _guard(guards_raw.get('min_file_age_hours'), 'Minimum file age', 0, 8760, 6),
-            'allow_import_date_fallback': {'enabled': _flag(
-                (guards_raw.get('allow_import_date_fallback') or {'enabled': True}).get('enabled', True))},
-        },
         'retention': {
             'include_specials': _flag(retention_raw.get('include_specials', False)),
-            'auto_unmonitor': _flag(retention_raw.get('auto_unmonitor', True)),
-            'auto_monitor': _flag(retention_raw.get('auto_monitor', False)),
+            'allow_estimated_dates': _flag(retention_raw.get('allow_estimated_dates', True)),
             'search_after_monitor': _flag(retention_raw.get('search_after_monitor', False)),
-        },
-        'sidecars': {'enabled': _flag(sidecars_raw.get('enabled', True)), 'extensions': sorted(set(extensions))},
-        'delete_empty_dirs': _flag(raw.get('delete_empty_dirs', True)),
-        'recycle': {
-            'mode': recycle_mode,
-            'path': recycle_path,
-            'retention_days': _whole(recycle_raw.get('retention_days', 14), 'Recycle retention', 1, 3650, allow_none=False),
         },
         'notifications': {name: _flag(notify_raw.get(name, default))
                           for name, default in DEFAULTS['notifications'].items()},
@@ -603,113 +526,14 @@ def normalise(path: str) -> str:
     return unicodedata.normalize('NFC', os.path.normpath(str(path))).rstrip('/') or '/'
 
 
-def map_path(path: str, path_maps) -> str:
-    """Translate a Sonarr (container) path to its Unraid host path.
-
-    The longest matching prefix wins, so a specific mapping can override a broad one.
-    """
-    candidate = normalise(path)
-    best = None
-    for entry in path_maps or []:
-        source = normalise(entry['from'])
-        if candidate == source or candidate.startswith(source + '/'):
-            if best is None or len(source) > len(normalise(best['from'])):
-                best = entry
-    if not best:
-        return candidate
-    source = normalise(best['from'])
-    remainder = candidate[len(source):].lstrip('/')
-    target = normalise(best['to'])
-    return normalise(os.path.join(target, remainder) if remainder else target)
 
 
-def unmap_path(path: str, path_maps) -> str:
-    """Translate an Unraid host path back to the path Sonarr knows."""
-    inverted = [{'from': entry['to'], 'to': entry['from']} for entry in path_maps or []]
-    return map_path(path, inverted)
 
 
 # ---------------------------------------------------------------------------
 # Filesystem helpers
 # ---------------------------------------------------------------------------
 
-def is_media(path: Path) -> bool:
-    return path.suffix.lower().lstrip('.') in MEDIA_EXTENSIONS
-
-
-def scan_media(root) -> list:
-    """Every media file below a series folder, with size and mtime.
-
-    Used to reconcile the library against Sonarr: files Sonarr does not know about are
-    reported, never deleted.
-    """
-    found = []
-    root = Path(root)
-    if not root.is_dir():
-        return found
-    for base, directories, files in os.walk(root, onerror=lambda error: None):
-        directories.sort()
-        for name in sorted(files):
-            path = Path(base) / name
-            if not is_media(path):
-                continue
-            try:
-                stat = path.stat()
-            except OSError:
-                continue
-            found.append({'path': normalise(path), 'size': stat.st_size, 'mtime': stat.st_mtime})
-    return found
-
-
-def sidecars_for(path, extensions) -> list:
-    """Sidecar files sharing an episode's stem, including language-tagged subtitles.
-
-    "Show - S01E01.mkv" also matches "Show - S01E01.en.srt" and "Show - S01E01-thumb.jpg",
-    but never another episode's files. An empty extension list means every non-media file
-    that shares the name, which is what someone who ticks the box and lists nothing means;
-    a list restricts it to those extensions.
-    """
-    path = Path(path)
-    parent = path.parent
-    stem = path.stem
-    allowed = {e.lower().lstrip('.') for e in extensions or []}
-    matches = []
-    if not parent.is_dir():
-        return matches
-    try:
-        entries = sorted(parent.iterdir())
-    except OSError:
-        return matches
-    for entry in entries:
-        if entry == path or not entry.is_file():
-            continue
-        name = entry.name
-        if not (name.startswith(stem + '.') or name.startswith(stem + '-')):
-            continue
-        extension = entry.suffix.lower().lstrip('.')
-        # Never treat another video as a sidecar, whatever the list says.
-        if extension in MEDIA_EXTENSIONS:
-            continue
-        if not allowed or extension in allowed:
-            matches.append(normalise(entry))
-    return matches
-
-
-def empty_directories(root) -> list:
-    """Empty directories below a series folder, deepest first. The root is never listed."""
-    root = Path(root)
-    found = []
-    if not root.is_dir():
-        return found
-    for base, directories, files in os.walk(root, topdown=False, onerror=lambda error: None):
-        if normalise(base) == normalise(root):
-            continue
-        try:
-            if not any(Path(base).iterdir()):
-                found.append(normalise(base))
-        except OSError:
-            continue
-    return found
 
 
 # ---------------------------------------------------------------------------
@@ -793,24 +617,6 @@ def _order_key(episode, allow_import_fallback):
     return (date or dt.date.min, episode.get('season') or 0, episode.get('episode') or 0)
 
 
-def guard_flag(settings: dict, name: str, default=True):
-    """A safety switch stored beside the numeric guards."""
-    guard = (settings.get('guards') or {}).get(name)
-    if isinstance(guard, dict):
-        return bool(guard.get('enabled', default))
-    if guard is None:
-        return default
-    return bool(guard)
-
-
-def guard_value(settings: dict, name: str, when_off=None):
-    """A guard's number, or `when_off` when the operator has switched that guard off."""
-    guard = (settings.get('guards') or {}).get(name)
-    if not isinstance(guard, dict):
-        return guard if guard is not None else when_off
-    if not guard.get('enabled', True):
-        return when_off
-    return guard.get('value', when_off)
 
 
 def evaluate(episodes, rule, settings, now=None) -> dict:
@@ -820,27 +626,19 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     the preview in the UI and the audit journal show exactly why a file was chosen.
     """
     now = now or dt.datetime.now(dt.timezone.utc)
-    retention = settings.get('retention', DEFAULTS['retention'])
-    guards = settings.get('guards', DEFAULTS['guards'])
-    allow_mtime = bool(guard_flag(settings, 'allow_import_date_fallback', True))
+    retention = settings.get('retention') or DEFAULTS['retention']
+    allow_estimates = bool(retention.get('allow_estimated_dates', True))
     # A rule may override the global specials decision; None means inherit it.
     include_specials = rule.get('include_specials')
     if include_specials is None:
         include_specials = bool(retention.get('include_specials', False))
-    min_age = dt.timedelta(hours=int(guard_value(settings, 'min_file_age_hours', 0) or 0))
 
     protected, candidates = [], []
     for episode in episodes:
         if not episode.get('path'):
             continue
-        season = episode.get('season')
-        if season == 0 and not include_specials:
+        if episode.get('season') == 0 and not include_specials:
             protected.append(dict(episode, reason='Specials (season 0) are excluded'))
-            continue
-        # Judged on when Sonarr imported the file, which is what "still importing" means.
-        added = import_date(episode)
-        if min_age and added and dt.datetime.combine(added, dt.time(), dt.timezone.utc) > now - min_age:
-            protected.append(dict(episode, reason=f'Modified within the last {int(min_age.total_seconds() // 3600)}h'))
             continue
         candidates.append(episode)
 
@@ -850,7 +648,7 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     if rule.get('keep_days'):
         cutoff = (now - dt.timedelta(days=int(rule['keep_days']))).date()
         for episode in candidates:
-            date, source = effective_date(episode, allow_mtime)
+            date, source = effective_date(episode, allow_estimates)
             if date is None:
                 votes[episode['path']].append(('days', 'unknown', 'No air date available'))
             elif date >= cutoff:
@@ -859,7 +657,7 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
                 votes[episode['path']].append(('days', 'delete', f'Aired {date} ({source}), older than {rule["keep_days"]} days'))
 
     if rule.get('keep_episodes'):
-        ranked = sorted(candidates, key=lambda e: _order_key(e, allow_mtime), reverse=True)
+        ranked = sorted(candidates, key=lambda e: _order_key(e, allow_estimates), reverse=True)
         keep_set = {e['path'] for e in ranked[:int(rule['keep_episodes'])]}
         for episode in candidates:
             if episode['path'] in keep_set:
@@ -905,16 +703,6 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
         'blocked': None,
     }
 
-    percent_cap = int(guard_value(settings, 'max_percent_per_rule', 100) or 100)
-    if candidates and percent_cap < 100:
-        percent = 100.0 * len(delete) / len(candidates)
-        if percent > percent_cap:
-            result['blocked'] = (
-                f'Guard stopped this rule: it would delete {len(delete)} of {len(candidates)} '
-                f'episodes ({percent:.0f}%), above the {percent_cap}% limit. '
-                'Check the rule and the Sonarr match, then raise the limit if this is intended.'
-            )
-            result['delete'] = []
     return result
 
 
@@ -939,10 +727,7 @@ def select_remonitor(episodes, ledger_entries, rule, settings, now=None) -> list
         ghost['from_ledger'] = True
         ghosts.append(ghost)
     combined = list(episodes) + ghosts
-    # The guards protect deletions, not this read-only comparison.
-    relaxed = dict(settings, guards=dict(settings.get('guards') or {},
-                                        max_percent_per_rule={'enabled': False, 'value': 100}))
-    decision = evaluate(combined, rule, relaxed, now=now)
+    decision = evaluate(combined, rule, settings, now=now)
     keepers = {item['path'] for item in decision['keep'] if item.get('from_ledger')}
     return [entry for entry, ghost in zip(ledger_entries, ghosts) if ghost['path'] in keepers]
 
@@ -997,9 +782,7 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
             aired.append(episode)
 
     # The percentage guard exists to stop mass deletion, not to limit a read-only view.
-    relaxed = dict(settings, guards=dict(settings.get('guards') or {},
-                                        max_percent_per_rule={'enabled': False, 'value': 100}))
-    decision = evaluate(aired, rule, relaxed, now=now)
+    decision = evaluate(aired, rule, settings, now=now)
     out_frame = decision['delete']
     in_frame = decision['keep'] + decision['protected'] + unaired
 
@@ -1044,26 +827,20 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
     }
 
 
-def describe_selectability(entry, exists: bool, in_use: bool) -> dict:
+def describe_selectability(entry, in_use: bool) -> dict:
     """Whether a Sonarr series can be given a rule, and why not when it cannot.
 
-    A rule binds to a Sonarr series id, not to a folder, so a series that has simply not
-    aired yet is a legitimate choice: Sonarr creates the folder on its first import and
-    the rule picks it up then. What is not legitimate is a series Sonarr says holds files
-    whose folder is absent here, which is a path-mapping fault and must be fixed rather
-    than ruled over.
+    Answered entirely from what Sonarr reports. The plugin no longer resolves paths on
+    this server, so there is no longer a case where a series exists in Sonarr and the
+    plugin disagrees about where it lives.
     """
     if not entry.get('path'):
         return {'selectable': False, 'awaiting': False, 'reason': 'no folder configured in Sonarr'}
     if in_use:
         return {'selectable': False, 'awaiting': False, 'reason': 'already used by another rule'}
-    if exists:
-        return {'selectable': True, 'awaiting': False, 'reason': ''}
-    if entry.get('episode_file_count'):
-        return {'selectable': False, 'awaiting': False,
-                'reason': f'Sonarr reports {entry["episode_file_count"]} file(s) but the folder is '
-                          'not on this server — check the path mapping'}
-    return {'selectable': True, 'awaiting': True, 'reason': 'awaiting first episode'}
+    if not entry.get('episode_file_count'):
+        return {'selectable': True, 'awaiting': True, 'reason': 'no episodes imported yet'}
+    return {'selectable': True, 'awaiting': False, 'reason': ''}
 
 
 
@@ -1078,7 +855,7 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
     """
     active = effective_rule(rule, settings.get('profiles'))
     retention = settings.get('retention') or {}
-    guards = settings.get('guards') or {}
+
     material = {
         'cache_schema': CACHE_SCHEMA,
         'keep_days': active.get('keep_days'),
@@ -1089,8 +866,9 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'path': active.get('path'),
         'series_id': active.get('series_id'),
         'global_specials': retention.get('include_specials'),
-        'import_date_fallback': guard_flag(settings, 'allow_import_date_fallback', True),
-        'min_file_age_hours': guard_value(settings, 'min_file_age_hours', 0),
+        'monitor_missing': active.get('monitor_missing'),
+        'estimated_dates': retention.get('allow_estimated_dates'),
+
     }
     return hashlib.sha256(canonical_json(material).encode('utf-8')).hexdigest()[:16]
 

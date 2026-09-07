@@ -14,6 +14,9 @@ there. The suite is 196 tests with no expected failures.
 ## Project constraints
 
 - A rule that does not resolve to exactly one Sonarr series must never be processed.
+- The plugin touches no filesystem at all. Sonarr owns it: sizes, air dates, import dates
+  and monitoring arrive with the episodes, and deletion is a Sonarr call. There is no
+  path mapping, and no setting that duplicates something Sonarr already does.
 - Deleting an episode file always unmonitors it. That is an invariant, not a setting:
   anything else builds a fetch-and-delete loop.
 - Nothing a series card offers happens immediately: removals and monitoring fixes queue,

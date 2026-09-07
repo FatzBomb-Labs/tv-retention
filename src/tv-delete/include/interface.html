@@ -170,48 +170,51 @@
 
   <h2 class="tvd-h2">TMDB</h2>
   <div class="tvd-card">
-    <p class="tvd-lede">Optional. Used only to fill in air dates Sonarr leaves blank — entering a key is what enables it.</p>
-    <div class="tvd-row tvd-inline">
-      <label class="tvd-field tvd-grow"><span>API key</span><input type="password" id="tvd-tmdb-key" autocomplete="off" placeholder="Not set"></label>
-      <button type="button" id="tvd-tmdb-test">Test</button>
+    <p class="tvd-lede">Optional, and used only to fill in air dates Sonarr leaves blank. Entering a key is what enables it.</p>
+    <div class="tvd-inline-row">
+      <span class="tvd-inline-label">API key</span>
+      <input type="password" id="tvd-tmdb-key" autocomplete="off" placeholder="Not set">
       <span id="tvd-tmdb-result" class="tvd-result"></span>
+      <button type="button" id="tvd-tmdb-test">Test</button>
     </div>
   </div>
 
-  <h2 class="tvd-h2">Safety</h2>
-  <div class="tvd-card" id="tvd-safety"></div>
-
   <h2 class="tvd-h2">Global rules</h2>
   <div class="tvd-card">
-    <h3 class="tvd-card-title">Specials</h3>
     <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-include-specials"><span class="tvd-slider"></span><span class="tvd-switch-text">Include specials (season 0)</span></label>
     <small>Applies to deletion and to the monitoring comparison together. Each series can override it.</small>
-    <h3 class="tvd-card-title">Auto monitor</h3>
-    <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-auto-unmonitor"><span class="tvd-slider"></span><span class="tvd-switch-text">Auto unmonitor</span></label>
-    <small>Unmonitor episodes in Sonarr as they are deleted, so they are not fetched again.</small>
-    <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-auto-monitor"><span class="tvd-slider"></span><span class="tvd-switch-text">Auto monitor</span></label>
-    <small>When a keep window widens, re-monitor episodes this plugin previously unmonitored. Sonarr may download them again.</small>
+    <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-estimated-dates"><span class="tvd-slider"></span><span class="tvd-switch-text">Estimate missing air dates from neighbouring episodes</span></label>
+    <small>Sonarr’s air date is used first, then TMDB. With this off, an episode none of those can date is never deleted.</small>
     <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-search-after"><span class="tvd-slider"></span><span class="tvd-switch-text">Search for newly monitored episodes</span></label>
-    <small>After a run monitors an episode, ask Sonarr to look for it rather than waiting for its next RSS pass. Only episodes that run newly monitored, never the whole series — but monitoring many at once means downloading many at once.</small>
+    <small>When a run monitors an episode, ask Sonarr to look for it rather than waiting for its next RSS pass. Only episodes that run newly monitored — but monitoring many at once means downloading many at once.</small>
   </div>
 
   <h2 class="tvd-h2">App storage</h2>
   <div class="tvd-card">
-    <div class="tvd-row tvd-inline">
-      <label class="tvd-field tvd-grow"><span>App storage folder</span><input type="text" id="tvd-state-dir" spellcheck="false"><small>Holds run journals, the log, the unmonitored ledger and caches. Kept off the flash device.</small></label>
+    <div class="tvd-inline-row">
+      <span class="tvd-inline-label">Folder</span>
+      <input type="text" id="tvd-state-dir" spellcheck="false">
       <button type="button" id="tvd-browse-state">Browse…</button>
     </div>
-    <div class="tvd-row">
-      <label class="tvd-field"><span>Runs kept in history</span><input type="number" id="tvd-history-size" min="1" max="500"></label>
-      <label class="tvd-field"><span>Log detail</span>
-        <select id="tvd-log-level">
-          <option value="minimal">Minimal</option>
-          <option value="error">Errors</option>
-          <option value="warning">Warnings</option>
-          <option value="verbose">Verbose</option>
-        </select>
-      </label>
+    <small>Holds run journals, the log and the caches. Kept off the flash device.</small>
+    <div class="tvd-inline-row">
+      <span class="tvd-inline-label">Runs kept in history</span>
+      <input type="number" id="tvd-history-size" min="1" max="500">
     </div>
+  </div>
+
+  <h2 class="tvd-h2">Logging</h2>
+  <div class="tvd-card">
+    <div class="tvd-inline-row">
+      <span class="tvd-inline-label">Detail</span>
+      <select id="tvd-log-level">
+        <option value="minimal">Minimal</option>
+        <option value="error">Errors</option>
+        <option value="warning">Warnings</option>
+        <option value="verbose">Verbose</option>
+      </select>
+    </div>
+    <small>Shown live on the Live Log tab. A test run marks every line <span class="tvd-mono">[TEST MODE]</span>.</small>
   </div>
 
   <h2 class="tvd-h2">Notifications</h2>
@@ -267,5 +270,5 @@
 </section>
 
 <dialog id="tvd-dialog" class="tvd-dialog"><form method="dialog" id="tvd-dialog-form"><div id="tvd-dialog-body"></div>
-<menu class="tvd-dialog-actions"><button value="cancel" class="tvd-secondary">Cancel</button><button value="ok" id="tvd-dialog-ok" class="tvd-primary">Save</button></menu></form></dialog>
+<menu class="tvd-dialog-actions"><span id="tvd-dialog-extra"></span><span class="tvd-spacer"></span><button value="cancel" class="tvd-secondary">Cancel</button><button value="ok" id="tvd-dialog-ok" class="tvd-primary">Save</button></menu></form></dialog>
 <div id="tvd-busy" class="tvd-busy" hidden><div class="tvd-busy-box"><span class="tvd-spinner"></span><span id="tvd-busy-text">Working…</span></div></div>

@@ -75,19 +75,19 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(self.new['schedule']['frequency'], 'daily')
         self.assertTrue(self.new['schedule']['enabled'])
 
-    def test_path_maps_become_roots(self):
-        roots = self.new['instances'][0]['roots']
-        self.assertEqual(roots, [{'sonarr_path': '/tv', 'unraid_path': '/mnt/user/media/TV',
-                                  'enabled': True}])
-        self.assertNotIn('path_maps', self.new['instances'][0])
+    def test_path_mapping_is_gone_entirely(self):
+        # Sonarr owns the filesystem, so an instance is only a connection.
+        instance = self.new['instances'][0]
+        self.assertNotIn('path_maps', instance)
+        self.assertNotIn('roots', instance)
 
-    def test_guards_keep_their_numbers_and_gain_a_switch(self):
-        self.assertEqual(self.new['guards']['max_deletes_per_run'], {'enabled': True, 'value': 300})
 
-    def test_retention_flags_are_renamed_not_reset(self):
-        self.assertFalse(self.new['retention']['auto_unmonitor'])
-        self.assertTrue(self.new['retention']['auto_monitor'])
+    def test_retention_keeps_what_still_means_something(self):
+        # Unmonitoring what we delete is an invariant now, so its flag is gone; monitoring
+        # missing episodes became a per-series decision.
         self.assertTrue(self.new['retention']['include_specials'])
+        self.assertNotIn('auto_unmonitor', self.new['retention'])
+        self.assertNotIn('auto_monitor', self.new['retention'])
 
     def test_the_separate_specials_monitoring_flag_is_gone(self):
         self.assertNotIn('monitor_specials', self.new['retention'])
@@ -129,8 +129,9 @@ class RealConfiguration(unittest.TestCase):
             self.assertEqual(before['series_id'], after['series_id'])
             self.assertEqual(before['path'], after['path'])
 
-    def test_the_instance_mapping_becomes_a_root(self):
-        self.assertEqual(self.new['instances'][0]['roots'][0]['sonarr_path'], '/tv')
+    def test_the_instance_keeps_only_its_connection(self):
+        self.assertNotIn('roots', self.new['instances'][0])
+        self.assertEqual(self.new['instances'][0]['url'], 'http://sonarr.example:8989')
 
     def test_the_migrated_document_validates(self):
         settings = validate_settings(self.new)

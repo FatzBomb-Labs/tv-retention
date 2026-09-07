@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from core import Rejected, map_path, normalise
+from core import Rejected, normalise
 
 TIMEOUT = 30
 USER_AGENT = 'TV-Delete/1.0 (Unraid plugin)'
@@ -30,10 +30,6 @@ class Sonarr:
         self.name = instance['name']
         self.url = instance['url'].rstrip('/')
         self.key = instance['api_key']
-        # Roots are the storage form; the path mapper wants prefix pairs.
-        self.path_maps = [{'from': root['sonarr_path'], 'to': root['unraid_path']}
-                          for root in instance.get('roots') or []
-                          if root.get('enabled', True) and root.get('unraid_path')]
         self.timeout = timeout
         self.context = None
         if not instance.get('verify_tls', True):
@@ -106,8 +102,7 @@ class Sonarr:
                 'status': entry.get('status') or '',
                 'episode_file_count': int(statistics.get('episodeFileCount') or 0),
                 'size_on_disk': int(statistics.get('sizeOnDisk') or 0),
-                'sonarr_path': normalise(path) if path else '',
-                'path': map_path(path, self.path_maps) if path else '',
+                'path': normalise(path) if path else '',
                 'tags': entry.get('tags') or [],
             })
         results.sort(key=lambda item: item['sort_title'].lower())
@@ -153,9 +148,9 @@ class Sonarr:
                 # it arrives with the episode rather than needing the disk.
                 'date_added': str(added) if added else '',
                 'monitored': bool(entry.get('monitored')),
-                'sonarr_path': normalise(file_info['path']) if has_file else '',
                 # A fileless episode still needs a stable key for the retention pass.
-                'path': map_path(file_info['path'], self.path_maps) if has_file else f'sonarr:episode:{entry.get("id")}',
+                'path': normalise(file_info['path']) if has_file
+                        else f'sonarr:episode:{entry.get("id")}',
                 'size': file_info.get('size') or 0,
             })
         return episodes

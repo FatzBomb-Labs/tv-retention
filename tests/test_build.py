@@ -241,9 +241,6 @@ class Interface(unittest.TestCase):
         # Hiding it on a stale or partial reading would be a promise the cache cannot keep.
         self.assertRegex(self.js, r'plan\.trustworthy && !plan\.actionable')
 
-    def test_delete_moved_into_the_editor(self):
-        self.assertIn('tvd-editor-foot', self.js)
-        self.assertRegex(self.js, r'if \(existing\) \{[\s\S]{0,400}Remove this series')
 
     def test_the_icon_is_a_font_awesome_name(self):
         """A name is not enough: it has to resolve to a glyph.
@@ -344,3 +341,16 @@ class Interface(unittest.TestCase):
         for severity in ('error', 'warning', 'notice'):
             self.assertNotRegex(css, rf'\.tvd-tag\.{severity}\s*\{{')
         self.assertRegex(css, r'\.tvd-sev\.warning\s*\{[^}]*color')
+    def test_delete_lives_in_the_editor_action_row(self):
+        # Bottom left, beside Cancel and Save — not on the card, where it invites a slip.
+        self.assertIn("tvd-dialog-extra", self.js)
+        self.assertRegex(self.js, r"textContent: 'Delete…'")
+        self.assertIn('tvd-dialog-extra', self.html)
+
+    def test_the_card_offers_no_destructive_button(self):
+        import re
+        card = re.search(r"const actions = el\('div', \{ className: 'tvd-rule-actions' \}\);(.*?)"
+                         r"body\.append\(actions\)", self.js, re.S)
+        self.assertIsNotNone(card)
+        for word in ('Remove', 'Delete'):
+            self.assertNotIn(f"textContent: '{word}", card.group(1))

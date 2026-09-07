@@ -30,39 +30,12 @@ KINDS = {
                 'run until it does.',
         'action': 'rematch',
     },
-    'folder-missing': {
-        'severity': ERROR, 'blocking': True, 'scope': 'series',
-        'title': 'Folder is missing',
-        'help': 'Sonarr reports files for this series, but its folder is not on this server. '
-                'Check the root mapping for its instance.',
-        'action': 'open-instance',
-    },
     'path-changed': {
         'severity': WARNING, 'blocking': False, 'scope': 'series',
         'title': 'Sonarr has moved this series',
         'help': 'The series resolves by id, but Sonarr now reports a different folder. '
                 'Accepting stores the new path.',
         'action': 'accept-path',
-    },
-    'monitored-outside-frame': {
-        'severity': WARNING, 'blocking': False, 'scope': 'series',
-        'title': 'Monitored episodes outside the keep window',
-        'help': 'Sonarr may re-download what the next run deletes, which loops. Unmonitoring '
-                'them stops it.',
-        'action': 'unmonitor-out-frame',
-    },
-    'unmonitored-inside-frame': {
-        'severity': WARNING, 'blocking': False, 'scope': 'series',
-        'title': 'Unmonitored episodes inside the keep window',
-        'help': 'Gaps inside the window will not fill while these are unmonitored.',
-        'action': 'monitor-in-frame',
-    },
-    'unknown-files': {
-        'severity': NOTICE, 'blocking': False, 'scope': 'series',
-        'title': 'Files Sonarr does not know about',
-        'help': 'These sit in the series folder but are not in Sonarr, so no rule will ever '
-                'remove them.',
-        'action': '',
     },
     'ended-expired': {
         'severity': NOTICE, 'blocking': False, 'scope': 'series',
@@ -75,13 +48,6 @@ KINDS = {
         'title': 'Sonarr is unreachable',
         'help': 'Scheduled runs are held until it answers, then released automatically.',
         'action': 'test-instance',
-    },
-    'mapping-broken': {
-        'severity': ERROR, 'blocking': True, 'scope': 'system',
-        'title': 'A root folder is not present on this server',
-        'help': 'Every series under that root resolves to a path that does not exist. Fix the '
-                'root mapping before running anything.',
-        'action': 'open-instance',
     },
     'no-recycle-bin': {
         'severity': WARNING, 'blocking': False, 'scope': 'system',

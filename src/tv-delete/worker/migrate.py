@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 3
+SETTINGS_VERSION = 4
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -68,8 +68,39 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v2(document))
     if version < 3:
         document.update(_to_v3(document))
+    if version < 4:
+        document.update(_to_v4(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v4(document: dict) -> dict:
+    """Sonarr took over the filesystem, and most of the settings went with it.
+
+    Path mappings, the sidecar list, empty-folder cleanup and the plugin's own recycle
+    folder all described work Sonarr already does. The deletion guards existed mainly to
+    contain a bad path mapping, which can no longer happen. Stored series paths are left
+    as they are: the next match run replaces them with Sonarr's own, because it resolves
+    by series id first.
+    """
+    changes = {}
+    retention = dict(document.get('retention') or {})
+    guards = document.get('guards') or {}
+    fallback = guards.get('allow_import_date_fallback')
+    retention['allow_estimated_dates'] = (fallback.get('enabled', True)
+                                          if isinstance(fallback, dict) else True)
+    # Monitoring episodes that have no file starts downloads, so it becomes a per-series
+    # decision rather than a global default, and nobody is opted in by an upgrade.
+    was_auto_monitor = bool(retention.pop('auto_monitor', False))
+    retention.pop('auto_unmonitor', None)
+    changes['retention'] = retention
+    changes['rules'] = [dict(rule, monitor_missing=bool(rule.get('auto_monitor', was_auto_monitor) is True))
+                        for rule in document.get('rules') or []]
+    changes['instances'] = [{key: value for key, value in instance.items() if key != 'roots'}
+                            for instance in document.get('instances') or []]
+    for gone in ('guards', 'sidecars', 'delete_empty_dirs', 'recycle'):
+        document.pop(gone, None)
+    return changes
 
 
 def _to_v3(document: dict) -> dict:

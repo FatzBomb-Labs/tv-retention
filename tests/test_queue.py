@@ -53,28 +53,29 @@ class Fixes(unittest.TestCase):
 class Overrides(unittest.TestCase):
     """Three global rules a series may disagree with."""
 
-    def test_each_override_is_three_state(self):
-        settings = validate_settings(base(include_specials='yes', auto_unmonitor='no', auto_monitor=''))
-        rule = settings['rules'][0]
+    def test_specials_override_is_three_state(self):
+        rule = validate_settings(base(include_specials='yes'))['rules'][0]
         self.assertIs(rule['include_specials'], True)
-        self.assertIs(rule['auto_unmonitor'], False)
-        self.assertIsNone(rule['auto_monitor'])
+        self.assertIs(validate_settings(base(include_specials='no'))['rules'][0]['include_specials'], False)
+        self.assertIsNone(validate_settings(base())['rules'][0]['include_specials'])
 
-    def test_unset_means_inherit(self):
-        rule = validate_settings(base())['rules'][0]
-        for name in ('include_specials', 'auto_unmonitor', 'auto_monitor'):
-            self.assertIsNone(rule[name])
+    def test_monitoring_missing_episodes_is_off_unless_chosen(self):
+        # Monitoring an episode with no file starts a download, so it is never a default.
+        self.assertFalse(validate_settings(base())['rules'][0]['monitor_missing'])
+        self.assertTrue(validate_settings(base(monitor_missing=True))['rules'][0]['monitor_missing'])
 
     def test_nonsense_is_refused(self):
         with self.assertRaises(Rejected):
-            validate_settings(base(auto_monitor='sometimes'))
+            validate_settings(base(include_specials='sometimes'))
 
 
 class SafetyMoved(unittest.TestCase):
-    def test_the_import_date_fallback_is_a_guard_not_a_global_rule(self):
+    def test_the_safety_section_is_gone_with_the_filesystem(self):
+        # Sonarr owns the filesystem, so the guards that protected against a bad path
+        # mapping have nothing left to protect against.
         settings = validate_settings({})
-        self.assertIn('allow_import_date_fallback', settings['guards'])
-        self.assertNotIn('allow_mtime_fallback', settings['retention'])
+        self.assertNotIn('guards', settings)
+        self.assertTrue(settings['retention']['allow_estimated_dates'])
 
     def test_searching_after_monitoring_is_off_by_default(self):
         # Monitoring many episodes at once means downloading many at once.

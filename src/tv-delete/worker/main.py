@@ -26,9 +26,8 @@ sys.path.insert(0, str(HERE))
 
 from core import (CACHE_SCHEMA, DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
                   canonical_json, classify_monitoring, describe_lifecycle, describe_selectability,
-                  effective_rule, empty_directories, evaluate, guard_value, interpolate_air_dates,
-                  is_media, new_id, normalise, redact, rule_fingerprint, scan_media,
-                  select_remonitor, sidecars_for, validate_settings)
+                  effective_rule, evaluate, interpolate_air_dates, new_id, normalise, redact,
+                  rule_fingerprint, select_remonitor, validate_settings)
 import alerts
 from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
@@ -263,82 +262,36 @@ def bind_rules(settings: dict, force: bool = False) -> list:
 
 
 def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
-    """Sonarr's episode files for one rule, annotated with on-disk facts.
+    """Sonarr's episode files for one rule.
 
-    Returns the episodes Sonarr knows about that exist on disk, plus the media files
-    found under the folder that Sonarr does not know about. Unknown files are reported
-    and never deleted, because without a Sonarr record there is no air date, no episode
-    number, and no safe way to unmonitor.
+    Everything the retention pass needs — sizes, air dates, import dates, monitoring —
+    arrives with the episodes. Sonarr owns the filesystem; the plugin only asks it what it
+    has and tells it what to remove.
     """
     episodes = client.episodes(rule['series_id'])
     if tmdb and rule.get('tvdb_id'):
         with contextlib.suppress(TMDBError):
             fill_air_dates(episodes, tmdb, rule['tvdb_id'])
-    # Anything still undated is estimated from its neighbours, which is steadier than the
-    # import date: an upgrade re-import moves that, the episodes either side do not.
     interpolate_air_dates(episodes)
-    present, missing = [], []
-    for episode in episodes:
-        path = Path(episode['path'])
-        try:
-            stat = path.stat()
-        except OSError:
-            missing.append(episode)
-            continue
-        episode['mtime'] = stat.st_mtime
-        episode['size'] = episode.get('size') or stat.st_size
-        present.append(episode)
-    known = {normalise(episode['path']) for episode in present}
-    unknown = [entry for entry in scan_media(rule['path']) if entry['path'] not in known]
-    return present, missing, unknown
+    return episodes, [], []
 
 
 # ---------------------------------------------------------------------------
 # Deletion
 # ---------------------------------------------------------------------------
 
-def recycle_file(settings: dict, rule: dict, path: Path) -> str:
-    """Move a file into the plugin recycle folder, mirroring its library path."""
-    root = Path(settings['recycle']['path'])
-    relative = Path(path).relative_to(Path(rule['path']).parent) if str(path).startswith(str(rule['path'])) else Path(path).name
-    target = root / Path(rule.get('series_title') or 'unknown').name / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        target = target.with_name(f'{target.stem}.{int(time.time())}{target.suffix}')
-    shutil.move(str(path), str(target))
-    return str(target)
 
 
-def purge_recycle(settings: dict) -> int:
-    """Delete recycled files past their retention period. Only the plugin's own folder."""
-    recycle = settings.get('recycle') or {}
-    if recycle.get('mode') != 'plugin' or not recycle.get('path'):
-        return 0
-    root = Path(recycle['path'])
-    if not root.is_dir():
-        return 0
-    cutoff = time.time() - int(recycle.get('retention_days', 14)) * 86400
-    removed = 0
-    for base, directories, files in os.walk(root, topdown=False, onerror=lambda error: None):
-        for name in files:
-            path = Path(base) / name
-            try:
-                if path.stat().st_mtime < cutoff:
-                    path.unlink()
-                    removed += 1
-            except OSError:
-                continue
-        with contextlib.suppress(OSError):
-            if Path(base) != root and not any(Path(base).iterdir()):
-                Path(base).rmdir()
-    return removed
 
 
 def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_run: bool) -> dict:
-    """Remove one episode file and its sidecars. Returns what was (or would be) done."""
-    mode = (settings.get('recycle') or {}).get('mode', 'sonarr')
-    sidecar_cfg = settings.get('sidecars') or {}
-    sidecars = sidecars_for(episode['path'], sidecar_cfg.get('extensions')) if sidecar_cfg.get('enabled') else []
+    """Ask Sonarr to remove one episode file.
+
+    Sonarr deletes the file, moves it to its recycle bin if it has one, takes the extra
+    files it imported alongside, and tidies the folder if it is configured to. None of
+    that is the plugin's business, and doing it here would only be a second, worse
+    implementation of it.
+    """
     action = {
         'path': episode['path'],
         'season': episode.get('season'),
@@ -348,8 +301,6 @@ def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_ru
         'air_source': episode.get('air_source'),
         'size': episode.get('size'),
         'reason': episode.get('reason'),
-        'sidecars': sidecars,
-        'method': 'recycle' if mode == 'plugin' else 'sonarr-api',
         'dry_run': dry_run,
         'ok': True,
         'error': '',
@@ -357,20 +308,8 @@ def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_ru
     if dry_run:
         return action
     try:
-        if mode == 'plugin':
-            action['recycled_to'] = recycle_file(settings, rule, Path(episode['path']))
-        else:
-            client.delete_episode_file(episode['file_id'])
-            # Sonarr removes the media file itself; a leftover means the path mapping is wrong.
-            if Path(episode['path']).exists():
-                action['ok'] = False
-                action['error'] = ('Sonarr reported the file deleted but it is still on disk. '
-                                   'Check this instance\'s path mapping.')
-                return action
-        for sidecar in sidecars:
-            with contextlib.suppress(OSError):
-                Path(sidecar).unlink()
-    except (SonarrError, OSError, ValueError) as error:
+        client.delete_episode_file(episode['file_id'])
+    except (SonarrError, ValueError) as error:
         action['ok'] = False
         action['error'] = str(error)
     return action
@@ -473,26 +412,21 @@ def apply_removals(settings: dict, rules, dry_run: bool) -> list:
 def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool) -> dict:
     """Bring a series' monitoring in line with its keep window.
 
-    Broader than unmonitoring what was just deleted, deliberately. An episode outside the
-    window with no file, still monitored, is the create-and-delete loop: Sonarr fetches it,
-    the next run removes it, forever. Reconciling the whole window is what actually ends
-    that, and it is why the corresponding alert can be suppressed when this is on.
+    Unmonitoring everything outside the window is unconditional: an episode out there with
+    no file, still monitored, is the fetch-and-delete loop, and nothing else ends it.
+    Monitoring the gaps inside the window is the opposite — it starts downloads — so it
+    happens only for a series that asked for it.
     """
     result = {'monitored': 0, 'unmonitored': 0, 'searched': 0, 'error': ''}
-    queued = {entry['kind'] for entry in (rule.get('queue') or {}).get('fixes') or []}
-    wants_unmonitor = rule_flag(settings, rule, 'auto_unmonitor', True) or 'unmonitor-out-frame' in queued
-    wants_monitor = rule_flag(settings, rule, 'auto_monitor', False) or 'monitor-in-frame' in queued
     outside = [row['episode_id'] for row in (state.get('out_frame_monitored') or []) if row.get('episode_id')]
     inside = [row['episode_id'] for row in (state.get('in_frame_unmonitored') or []) if row.get('episode_id')]
-    if wants_unmonitor and outside:
-        result['unmonitored'] = len(outside)
-    if wants_monitor and inside:
-        result['monitored'] = len(inside)
+    result['unmonitored'] = len(outside)
+    result['monitored'] = len(inside) if rule.get('monitor_missing') else 0
     if dry_run:
         return result
     try:
         client = client_for(settings, rule['instance_id'])
-        if result['unmonitored']:
+        if outside:
             client.set_monitored(outside, False)
         if result['monitored']:
             client.set_monitored(inside, True)
@@ -520,10 +454,7 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         'deleted': [],
         'kept': 0,
         'protected': 0,
-        'unknown_files': [],
-        'missing_files': 0,
         'freed_bytes': 0,
-        'emptied_dirs': [],
         'unmonitored': 0,
         'unmonitored_frame': 0,
         'monitored': 0,
@@ -544,18 +475,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         episodes, missing, unknown = collect_episodes(settings, rule, client, tmdb)
     except SonarrError as error:
         outcome.update(ok=False, error=str(error))
-        return outcome
-
-    if not Path(rule['path']).is_dir():
-        # Sonarr creates a series folder on its first import. Absent with files expected is
-        # a mapping fault; absent with nothing imported is simply a series with no episodes.
-        if missing:
-            outcome.update(ok=False, error=(
-                f'Sonarr reports {len(missing)} file(s) for this series, but {rule["path"]} '
-                'does not exist on this server. Check this instance\'s path mapping.'))
-        else:
-            outcome['note'] = ('Sonarr has no files for this series yet, so its folder has not '
-                               'been created. Nothing to do.')
         return outcome
 
     # -- put back what a widened rule now covers -------------------------
@@ -595,8 +514,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     outcome['considered'] = decision['considered']
     outcome['kept'] = len(decision['keep'])
     outcome['protected'] = len(decision['protected'])
-    outcome['missing_files'] = len(missing)
-    outcome['unknown_files'] = [entry['path'] for entry in unknown[:50]]
     if decision['blocked']:
         outcome['blocked'] = decision['blocked']
         if ledger_dirty and not dry_run:
@@ -636,12 +553,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         ledger[rule['id']] = entries
         save_ledger(settings, ledger)
 
-    if settings.get('delete_empty_dirs') and (deleted_ids or dry_run):
-        for directory in empty_directories(rule['path']):
-            outcome['emptied_dirs'].append(directory)
-            if not dry_run:
-                with contextlib.suppress(OSError):
-                    Path(directory).rmdir()
     return outcome
 
 
@@ -687,12 +598,12 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         except Rejected as error:
             results.append({'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
                             'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
-                            'considered': 0, 'kept': 0, 'protected': 0, 'unknown_files': [],
-                            'blocked': None, 'freed_bytes': 0, 'emptied_dirs': [], 'unmonitored': 0,
-                            'missing_files': 0, 'remonitored': [], 'preset': '', 'note': ''})
+                            'considered': 0, 'kept': 0, 'protected': 0,
+                            'blocked': None, 'freed_bytes': 0, 'unmonitored': 0,
+                            'remonitored': [], 'preset': '', 'note': ''})
     total = sum(len(result['deleted']) for result in results)
 
-    cap = guard_value(settings, 'max_deletes_per_run')
+    cap = None
     aborted = ''
     if cap is not None and total > cap:
         aborted = (f'Guard stopped this run: {total} files were selected, above the '
@@ -728,16 +639,15 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
             except Rejected as error:
                 executed.append({'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
                                  'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
-                                 'considered': 0, 'kept': 0, 'protected': 0, 'unknown_files': [],
-                                 'blocked': None, 'freed_bytes': 0, 'emptied_dirs': [], 'unmonitored': 0,
-                                 'missing_files': 0, 'remonitored': [], 'preset': '', 'note': ''})
+                                 'considered': 0, 'kept': 0, 'protected': 0,
+                                 'blocked': None, 'freed_bytes': 0, 'unmonitored': 0,
+                                 'remonitored': [], 'preset': '', 'note': ''})
         summary['rules'] = executed
         summary['deleted'] = sum(len([d for d in r['deleted'] if d['ok']]) for r in executed)
         summary['remonitored'] = sum(len(r.get('remonitored') or []) for r in executed)
         summary['freed_bytes'] = sum(r['freed_bytes'] for r in executed)
         summary['errors'] = [r['error'] for r in executed if r.get('error')]
         summary['blocked'] = [r['blocked'] for r in executed if r.get('blocked')]
-        summary['recycle_purged'] = purge_recycle(settings)
         # Deleting unmonitors, so any cached monitoring for those shows is now wrong.
         for result in executed:
             if not result.get('deleted') and not result.get('unmonitored'):
@@ -1049,9 +959,6 @@ def check_one_rule(settings: dict, rule: dict, instance_state: dict = None) -> d
                  'fingerprint': rule_fingerprint(rule, settings)}
     else:
         state = monitoring_for(settings, rule)
-        folder_ok, folder_note = folder_state(settings, rule)
-        state['folder_ok'] = folder_ok
-        state['folder_note'] = folder_note
         state['checked_at'] = now_iso()
         state['fingerprint'] = rule_fingerprint(rule, settings)
     health = load_health(settings)
@@ -1077,62 +984,42 @@ def check_one_rule(settings: dict, rule: dict, instance_state: dict = None) -> d
 # ---------------------------------------------------------------------------
 
 def check_instance(settings: dict, instance: dict, force: bool = True) -> dict:
-    """Reachability, credentials, and whether the path mapping resolves."""
+    """Reachability, credentials, and whether Sonarr has somewhere to put deleted files."""
     result = {'instance_id': instance['id'], 'name': instance['name'], 'ok': True,
-              'error': '', 'checked_at': now_iso(), 'folders_missing': 0}
+              'error': '', 'checked_at': now_iso(), 'reachable': True}
     if not instance.get('enabled', True):
-        return dict(result, ok=True, disabled=True)
+        return dict(result, disabled=True)
     try:
         client = Sonarr(instance)
-        client.status()
+        status = client.status()
         catalogue = catalogue_for(settings, instance['id'], force=force)
     except (SonarrError, Rejected) as error:
-        return dict(result, ok=False, error=str(error))
-    with_files = [entry for entry in catalogue if entry['path'] and entry['episode_file_count'] > 0]
-    missing = [entry for entry in with_files if not Path(entry['path']).is_dir()]
+        return dict(result, ok=False, reachable=False, error=str(error))
+    result['sonarr_version'] = status.get('version')
     result['series_count'] = len(catalogue)
     result['recycle_bin'] = check_recycle_bin(settings, instance)
-    result['folders_missing'] = len(missing)
-    if missing:
-        result.update(ok=False, error=(
-            f'{len(missing)} series folder(s) that Sonarr says hold files are not on this '
-            'server. Check this instance\'s path mapping.'))
     return result
 
 
 def alerts_for_rule(settings: dict, rule: dict, state: dict) -> list:
-    """Turn one rule's checked state into the alerts it warrants."""
-    found = []
+    """Turn one rule's checked state into the alerts it warrants.
+
+    Monitoring drift is deliberately absent. Every run reconciles the whole keep window,
+    so an alert about it would be a warning that the next run silently fixes — and the
+    scheduled-changes line already says what that run will do, which is the useful form of
+    the same information.
+    """
     if rule.get('match_status') != 'matched':
         return [alerts.make('unmatched', rule_id=rule['id'],
                             detail=rule.get('match_error') or 'No Sonarr series resolves to this rule')]
     if not state.get('ok'):
         return [alerts.make('unmatched', rule_id=rule['id'],
                             detail=state.get('error') or state.get('label') or 'Could not read Sonarr')]
-    if state.get('folder_ok') is False:
-        found.append(alerts.make('folder-missing', rule_id=rule['id'],
-                                 detail=state.get('folder_note') or rule['path']))
-    outside = state.get('out_frame_monitored_count', len(state.get('out_frame_monitored') or []))
-    inside = state.get('in_frame_unmonitored_count', len(state.get('in_frame_unmonitored') or []))
-    queued = {entry['kind'] for entry in (rule.get('queue') or {}).get('fixes') or []}
-    # Suppressed when the next run resolves it anyway. That is only true because the run
-    # reconciles the whole keep window rather than just the episodes it deletes.
-    if outside and not rule_flag(settings, rule, 'auto_unmonitor', True) and 'unmonitor-out-frame' not in queued:
-        found.append(alerts.make('monitored-outside-frame', rule_id=rule['id'], count=outside,
-                                 detail=f'{outside} episode(s) outside the keep window are monitored'))
-    if inside and not rule_flag(settings, rule, 'auto_monitor', False) and 'monitor-in-frame' not in queued:
-        found.append(alerts.make('unmonitored-inside-frame', rule_id=rule['id'], count=inside,
-                                 detail=f'{inside} episode(s) inside the keep window are unmonitored'))
-    unknown = state.get('unknown_files') or []
-    if unknown:
-        found.append(alerts.make('unknown-files', rule_id=rule['id'], count=len(unknown),
-                                 detail=f'{len(unknown)} file(s) in this folder are not in Sonarr',
-                                 data={'files': unknown[:20]}))
     if state.get('lifecycle') in ('ended_expired', 'ended_empty'):
-        found.append(alerts.make('ended-expired', rule_id=rule['id'],
-                                 detail='Sonarr reports this series as ended and nothing remains '
-                                        'inside the keep window'))
-    return found
+        return [alerts.make('ended-expired', rule_id=rule['id'],
+                            detail='Sonarr reports this series as ended and nothing remains '
+                                   'inside the keep window')]
+    return []
 
 
 def system_alerts(settings: dict, health: dict) -> list:
@@ -1146,16 +1033,9 @@ def system_alerts(settings: dict, health: dict) -> list:
             found.append(alerts.make('sonarr-unreachable', instance_id=instance['id'],
                                      detail=f'{instance["name"]}: {state.get("error", "no answer")}'))
             continue
-        if not (health.get('instances') or {}).get(instance['id'], {}).get('recycle_bin'):
+        if not state.get('recycle_bin'):
             found.append(alerts.make('no-recycle-bin', instance_id=instance['id'],
                                      detail=f'{instance["name"]} deletes files outright; nothing is recoverable'))
-        missing = [root for root in instance.get('roots', [])
-                   if root.get('enabled') and root.get('unraid_path')
-                   and not Path(root['unraid_path']).is_dir()]
-        for root in missing:
-            found.append(alerts.make('mapping-broken', instance_id=instance['id'],
-                                     detail=f'{instance["name"]}: {root["unraid_path"]} '
-                                            f'(mapped from {root["sonarr_path"]}) is not present'))
     return found
 
 
@@ -1242,19 +1122,6 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
     return health
 
 
-def folder_state(settings: dict, rule: dict) -> tuple:
-    """Whether a rule's folder is a problem, distinguishing "not created yet"."""
-    if Path(rule['path']).is_dir():
-        return True, ''
-    try:
-        catalogue = catalogue_for(settings, rule['instance_id'])
-    except (SonarrError, Rejected):
-        return True, ''
-    series = next((entry for entry in catalogue if entry['series_id'] == rule.get('series_id')), None)
-    if series and series.get('episode_file_count'):
-        return False, (f'Sonarr reports {series["episode_file_count"]} file(s) but {rule["path"]} '
-                       'is not on this server. Check the path mapping.')
-    return True, 'Sonarr has no files for this series yet, so its folder has not been created.'
 
 
 # ---------------------------------------------------------------------------
@@ -1467,81 +1334,32 @@ def action_settings(settings, request):
             'series_match_text': schedules.describe((updated.get('health') or {}).get('series_match') or {})}
 
 
-def instance_roots(instance: dict) -> list:
-    """The enabled root mappings for an instance, longest Sonarr path first."""
-    roots = [root for root in instance.get('roots') or []
-             if root.get('enabled') and root.get('unraid_path')]
-    return sorted(roots, key=lambda root: -len(root['sonarr_path']))
 
 
-def root_for(instance: dict, sonarr_path: str):
-    """The mapping that covers a Sonarr path, or None when nothing does."""
-    candidate = normalise(sonarr_path or '')
-    for root in instance_roots(instance):
-        source = normalise(root['sonarr_path'])
-        if candidate == source or candidate.startswith(source + '/'):
-            return root
-    return None
-
-
-def action_test_instance(settings, request):
-    """Confirm Sonarr answers, and report the root folders it manages.
-
-    Deliberately cheap: it asks Sonarr what it is and what its roots are. It does not walk
-    three thousand series folders to prove a mapping — that is a property of the roots, and
-    checking those is two calls rather than three thousand.
-    """
-    from core import validate_instance
-    existing = {i['id']: i.get('api_key', '') for i in settings.get('instances', [])}
-    instance = validate_instance(dict(request.get('instance') or {}, roots=[]), existing)
-    client = Sonarr(instance)
-    status = client.status()
-    roots = client.root_folders()
-    recycle_bin = ''
-    try:
-        media = client._request('GET', 'config/mediamanagement') or {}
-        recycle_bin = media.get('recycleBin') or ''
-    except SonarrError:
-        recycle_bin = ''
-    return {
-        'sonarr_version': status.get('version'),
-        'series_count': len(client.series()),
-        'root_folders': [normalise(path) for path in roots],
-        'sonarr_recycle_bin': recycle_bin,
-    }
 
 
 def action_series(settings, request):
-    """The series list behind the picker.
-
-    Selectability is answered from Sonarr's own data and the root mappings, without
-    touching the filesystem per series: whether a series has files is in its statistics,
-    and whether its location exists is a property of its root, checked once.
-    """
+    """The series list behind the picker, answered entirely from Sonarr."""
     instance_id = str(request.get('instance_id') or '')
-    instance = next((i for i in settings.get('instances', []) if i['id'] == instance_id), None)
-    if not instance:
-        raise Rejected('That Sonarr instance no longer exists.')
     catalogue = catalogue_for(settings, instance_id, force=bool(request.get('force')))
     used = {r['path'] for r in settings.get('rules', []) if r['id'] != str(request.get('except_rule') or '')}
-    present = {}
-    results = []
-    for entry in catalogue:
-        root = root_for(instance, entry.get('sonarr_path'))
-        if root is None:
-            results.append(dict(entry, exists=False, in_use=False, selectable=False, awaiting=False,
-                                reason='no root mapping covers this series'))
-            continue
-        target = root['unraid_path']
-        if target not in present:
-            present[target] = Path(target).is_dir()
-        in_use = entry['path'] in used
-        # A series with no files has no folder yet whatever the root says, which is what
-        # separates "awaiting its first episode" from "the mapping is wrong".
-        exists = present[target] and entry['episode_file_count'] > 0
-        results.append(dict(entry, exists=exists, in_use=in_use,
-                            **describe_selectability(entry, exists, in_use)))
-    return {'series': results, 'roots_checked': len(present)}
+    return {'series': [dict(entry, in_use=entry['path'] in used,
+                            **describe_selectability(entry, entry['path'] in used))
+                       for entry in catalogue]}
+
+
+def action_test_instance(settings, request):
+    """Confirm Sonarr answers, and report what it will do with deleted files."""
+    from core import validate_instance
+    existing = {i['id']: i.get('api_key', '') for i in settings.get('instances', [])}
+    instance = validate_instance(request.get('instance') or {}, existing)
+    client = Sonarr(instance)
+    status = client.status()
+    return {
+        'sonarr_version': status.get('version'),
+        'series_count': len(client.series()),
+        'recycle_bin': check_recycle_bin(settings, instance),
+    }
 
 
 
@@ -1549,10 +1367,8 @@ def action_series(settings, request):
 def monitoring_for(settings: dict, rule: dict) -> dict:
     """Everything one check knows about a series: monitoring, lifecycle, and the plan.
 
-    The plan is computed here rather than on demand because this pass already has what it
-    needs. It fetches the episodes once, walks the series folder once for sizes and
-    modification times, and the retention evaluation over that is free by comparison. That
-    is what lets "Show scheduled changes" and the Run button answer instantly from cache.
+    Entirely from Sonarr. Sizes, air dates, import dates, monitoring and season numbers all
+    arrive with the episodes, so this touches no filesystem and needs no path mapping.
     """
     base = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'], 'ok': True}
     if rule.get('match_status') != 'matched':
@@ -1566,52 +1382,30 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
     interpolate_air_dates(episodes)
 
-    # One walk of the folder supplies size and modification time for every episode, rather
-    # than one stat call each: a long-running series has thousands of them.
-    on_disk = {entry['path']: entry for entry in scan_media(rule['path'])}
-    present = []
-    for episode in episodes:
-        found = on_disk.get(normalise(episode.get('path') or ''))
-        if episode.get('has_file') and found:
-            episode['mtime'] = found['mtime']
-            episode['size'] = episode.get('size') or found['size']
-            present.append(episode)
-        elif episode.get('has_file'):
-            episode['has_file'] = False
-
     state = dict(base, **classify_monitoring(episodes, active, settings))
     series = next((entry for entry in catalogue_for(settings, rule['instance_id'])
                    if entry['series_id'] == rule['series_id']), None)
     if series:
         state.update(describe_lifecycle(state, series))
 
-    known = {normalise(episode['path']) for episode in present}
-    state['unknown_files'] = [path for path in on_disk if path not in known][:50]
-
+    present = [episode for episode in episodes if episode.get('has_file')]
     decision = evaluate(present, active, settings)
     would_delete = decision['delete']
     deleting = {item.get('episode_id') for item in would_delete}
-    outside = [row for row in (state.get('out_frame_monitored') or [])]
-    if rule_flag(settings, rule, 'auto_unmonitor', True):
-        # Everything outside the window, which necessarily includes what is being deleted.
-        unmonitor_count = len(outside)
-    else:
-        # Only what is being deleted: that part is not optional.
-        unmonitor_count = len([row for row in outside if row.get('episode_id') in deleting])
+    outside = state.get('out_frame_monitored') or []
+    inside = state.get('in_frame_unmonitored') or []
+    # Deleting always unmonitors, and the run also unmonitors everything else outside the
+    # window; both are counted here because both are changes someone would want to see.
+    unmonitor = {row.get('episode_id') for row in outside} | deleting
     state['plan'] = {
         'delete': len(would_delete),
         'delete_bytes': sum(int(item.get('size') or 0) for item in would_delete),
         'blocked': decision['blocked'] or '',
-        'unmonitor': unmonitor_count,
-        'monitor': 0,
+        'unmonitor': len([row for row in outside if row.get('episode_id') in unmonitor]),
+        # Monitoring episodes that have no file starts downloads, so only when asked for.
+        'monitor': len(inside) if rule.get('monitor_missing') else 0,
         'computed_at': now_iso(),
     }
-    if rule_flag(settings, rule, 'auto_monitor', False):
-        entries = (load_ledger(settings).get(rule['id']) or [])
-        present_ids = {episode.get('episode_id') for episode in present}
-        entries = [entry for entry in entries if entry.get('episode_id') not in present_ids]
-        with contextlib.suppress(Exception):
-            state['plan']['monitor'] = len(select_remonitor(present, entries, active, settings))
     return state
 
 
@@ -1674,78 +1468,6 @@ def action_monitor_apply(settings, request):
             'ok_message': f'{len(ids)} episode(s) {verb} in Sonarr.'}
 
 
-def folder_size(path: Path, limit: int = 20000) -> tuple:
-    """Total bytes and media-file count below a folder, bounded so a huge tree cannot stall."""
-    total, files = 0, 0
-    for base, directories, names in os.walk(path, onerror=lambda error: None):
-        for name in names:
-            if not is_media(Path(name)):
-                continue
-            files += 1
-            with contextlib.suppress(OSError):
-                total += (Path(base) / name).stat().st_size
-            if files >= limit:
-                return total, files
-    return total, files
-
-
-def holds_media(path: Path) -> bool:
-    for base, directories, names in os.walk(path, onerror=lambda error: None):
-        if any(is_media(Path(name)) for name in names):
-            return True
-    return False
-
-
-def action_remove_series(settings, request):
-    """Remove a series from TV Delete, and optionally from Sonarr and from disk.
-
-    The caller states each removal separately, because they are different sizes of
-    decision. Preview refuses both of the destructive ones outright: an action that
-    silently did nothing would be worse than one that says it is unavailable.
-    """
-    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
-    if not rule:
-        raise Rejected('That series is no longer in the list.')
-    delete_files = bool(request.get('delete_files'))
-    from_sonarr = bool(request.get('remove_from_sonarr'))
-    # Deliberately outside Preview. Tidying up is normally done with Preview on, and a
-    # removal that silently did nothing would be worse than one that acts as asked. The
-    # typed confirmation is what stands in for the mode here, and the dialog says so.
-    typed = str(request.get('confirm_title') or '').strip()
-    if (delete_files or from_sonarr) and typed.casefold() != str(rule.get('series_title') or '').strip().casefold():
-        raise Rejected('The confirmation did not match. Nothing was removed.')
-    if rule.get('match_status') != 'matched' and from_sonarr:
-        raise Rejected('This series is not matched to a Sonarr record, so it cannot be removed from Sonarr.')
-
-    before = folder_size(Path(rule['path'])) if Path(rule['path']).is_dir() else (0, 0)
-    if from_sonarr:
-        client_for(settings, rule['instance_id']).delete_series(rule['series_id'], delete_files=delete_files)
-        invalidate_catalogue(settings, rule['instance_id'])
-
-    settings['rules'] = [r for r in settings.get('rules', []) if r['id'] != rule['id']]
-    save_settings(settings)
-    health = load_health(settings)
-    health['rules'].pop(rule['id'], None)
-    health['alerts'] = [a for a in (health.get('alerts') or []) if a.get('rule_id') != rule['id']]
-    write_cache(settings, 'health.json', health)
-    ledger = load_ledger(settings)
-    ledger.pop(rule['id'], None)
-    save_ledger(settings, ledger)
-
-    record = {'action': 'remove-series', 'at': now_iso(), 'series_title': rule.get('series_title'),
-              'path': rule['path'], 'series_id': rule.get('series_id'),
-              'removed_from_sonarr': from_sonarr, 'deleted_files': delete_files,
-              'files': before[1] if delete_files else 0, 'bytes': before[0] if delete_files else 0}
-    journal(settings, record)
-    log_line(settings, 'warning',
-             f'removed {rule.get("series_title")} (sonarr={from_sonarr}, files={delete_files})'
-             + (' — overrode Preview' if settings.get('preview') and (from_sonarr or delete_files) else ''))
-    if from_sonarr:
-        notify(settings, 'TV Delete removed a series',
-               f'{rule.get("series_title")} was removed from Sonarr'
-               + (f' with {before[1]} file(s), {before[0] / 1024 ** 3:.1f} GiB' if delete_files else ''),
-               'warning', event='series_removed')
-    return {'removed': record, 'settings': redact(load_settings())}
 
 
 def action_log(settings, request):
@@ -1915,7 +1637,6 @@ ACTIONS = {
     'test-instance': action_test_instance,
     'series': action_series,
     'monitoring': action_monitoring,
-    'remove-series': action_remove_series,
     'monitor-apply': action_monitor_apply,
     'browse': action_browse,
     'match': action_match,

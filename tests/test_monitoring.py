@@ -8,11 +8,7 @@ NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 
 
 def settings():
-    return {'retention': dict(DEFAULTS['retention']),
-            'guards': {'max_deletes_per_run': {'enabled': True, 'value': 1000},
-                       'max_percent_per_rule': {'enabled': True, 'value': 50},
-                       'min_file_age_hours': {'enabled': True, 'value': 0},
-                       'allow_import_date_fallback': {'enabled': True}}}
+    return {'retention': dict(DEFAULTS['retention'])}
 
 
 def episode(number, days_ago, monitored, has_file=True):
@@ -76,10 +72,6 @@ class Classify(unittest.TestCase):
         self.assertEqual(state['total'], 2)
         self.assertEqual([row['has_file'] for row in state['in_frame_unmonitored']], [False])
 
-    def test_the_percentage_guard_does_not_limit_the_view(self):
-        episodes = [episode(index, 400, True) for index in range(1, 11)]
-        state = classify_monitoring(episodes, RULE, settings(), now=NOW)
-        self.assertEqual(len(state['out_frame_monitored']), 10)
 
     def test_an_empty_series_is_reported_not_crashed(self):
         self.assertEqual(classify_monitoring([], RULE, settings(), now=NOW)['status'], 'empty')

@@ -324,3 +324,19 @@
   border-radius: 50%; background: var(--tvd-bad); color: #fff; font-weight: 700; font-size: 13px; line-height: 1; }
 .tvd-queued-lines { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 12px; opacity: .85; }
 .tvd-queued-danger { color: var(--tvd-bad); font-weight: 600; }
+
+/* Scheduled changes as a short list of sentences rather than a row of badges: at most
+   three lines, each naming a verb and a count. */
+.tvd-plan-list { display: grid; gap: 2px; }
+.tvd-plan { font-size: 12px; }
+.tvd-plan.delete { color: var(--tvd-bad); }
+.tvd-plan.unmonitor { color: var(--tvd-warn); }
+.tvd-plan.monitor { color: var(--tvd-good); }
+.tvd-plan-summary { padding: 10px 12px; border: 1px solid var(--tvd-line); border-radius: 6px; }
+.tvd-change-series { padding: 10px 0; border-top: 1px solid var(--tvd-line); display: grid; gap: 4px; }
+
+/* One label, one control, one action — the shape a single setting should have. */
+.tvd-inline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tvd-inline-row input, .tvd-inline-row select { flex: 1 1 240px; }
+.tvd-inline-label { font-weight: 600; flex: 0 0 auto; min-width: 130px; }
+.tvd-instance-line .tvd-spacer { flex: 1; }
