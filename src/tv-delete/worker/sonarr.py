@@ -85,6 +85,9 @@ class Sonarr:
         results = []
         for entry in payload:
             path = entry.get('path') or ''
+            # Sonarr only creates a series folder once it imports something, so the file
+            # count decides whether a missing folder is a problem or simply not needed yet.
+            statistics = entry.get('statistics') or {}
             results.append({
                 'instance_id': self.id,
                 'instance_name': self.name,
@@ -95,6 +98,8 @@ class Sonarr:
                 'tmdb_id': entry.get('tmdbId'),
                 'year': entry.get('year'),
                 'monitored': bool(entry.get('monitored')),
+                'episode_file_count': int(statistics.get('episodeFileCount') or 0),
+                'size_on_disk': int(statistics.get('sizeOnDisk') or 0),
                 'sonarr_path': normalise(path) if path else '',
                 'path': map_path(path, self.path_maps) if path else '',
                 'tags': entry.get('tags') or [],

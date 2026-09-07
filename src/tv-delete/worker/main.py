@@ -420,6 +420,7 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         'preset': '',
         'ok': True,
         'error': '',
+        'note': '',
         'blocked': None,
         'considered': 0,
         'deleted': [],
@@ -435,9 +436,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     if rule.get('match_status') != 'matched':
         outcome.update(ok=False, error=rule.get('match_error') or 'Rule is not matched to a Sonarr series')
         return outcome
-    if not Path(rule['path']).is_dir():
-        outcome.update(ok=False, error=f'Folder does not exist on this server: {rule["path"]}')
-        return outcome
     try:
         active = effective_rule(rule, settings.get('profiles'))
     except Rejected as error:
@@ -449,6 +447,18 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         episodes, missing, unknown = collect_episodes(settings, rule, client, tmdb)
     except SonarrError as error:
         outcome.update(ok=False, error=str(error))
+        return outcome
+
+    if not Path(rule['path']).is_dir():
+        # Sonarr creates a series folder on its first import. Absent with files expected is
+        # a mapping fault; absent with nothing imported is simply a series with no episodes.
+        if missing:
+            outcome.update(ok=False, error=(
+                f'Sonarr reports {len(missing)} file(s) for this series, but {rule["path"]} '
+                'does not exist on this server. Check this instance\'s path mapping.'))
+        else:
+            outcome['note'] = ('Sonarr has no files for this series yet, so its folder has not '
+                               'been created. Nothing to do.')
         return outcome
 
     # -- put back what a widened rule now covers -------------------------
@@ -553,7 +563,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                             'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
                             'considered': 0, 'kept': 0, 'protected': 0, 'unknown_files': [],
                             'blocked': None, 'freed_bytes': 0, 'emptied_dirs': [], 'unmonitored': 0,
-                            'missing_files': 0, 'remonitored': [], 'preset': ''})
+                            'missing_files': 0, 'remonitored': [], 'preset': '', 'note': ''})
     total = sum(len(result['deleted']) for result in results)
 
     cap = int((settings.get('guards') or {}).get('max_deletes_per_run', 200))
@@ -592,7 +602,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                                  'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
                                  'considered': 0, 'kept': 0, 'protected': 0, 'unknown_files': [],
                                  'blocked': None, 'freed_bytes': 0, 'emptied_dirs': [], 'unmonitored': 0,
-                                 'missing_files': 0, 'remonitored': [], 'preset': ''})
+                                 'missing_files': 0, 'remonitored': [], 'preset': '', 'note': ''})
         summary['rules'] = executed
         summary['deleted'] = sum(len([d for d in r['deleted'] if d['ok']]) for r in executed)
         summary['remonitored'] = sum(len(r.get('remonitored') or []) for r in executed)
@@ -651,7 +661,12 @@ def action_settings(settings, request):
 
 
 def action_test_instance(settings, request):
-    """Verify one Sonarr instance: reachable, authorised, and correctly path-mapped."""
+    """Verify one Sonarr instance: reachable, authorised, and correctly path-mapped.
+
+    A series folder that is absent is only evidence of a bad mapping when Sonarr believes
+    it has files there. Sonarr does not create a series folder until it imports something,
+    so an empty series legitimately has no folder and must not be reported as an error.
+    """
     from core import validate_instance
     existing = {i['id']: i.get('api_key', '') for i in settings.get('instances', [])}
     instance = validate_instance(request.get('instance') or {}, existing)
@@ -659,7 +674,11 @@ def action_test_instance(settings, request):
     status = client.status()
     catalogue = client.series()
     mapped = [entry for entry in catalogue if entry['path']]
-    reachable = [entry for entry in mapped if Path(entry['path']).is_dir()]
+    with_files = [entry for entry in mapped if entry['episode_file_count'] > 0]
+    found = [entry for entry in with_files if Path(entry['path']).is_dir()]
+    broken = [entry for entry in with_files if not Path(entry['path']).is_dir()]
+    not_created = [entry for entry in mapped
+                   if entry['episode_file_count'] == 0 and not Path(entry['path']).is_dir()]
     recycle_bin = ''
     try:
         media = client._request('GET', 'config/mediamanagement') or {}
@@ -669,11 +688,15 @@ def action_test_instance(settings, request):
     return {
         'sonarr_version': status.get('version'),
         'series_count': len(catalogue),
-        'folders_found': len(reachable),
-        'folders_missing': [entry['path'] for entry in mapped if not Path(entry['path']).is_dir()][:10],
+        'series_with_files': len(with_files),
+        'folders_found': len(found),
+        'folders_missing': [entry['path'] for entry in broken][:10],
+        'folders_not_created': len(not_created),
+        'mapping_ok': not broken and bool(with_files),
         'sonarr_recycle_bin': recycle_bin,
         'sample': [{'title': entry['title'], 'sonarr_path': entry['sonarr_path'], 'path': entry['path'],
-                    'exists': Path(entry['path']).is_dir()} for entry in mapped[:5]],
+                    'files': entry['episode_file_count'],
+                    'exists': Path(entry['path']).is_dir()} for entry in (broken + with_files)[:5]],
     }
 
 
@@ -742,7 +765,8 @@ def action_series(settings, request):
     client = client_for(settings, str(request.get('instance_id') or ''))
     catalogue = client.series()
     used = {r['path'] for r in settings.get('rules', [])}
-    return {'series': [dict(entry, exists=Path(entry['path']).is_dir() if entry['path'] else False,
+    return {'series': [dict(entry,
+                            exists=Path(entry['path']).is_dir() if entry['path'] else False,
                             in_use=entry['path'] in used) for entry in catalogue]}
 
 

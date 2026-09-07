@@ -168,9 +168,11 @@ running container that publishes the port in the instance URL, and pairs the two
 server that turns Sonarr's `/tv/Series`, `/tv/Kids`, `/tv/News & Talk` and `/tv/Reality`
 into the single mapping `/tv` → `/mnt/user/media/TV`, and confirms the folder exists.
 
-Getting this wrong is the most common cause of trouble, so **Test connection** counts how
-many of Sonarr's series folders actually exist on this server and lists the ones that do
-not.
+Getting this wrong is the most common cause of trouble, so **Test connection** checks the
+series folders against the mapping. It only counts a folder as missing when Sonarr says it
+holds files: Sonarr does not create a series folder until it first imports something, so a
+series with no episodes legitimately has no folder and is reported separately rather than
+as a mapping error. A run treats the same case as nothing to do, not as a failure.
 
 Multiple instances are supported — one for series, one for anime, and so on. Each rule
 belongs to one instance.
@@ -260,7 +262,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 108 tests
+python3 -m unittest discover -s tests -v   # 111 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

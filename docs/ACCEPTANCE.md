@@ -8,6 +8,8 @@ read-only or reversible.
 - [ ] Plugins → Install Plugin → path to `install/tv-delete.plg`. Installation reports
       the SHA256 check passing.
 - [ ] **Tools → TV Delete** loads, shows the version, and reports *Dry run is on*.
+- [ ] The Plugins page row shows the **TV Delete** description and a trash icon. The Name
+      column reads `tv-delete`, which is Unraid's plugin directory identifier, not a label.
 - [ ] `ls /boot/config/plugins/tv-delete/` shows the package; there is no
       `schedule.cron` yet.
 
@@ -15,7 +17,8 @@ read-only or reversible.
 
 - [ ] Add `Sonarr-Series` (`http://<server>:8989`). Press **Detect roots** and confirm it
       fills in `/tv` → `/mnt/user/media/TV`. **Test connection** then reports the Sonarr
-      version and finds every series folder.
+      version and finds every series folder that holds files. Series with no episodes yet
+      are listed separately as "not created", which is not an error.
 - [ ] Add `Sonarr-Anime` (port 8990) with the same mapping, and test it.
 - [ ] Note whether either Sonarr has a recycle bin configured — the test reports it. If
       not, deletions through Sonarr are permanent, so consider the plugin's own recycle

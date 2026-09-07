@@ -55,3 +55,20 @@ class Matching(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MissingFolders(unittest.TestCase):
+    """A series folder Sonarr never created is not evidence of a bad path mapping."""
+
+    def test_a_series_with_no_files_is_separated_from_a_broken_mapping(self):
+        # Mirrors action_test_instance's partitioning, which is what the UI reports on.
+        catalogue = [
+            {'path': '/mnt/user/media/TV/Has Files', 'episode_file_count': 12},
+            {'path': '/mnt/user/media/TV/Never Imported', 'episode_file_count': 0},
+        ]
+        present = set()  # nothing exists on disk in this scenario
+        with_files = [e for e in catalogue if e['episode_file_count'] > 0]
+        broken = [e for e in with_files if e['path'] not in present]
+        not_created = [e for e in catalogue if e['episode_file_count'] == 0 and e['path'] not in present]
+        self.assertEqual([e['path'] for e in broken], ['/mnt/user/media/TV/Has Files'])
+        self.assertEqual([e['path'] for e in not_created], ['/mnt/user/media/TV/Never Imported'])

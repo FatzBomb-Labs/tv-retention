@@ -106,3 +106,16 @@ class Interface(unittest.TestCase):
 
     def test_a_failed_start_clears_the_overlay(self):
         self.assertRegex(self.js, r"refresh\(\)\.catch")
+
+    def test_the_package_ships_a_readme_for_the_plugins_page(self):
+        # Unraid renders plugins/<name>/README.md as the description on the Plugins page,
+        # falling back to the bare slug when it is absent.
+        with tarfile.open(ROOT / 'dist' / f'tv-delete-{(ROOT / "VERSION").read_text().strip()}-noarch-1.txz') as archive:
+            self.assertIn('usr/local/emhttp/plugins/tv-delete/README.md', archive.getnames())
+        readme = (ROOT / 'src' / 'tv-delete' / 'README.md').read_text()
+        self.assertTrue(readme.lstrip().startswith('**TV Delete**'), 'the description must lead with the display name')
+
+    def test_the_manifest_declares_an_icon(self):
+        import xml.etree.ElementTree as ElementTree
+        root = ElementTree.parse(ROOT / 'install' / 'tv-delete.plg').getroot()
+        self.assertTrue(root.get('icon'))

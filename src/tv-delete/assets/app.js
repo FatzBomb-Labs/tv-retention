@@ -647,22 +647,30 @@
 
   function showInstanceTest(instance, data) {
     dialog(`${instance.name}: connection test`, (body) => {
-      body.append(el('p', { textContent: `Sonarr ${data.sonarr_version} answered, managing ${data.series_count} series.` }));
-      body.append(el('p', { textContent: `${data.folders_found} of ${data.series_count} series folders were found on this server.` }));
-      if (data.folders_missing.length) {
-        body.append(el('p', { className: 'tvd-error', textContent: 'These mapped folders do not exist here — the path mapping is probably wrong:' }));
-        data.folders_missing.forEach((path) => body.append(el('div', { className: 'tvd-mono', textContent: path })));
+      body.append(el('p', { textContent: `Sonarr ${data.sonarr_version} answered, managing ${data.series_count} series, `
+        + `${data.series_with_files} of which have files.` }));
+      body.append(el('p', {
+        className: data.folders_missing.length ? 'tvd-error' : '',
+        textContent: data.folders_missing.length
+          ? `${data.folders_missing.length} series folder(s) that Sonarr says hold files are not present here. The path mapping is probably wrong:`
+          : `All ${data.folders_found} series folders that hold files were found on this server. The path mapping is correct.`,
+      }));
+      data.folders_missing.forEach((path) => body.append(el('div', { className: 'tvd-mono', textContent: path })));
+      if (data.folders_not_created) {
+        // Not a fault: Sonarr only creates a series folder when it first imports something.
+        body.append(el('p', { textContent: `${data.folders_not_created} series have no files yet, so Sonarr has `
+          + 'not created their folders. That is normal and is not a mapping problem.' }));
       }
       body.append(el('p', { textContent: data.sonarr_recycle_bin
         ? `Sonarr's recycle bin: ${data.sonarr_recycle_bin}`
         : 'Sonarr has no recycle bin configured, so deletions through Sonarr are permanent.' }));
       const table = el('table', { className: 'tvd-table' });
-      table.append(el('thead', { innerHTML: '<tr><th>Series</th><th>Sonarr path</th><th>Unraid path</th><th>Found</th></tr>' }));
+      table.append(el('thead', { innerHTML: '<tr><th>Series</th><th>Sonarr path</th><th>Unraid path</th><th>Files</th><th>Found</th></tr>' }));
       const tbody = el('tbody');
       (data.sample || []).forEach((row) => {
         const tr = el('tr');
-        [row.title, row.sonarr_path, row.path, row.exists ? 'yes' : 'no'].forEach((value, index) => {
-          tr.append(el('td', { className: index ? 'tvd-mono' : '', textContent: String(value) }));
+        [row.title, row.sonarr_path, row.path, row.files, row.exists ? 'yes' : 'no'].forEach((value, index) => {
+          tr.append(el('td', { className: index === 1 || index === 2 ? 'tvd-mono' : '', textContent: String(value) }));
         });
         tbody.append(tr);
       });
@@ -730,7 +738,10 @@
         event.preventDefault();
         guarded('', async () => {
           const data = await api('test-instance', { instance: draftInstance() }, 'Contacting Sonarr…');
-          notice(`Sonarr ${data.sonarr_version}: ${data.series_count} series, ${data.folders_found} folders found on this server.`, 'ok');
+          notice(data.folders_missing.length
+            ? `Sonarr ${data.sonarr_version}: ${data.folders_missing.length} folder(s) with files are missing here — check the mapping.`
+            : `Sonarr ${data.sonarr_version}: ${data.series_count} series, all ${data.folders_found} folders with files found on this server.`,
+            data.folders_missing.length ? 'bad' : 'ok');
         });
       });
 
@@ -869,6 +880,7 @@
           el('span', { className: 'tvd-chip', textContent: `${rule.protected} protected` }),
         ]));
         if (rule.preset) card.append(el('small', { textContent: `Retention preset: ${rule.preset}` }));
+        if (rule.note) card.append(el('small', { textContent: rule.note }));
         if (rule.error) card.append(el('div', { className: 'tvd-error', textContent: rule.error }));
         if ((rule.remonitored || []).length) {
           card.append(el('p', { textContent: `${rule.remonitored.length} previously removed episode(s) ${result.dry_run ? 'would be' : 'were'} re-monitored because this rule now covers them again:` }));

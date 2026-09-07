@@ -74,8 +74,11 @@ def build_package() -> str:
 
 
 def build_manifest(checksum: str) -> Path:
+    # The name is an identifier, not a label: Unraid uses it as the plugin directory when
+    # it looks up the icon and the README that the Plugins page shows as the description.
     plugin = ET.Element('PLUGIN', dict(name=NAME, author='FatzServer', version=VERSION,
-                                       launch='Tools/TVDelete', min='7.0.0'))
+                                       launch='Tools/TVDelete', icon='icon-trash',
+                                       category='stable', min='7.0.0'))
     ET.SubElement(plugin, 'CHANGES').text = CHANGES
 
     payload = ET.SubElement(plugin, 'FILE', Name=f'{BOOT}/{PACKAGE}', Type='base64')
