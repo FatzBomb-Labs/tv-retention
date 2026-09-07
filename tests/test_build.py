@@ -119,3 +119,10 @@ class Interface(unittest.TestCase):
         import xml.etree.ElementTree as ElementTree
         root = ElementTree.parse(ROOT / 'install' / 'tv-delete.plg').getroot()
         self.assertTrue(root.get('icon'))
+
+    def test_the_picker_refuses_unselectable_series(self):
+        self.assertIn('!entry.selectable', self.js)
+        self.assertIn('cannot be given a rule', self.js)
+
+    def test_a_typed_folder_is_checked_before_saving(self):
+        self.assertRegex(self.js, r"await api\('browse'.*Checking the folder")

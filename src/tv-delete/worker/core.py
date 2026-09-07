@@ -786,3 +786,28 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
         'in_frame_unmonitored': summarise(in_frame_unmonitored),
         'out_frame_monitored': summarise(out_frame_monitored),
     }
+
+
+def describe_selectability(entry, exists: bool, in_use: bool) -> dict:
+    """Whether a Sonarr series can be given a rule, and why not when it cannot.
+
+    A rule exists to delete files from a folder, so a series with no folder on this server
+    has nothing to act on and must not be selectable. The three ways that happens are very
+    different problems, and the reason has to say which: Sonarr holding no folder at all,
+    Sonarr never having imported anything, or a folder that should be here and is not —
+    the last being a path-mapping fault worth fixing before anything else.
+
+    This only governs choosing a series. An existing rule whose folder disappears later is
+    never blocked by it; a run reports that case and carries on.
+    """
+    if not entry.get('path'):
+        return {'selectable': False, 'reason': 'no folder configured in Sonarr'}
+    if in_use:
+        return {'selectable': False, 'reason': 'already used by another rule'}
+    if exists:
+        return {'selectable': True, 'reason': ''}
+    if entry.get('episode_file_count'):
+        return {'selectable': False,
+                'reason': f'Sonarr reports {entry["episode_file_count"]} file(s) but the folder is '
+                          'not on this server — check the path mapping'}
+    return {'selectable': False, 'reason': 'no episodes imported yet, so Sonarr has not created its folder'}

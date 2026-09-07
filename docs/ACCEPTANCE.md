@@ -38,6 +38,8 @@ read-only or reversible.
 - [ ] Add one show by browsing to its folder. It also saves as **matched**.
 - [ ] Point a rule at a folder Sonarr does not manage. It saves as **not matched**, in
       red, with the reason shown — and a preview skips it.
+- [ ] Open the series picker and confirm series with no folder on this server are greyed
+      out with the reason, and that a show already covered by a rule cannot be picked again.
 - [ ] Recreate the rules the old shell script had, with the same day counts.
 
 ## 4. Preview

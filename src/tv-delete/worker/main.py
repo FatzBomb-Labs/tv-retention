@@ -27,7 +27,7 @@ sys.path.insert(0, str(HERE))
 from core import (DEFAULTS, VERSION, Rejected, atomic_json, derive_mappings,
                   effective_rule, empty_directories, evaluate, new_id, normalise, redact,
                   scan_media, select_remonitor, sidecars_for, validate_cron, validate_settings,
-                  classify_monitoring)
+                  classify_monitoring, describe_selectability)
 from sonarr import Sonarr, SonarrError, match_rule
 from tmdb import TMDB, TMDBError, fill_air_dates
 
@@ -762,12 +762,17 @@ def action_detect_mappings(settings, request):
 
 
 def action_series(settings, request):
+    """The series list behind the picker, each marked selectable or explained."""
     client = client_for(settings, str(request.get('instance_id') or ''))
     catalogue = client.series()
-    used = {r['path'] for r in settings.get('rules', [])}
-    return {'series': [dict(entry,
-                            exists=Path(entry['path']).is_dir() if entry['path'] else False,
-                            in_use=entry['path'] in used) for entry in catalogue]}
+    used = {r['path']: r for r in settings.get('rules', []) if r['id'] != str(request.get('except_rule') or '')}
+    results = []
+    for entry in catalogue:
+        exists = Path(entry['path']).is_dir() if entry['path'] else False
+        in_use = entry['path'] in used
+        results.append(dict(entry, exists=exists, in_use=in_use,
+                            **describe_selectability(entry, exists, in_use)))
+    return {'series': results}
 
 
 def monitoring_for(settings: dict, rule: dict) -> dict:

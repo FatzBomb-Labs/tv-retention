@@ -96,6 +96,21 @@ such an episode; *any* deletes it on the strength of the other conditions.
 Example: `keep_days = 180`, `keep_episodes = 20`, combine `earliest` keeps everything
 from the last 180 days **and** the 20 newest episodes, whichever is more generous.
 
+### Which series can be given a rule
+
+A rule exists to delete files from a folder, so the picker only allows series that have
+one on this server. The rest are listed with the reason, greyed out:
+
+| Reason | Meaning |
+|---|---|
+| *no episodes imported yet, so Sonarr has not created its folder* | Normal. Sonarr creates a series folder on first import. |
+| *Sonarr reports N file(s) but the folder is not on this server* | A path-mapping fault. Fix the mapping first. |
+| *already used by another rule* | One rule per folder. |
+| *no folder configured in Sonarr* | Sonarr itself has no path for the series. |
+
+This governs choosing a series only. An existing rule whose folder later disappears is
+never blocked: the run reports it and carries on.
+
 ## Retention presets
 
 Rather than typing the same numbers onto every show, create a named preset — *Keep 30
@@ -262,7 +277,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 111 tests
+python3 -m unittest discover -s tests -v   # 119 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

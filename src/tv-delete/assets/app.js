@@ -443,12 +443,15 @@
   $('tvd-add-preset').addEventListener('click', () => editPreset(null));
 
   // -- rule editor -------------------------------------------------------
-  async function seriesFor(instanceId) {
-    if (!seriesCache[instanceId]) {
-      const data = await api('series', { instance_id: instanceId }, 'Loading series from Sonarr…');
-      seriesCache[instanceId] = data.series;
+  async function seriesFor(instanceId, exceptRule) {
+    // Keyed by the rule being edited too: a rule's own folder must not count as "in use".
+    const key = instanceId + ':' + (exceptRule || '');
+    if (!seriesCache[key]) {
+      const data = await api('series', { instance_id: instanceId, except_rule: exceptRule || '' },
+                             'Loading series from Sonarr…');
+      seriesCache[key] = data.series;
     }
-    return seriesCache[instanceId];
+    return seriesCache[key];
   }
 
   function browseFolder(startPath, onPick) {
@@ -504,7 +507,9 @@
       modeSelect.append(el('option', { value: 'folder', textContent: 'Pick a folder, then match it to Sonarr' }));
 
       const seriesSelect = el('select');
+      const seriesHint = el('small', { textContent: '' });
       const seriesField = field('Sonarr series', seriesSelect, 'Only series this Sonarr instance manages.');
+      seriesField.append(seriesHint);
       const pathInput = el('input', { type: 'text', value: rule.path, spellcheck: false, placeholder: '/mnt/user/media/TV/…' });
       const browseButton = el('button', { type: 'button', textContent: 'Browse…' });
       browseButton.addEventListener('click', (event) => {
@@ -515,16 +520,24 @@
       const pathField = el('div', {}, [pathRow, el('small', { textContent: 'The folder must belong to a Sonarr series on the selected instance, or the rule is saved unmatched and skipped.' })]);
 
       const loadSeries = () => guarded('', async () => {
-        const catalogue = await seriesFor(instanceSelect.value);
+        const catalogue = await seriesFor(instanceSelect.value, rule.id);
         seriesSelect.replaceChildren(el('option', { value: '', textContent: '— choose a series —' }));
+        let blocked = 0;
         catalogue.forEach((entry) => {
-          const suffix = entry.exists ? '' : '  (folder not found on this server)';
+          // A series with no folder here has nothing for a rule to act on, so it is shown
+          // with the reason and cannot be picked.
+          if (!entry.selectable) blocked += 1;
           seriesSelect.append(el('option', {
             value: String(entry.series_id),
-            textContent: `${entry.title}${entry.year ? ` (${entry.year})` : ''}${suffix}`,
+            disabled: !entry.selectable,
+            textContent: `${entry.title}${entry.year ? ` (${entry.year})` : ''}`
+                         + (entry.selectable ? '' : ` — ${entry.reason}`),
           }));
         });
         if (rule.series_id) seriesSelect.value = String(rule.series_id);
+        seriesHint.textContent = blocked
+          ? `${catalogue.length - blocked} of ${catalogue.length} series can be given a rule; the rest are shown with the reason they cannot.`
+          : `${catalogue.length} series available.`;
       });
 
       const applyMode = () => {
@@ -577,14 +590,17 @@
         unmonitor: context.unmonitor.input.checked,
       };
       if (context.modeSelect.value === 'series') {
-        const catalogue = await seriesFor(context.instanceSelect.value);
+        const catalogue = await seriesFor(context.instanceSelect.value, rule.id);
         const chosen = catalogue.find((entry) => String(entry.series_id) === context.seriesSelect.value);
         if (!chosen) throw new Error('Choose a series from the list.');
-        if (!chosen.path) throw new Error(`${chosen.title} has no folder in Sonarr.`);
+        if (!chosen.selectable) throw new Error(`${chosen.title} cannot be given a rule: ${chosen.reason}.`);
         Object.assign(draft, { series_id: chosen.series_id, series_title: chosen.title, tvdb_id: chosen.tvdb_id, path: chosen.path });
       } else {
-        if (!context.pathInput.value.trim()) throw new Error('Choose a folder.');
-        Object.assign(draft, { series_id: null, series_title: '', tvdb_id: null, path: context.pathInput.value.trim() });
+        const typed = context.pathInput.value.trim();
+        if (!typed) throw new Error('Choose a folder.');
+        // Browsing can only reach real folders, but the box can also be typed into.
+        await api('browse', { path: typed }, 'Checking the folder…');
+        Object.assign(draft, { series_id: null, series_title: '', tvdb_id: null, path: typed });
       }
       settings.rules = (settings.rules || []).filter((other) => other.id !== rule.id).concat([draft]);
       await saveSettings(null);
