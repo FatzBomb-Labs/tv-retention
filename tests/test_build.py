@@ -276,3 +276,20 @@ class Interface(unittest.TestCase):
         self.assertIn('function seriesAlertCard', self.js)
         self.assertIn('ALERT_TAG', self.js)
         self.assertNotIn('function alertRow', self.js)
+
+    def test_no_decorative_glyph_is_used_as_a_label(self):
+        """A glyph renders at whatever size and baseline the platform picks.
+
+        A bare "!" in a badge and an emoji before every folder name were sized by the font
+        rather than by the rule meant to shape them, which is what made those rows look
+        wrong. Words, or a count, behave predictably. The "?" hint is exempt: it is a
+        control with its own size, radius and font-size written under #tv-delete.
+        """
+        for glyph in ('📁', '⬑', '✓', '✗', '▾', '★', '⚠'):
+            self.assertNotIn(glyph, self.js, f'{glyph} renders unpredictably; use a word')
+        self.assertNotRegex(self.js, r"textContent: '!'", 'a bare "!" badge; use a count')
+        self.assertNotRegex(self.js, r"textContent: '…'", 'a lone ellipsis label; name the action')
+
+    def test_system_alerts_are_grouped_like_series_ones(self):
+        self.assertRegex(self.js, r'function systemAlertCard\(instanceName, list\)')
+        self.assertIn('byInstance', self.js)

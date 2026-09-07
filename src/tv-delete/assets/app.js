@@ -268,12 +268,12 @@
         crumb.textContent = data.path;
         list.replaceChildren();
         if (data.parent) {
-          const up = el('button', { type: 'button', textContent: '⬑ up one level' });
+          const up = el('button', { type: 'button', textContent: 'Up one level' });
           up.addEventListener('click', (event) => { event.preventDefault(); load(data.parent); });
           list.append(up);
         }
         data.entries.forEach((entry) => {
-          const button = el('button', { type: 'button', textContent: `📁 ${entry.name}` });
+          const button = el('button', { type: 'button', textContent: entry.name, className: 'tvd-folder' });
           button.addEventListener('click', (event) => { event.preventDefault(); load(entry.path); });
           list.append(button);
         });
@@ -757,14 +757,14 @@
     return card;
   }
 
-  function systemAlertCard(alert) {
-    const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
-    const card = el('div', { className: `tvd-alert-card ${alert.severity}` });
+  function systemAlertCard(instanceName, list) {
+    const severity = worstSeverity(list);
+    const card = el('div', { className: `tvd-alert-card ${severity}` });
     card.append(el('div', { className: 'tvd-alert-card-head' }, [
-      el('span', { className: `tvd-dot-badge ${alert.severity}`, textContent: '!' }),
-      el('span', { className: 'tvd-rule-title', textContent: instance ? instance.name : 'TV Delete' }),
+      el('span', { className: `tvd-dot-badge ${severity}`, textContent: String(list.length) }),
+      el('span', { className: 'tvd-rule-title', textContent: instanceName }),
     ]));
-    card.append(alertItem(alert));
+    list.forEach((alert) => card.append(alertItem(alert)));
     return card;
   }
 
@@ -815,7 +815,14 @@
     systemBox.replaceChildren();
     const system = systemAlerts.filter(matches);
     $('tvd-alerts-system-empty').hidden = system.length > 0;
-    system.forEach((alert) => systemBox.append(systemAlertCard(alert)));
+    // Grouped the same way series are: one card per thing, however many problems it has.
+    const byInstance = new Map();
+    system.forEach((alert) => {
+      const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
+      const name = instance ? instance.name : 'TV Delete';
+      byInstance.set(name, (byInstance.get(name) || []).concat([alert]));
+    });
+    byInstance.forEach((list, name) => systemBox.append(systemAlertCard(name, list)));
 
     const seriesBox = $('tvd-alerts-series');
     seriesBox.replaceChildren();
@@ -1271,7 +1278,7 @@
           const stored = (instance.roots || []).find((root) => root.sonarr_path === sonarrPath) || {};
           const unraid = el('input', { type: 'text', value: stored.unraid_path || '',
                                        spellcheck: false, placeholder: '/mnt/user/media/TV' });
-          const browse = el('button', { type: 'button', textContent: '…', title: 'Browse' });
+          const browse = el('button', { type: 'button', className: 'tvd-small', textContent: 'Browse' });
           browse.addEventListener('click', (event) => {
             event.preventDefault();
             browseFolder(unraid.value || '/mnt/user', (picked) => { unraid.value = picked; });
@@ -1331,7 +1338,7 @@
           const data = await api('test-instance', { instance: draft }, 'Contacting Sonarr…');
           verified = true;
           sonarrRoots = data.root_folders || [];
-          testResult.textContent = `✓ Sonarr ${data.sonarr_version}, ${data.series_count} series`;
+          testResult.textContent = `Connected — Sonarr ${data.sonarr_version}, ${data.series_count} series`;
           testResult.className = 'tvd-result ok';
           drawRoots();
           applyGate();
@@ -1506,10 +1513,10 @@
     const result = $('tvd-tmdb-result');
     try {
       await api('test-tmdb', { tmdb: { api_key: $('tvd-tmdb-key').value } }, 'Contacting TMDB…');
-      result.textContent = '✓ accepted';
+      result.textContent = 'Key accepted';
       result.className = 'tvd-result ok';
     } catch (error) {
-      result.textContent = '✗ rejected';
+      result.textContent = 'Key rejected';
       result.className = 'tvd-result bad';
       throw error;
     }

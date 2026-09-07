@@ -254,3 +254,11 @@
 .tvd-notify-row { padding: 4px 0; }
 .tvd-danger-box { border: 1px solid var(--tvd-line); border-left: 3px solid var(--tvd-bad);
   border-radius: 6px; padding: 10px 12px; }
+
+/* Folder rows in the picker: a plain list of names, aligned, with no glyph in front. An
+   emoji renders at whatever size and baseline the platform chooses, which is why the
+   symbols that used to sit in these labels are gone. */
+#tv-delete button.tvd-folder { text-align: left; border-radius: 4px; }
+#tv-delete .tvd-result { font-size: 12px; opacity: .8; }
+#tv-delete .tvd-result.ok { color: var(--tvd-good); }
+#tv-delete .tvd-result.bad { color: var(--tvd-bad); }
