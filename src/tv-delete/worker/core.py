@@ -50,6 +50,9 @@ DEFAULTS = {
         'unmonitor_deleted': True,
         # Off by default: re-monitoring an episode invites Sonarr to download it again.
         'remonitor_widened': False,
+        # Specials sit outside the keep frame's logic, so they are left out of the
+        # monitoring comparison unless asked for.
+        'monitor_specials': False,
     },
     'sidecars': {'enabled': True, 'extensions': list(SIDECAR_EXTENSIONS)},
     'delete_empty_dirs': True,
@@ -418,6 +421,7 @@ def validate_settings(raw, previous=None) -> dict:
             'allow_mtime_fallback': _flag(retention_raw.get('allow_mtime_fallback', True)),
             'unmonitor_deleted': _flag(retention_raw.get('unmonitor_deleted', True)),
             'remonitor_widened': _flag(retention_raw.get('remonitor_widened', False)),
+            'monitor_specials': _flag(retention_raw.get('monitor_specials', False)),
         },
         'sidecars': {'enabled': _flag(sidecars_raw.get('enabled', True)), 'extensions': sorted(set(extensions))},
         'delete_empty_dirs': _flag(raw.get('delete_empty_dirs', True)),
@@ -764,11 +768,27 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
     up immediately — including the state a library is in before this plugin has ever run.
     Episodes that have not aired yet are always treated as inside the frame: you want the
     next episode, whatever the retention rule says about the old ones.
+
+    Specials are left out of the comparison unless asked for. A special is not part of a
+    "keep the last two seasons" decision, and counting them would make the corrective
+    actions sweep every special into whatever the rest of the show is doing — which is
+    rarely what anyone means.
     """
     now = now or dt.datetime.now(dt.timezone.utc)
     today = now.date()
-    unaired, aired = [], []
+    retention = settings.get('retention') or {}
+    monitor_specials = bool(retention.get('monitor_specials', False))
+
+    specials = []
+    considered = []
     for episode in episodes:
+        if episode.get('season') == 0 and not monitor_specials:
+            specials.append(episode)
+        else:
+            considered.append(episode)
+
+    unaired, aired = [], []
+    for episode in considered:
         date, _ = effective_date(episode, allow_mtime_fallback=False)
         # No air date and no file means Sonarr does not know when it airs; treat it as
         # forthcoming rather than as something to strip the monitoring from.
@@ -784,16 +804,16 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
     in_frame = decision['keep'] + decision['protected'] + unaired
 
     files_in_frame = [e for e in in_frame if e.get('has_file')]
-    files_total = [e for e in episodes if e.get('has_file')]
+    files_total = [e for e in considered if e.get('has_file')]
     in_frame_unmonitored = [e for e in in_frame if not e.get('monitored')]
     out_frame_monitored = [e for e in out_frame if e.get('monitored')]
-    monitored = [e for e in episodes if e.get('monitored')]
+    monitored = [e for e in considered if e.get('monitored')]
 
-    if not episodes:
+    if not considered:
         status = 'empty'
     elif not in_frame_unmonitored and not out_frame_monitored:
         status = 'aligned'
-    elif len(monitored) == len(episodes):
+    elif len(monitored) == len(considered):
         status = 'all_monitored'
     elif in_frame_unmonitored and out_frame_monitored:
         status = 'mixed'
@@ -811,7 +831,8 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
     return {
         'status': status,
         'label': MONITOR_STATUS[status],
-        'total': len(episodes),
+        'total': len(considered),
+        'specials_ignored': len(specials),
         'monitored': len(monitored),
         'in_frame': len(in_frame),
         'out_frame': len(out_frame),
@@ -916,6 +937,7 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'series_id': active.get('series_id'),
         'global_specials': retention.get('include_specials'),
         'mtime_fallback': retention.get('allow_mtime_fallback'),
+        'monitor_specials': retention.get('monitor_specials'),
         'min_file_age_hours': guards.get('min_file_age_hours'),
     }
     return hashlib.sha256(canonical_json(material).encode('utf-8')).hexdigest()[:16]

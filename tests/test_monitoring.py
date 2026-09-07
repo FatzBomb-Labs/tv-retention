@@ -89,3 +89,50 @@ class Classify(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Specials(unittest.TestCase):
+    """Specials are outside the keep frame's logic, so they stay out of the comparison."""
+
+    def setUp(self):
+        self.episodes = [
+            episode(1, 10, True),
+            episode(2, 400, False),
+            dict(episode(1, 900, False), season=0, episode_id=900),
+        ]
+
+    def test_specials_are_not_counted_by_default(self):
+        state = classify_monitoring(self.episodes, RULE, settings(), now=NOW)
+        self.assertEqual(state['specials_ignored'], 1)
+        self.assertEqual(state['total'], 2)
+        self.assertEqual(state['status'], 'aligned')
+
+    def test_an_unmonitored_special_is_not_offered_for_monitoring(self):
+        # The bug this guards: a special landed in "protected", which fed the in-frame
+        # list, so "monitor all within keep frame" swept up every special.
+        state = classify_monitoring(self.episodes, RULE, settings(), now=NOW)
+        self.assertEqual(state['in_frame_unmonitored'], [])
+
+    def test_specials_are_counted_when_asked_for(self):
+        document = settings()
+        document['retention']['monitor_specials'] = True
+        state = classify_monitoring(self.episodes, RULE, document, now=NOW)
+        self.assertEqual(state['specials_ignored'], 0)
+        self.assertEqual(state['total'], 3)
+        self.assertEqual([row['season'] for row in state['in_frame_unmonitored']], [0])
+
+    def test_a_show_of_only_specials_reads_as_empty_not_aligned(self):
+        specials_only = [dict(episode(1, 900, False), season=0)]
+        state = classify_monitoring(specials_only, RULE, settings(), now=NOW)
+        self.assertEqual(state['status'], 'empty')
+        self.assertEqual(state['specials_ignored'], 1)
+
+    def test_the_setting_changes_the_cache_fingerprint(self):
+        from core import rule_fingerprint, validate_settings
+        base = {'instances': [{'id': 'i1', 'name': 'S', 'url': 'http://s:8989', 'api_key': 'a' * 32}],
+                'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1,
+                           'path': '/mnt/user/media/TV/A', 'keep_days': 30}]}
+        plain = validate_settings(base)
+        counted = validate_settings(dict(base, retention={'monitor_specials': True}))
+        self.assertNotEqual(rule_fingerprint(plain['rules'][0], plain),
+                            rule_fingerprint(counted['rules'][0], counted))

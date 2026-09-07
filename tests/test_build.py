@@ -181,7 +181,8 @@ class Interface(unittest.TestCase):
         # stripping the plain quotes first would eat across their boundaries.
         for quote in ('`', '"', "'"):
             code = re.sub(quote + r'(?:\\.|[^' + quote + r'\\])*' + quote, ' ', code, flags=re.S)
-        shape = r'\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b'
+        # Not preceded by a dot: Number.MAX_SAFE_INTEGER is a property, not a module constant.
+        shape = r'(?<![.\w])([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b'
         declared = set(re.findall(r'\b(?:const|let|var)\s+' + shape, code))
         used = set(re.findall(shape, code))
         missing = sorted(used - declared)

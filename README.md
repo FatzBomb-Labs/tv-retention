@@ -76,6 +76,14 @@ Requirements: Unraid 7.0 or newer, and at least one reachable Sonarr v3/v4 insta
 
 ## Rules
 
+The list can be ordered by **needs attention** (the default — problems first, so two broken
+shows among thirty healthy ones are at the top), title, least recently checked, keep window,
+preset, or Sonarr instance.
+
+Each show carries **Preview** and **Run**, alongside **Preview all** and **Run now** in the
+header. Running one show is the same operation as running everything, narrowed to that
+rule, and obeys dry run identically.
+
 A rule holds any combination of three conditions:
 
 | Condition | Meaning |
@@ -194,6 +202,13 @@ Two corrections may appear in that menu, and neither is ever run automatically:
 
 - **Monitor all within keep frame** — only when episodes inside it are unmonitored
 - **Unmonitor all outside keep frame** — only when episodes outside it are monitored
+
+Specials are left out of this comparison unless you turn on **Count specials in the
+monitoring comparison**. A special is not part of a “keep the last two seasons” decision,
+and counting them makes the corrective actions sweep every special along with the rest —
+on this library that was 72 of Survivor’s specials appearing as “unmonitored in frame”.
+The count of ignored specials is shown in the episode list so the exclusion is visible
+rather than silent.
 
 **Show the episodes…** lists the exact episodes behind the pill, including ones Sonarr has no file
 for — an episode’s monitored flag matters whether or not it is on disk. Episodes that
@@ -379,7 +394,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 172 tests
+python3 -m unittest discover -s tests -v   # 177 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

@@ -37,6 +37,15 @@
 <section id="tvd-panel-shows" class="tvd-panel">
   <div class="tvd-toolbar">
     <input id="tvd-search" type="search" placeholder="Search shows or folders…" aria-label="Search rules">
+    <select id="tvd-sort" aria-label="Sort shows">
+      <option value="attention">Sort by: needs attention</option>
+      <option value="title">Sort by: title</option>
+      <option value="title-desc">Sort by: title, Z–A</option>
+      <option value="checked">Sort by: least recently checked</option>
+      <option value="keep">Sort by: keep window, shortest first</option>
+      <option value="preset">Sort by: preset</option>
+      <option value="instance">Sort by: Sonarr instance</option>
+    </select>
     <select id="tvd-filter" aria-label="Filter rules">
       <option value="all">All rules</option>
       <option value="enabled">Enabled only</option>
@@ -131,7 +140,8 @@
     <label class="tvd-field"><span>Stop a run above this many deletions</span><input type="number" id="tvd-max-deletes" min="1" max="100000"><small>A whole run is abandoned if the plan exceeds this. Catches a bad rule or a broken path mapping.</small></label>
     <label class="tvd-field"><span>Stop a rule above this share of its episodes (%)</span><input type="number" id="tvd-max-percent" min="1" max="100"><small>Set to 100 to disable.</small></label>
     <label class="tvd-field"><span>Never touch files modified within (hours)</span><input type="number" id="tvd-min-age" min="0" max="8760"><small>Protects imports and in-progress copies.</small></label>
-    <label class="tvd-check"><input type="checkbox" id="tvd-include-specials"> Include specials (season 0)</label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-include-specials"> Include specials (season 0) when deleting<small>Each show can override this.</small></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-monitor-specials"> Count specials in the monitoring comparison<small>Off by default. A special is not part of a “keep the last two seasons” decision, and counting them makes the corrective actions monitor or unmonitor every special along with the rest.</small></label>
     <label class="tvd-check"><input type="checkbox" id="tvd-mtime-fallback"> Fall back to file modification time when no air date exists<small>With this off, an episode with no known air date is never deleted.</small></label>
     <label class="tvd-check"><input type="checkbox" id="tvd-unmonitor"> Unmonitor episodes in Sonarr after deleting them</label>
     <label class="tvd-check"><input type="checkbox" id="tvd-remonitor"> Re-monitor episodes again when a rule is widened<small>Only episodes this plugin unmonitored, and only while they fall back inside the new keep window. Sonarr may download them again.</small></label>

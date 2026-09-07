@@ -196,17 +196,75 @@
     return parts;
   }
 
+  // Ordering the list. "Needs attention" is the default because a list of thirty healthy
+  // shows and two broken ones should not make you hunt for the two.
+  const ATTENTION_RANK = {
+    unmatched: 0, mixed: 1, outside_monitored: 2, in_frame_unmonitored: 3,
+    all_monitored: 4, empty: 5, aligned: 6,
+  };
+
+  function attentionScore(rule) {
+    if (rule.match_status !== 'matched') return -2;
+    const state = monitoring[rule.id];
+    if (!state) return 8;
+    if (!state.ok || state.folder_ok === false) return -1;
+    if (PILL_ENDED_SPENT.has(state.lifecycle)) return 0.5;
+    return ATTENTION_RANK[state.status] ?? 7;
+  }
+
+  function keepWindow(rule) {
+    // A single comparable number for "how much is kept", so shows with different
+    // conditions still order sensibly. Days dominate; episodes and seasons approximate.
+    const source = presetFor(rule) || rule;
+    const candidates = [];
+    if (source.keep_days) candidates.push(Number(source.keep_days));
+    if (source.keep_episodes) candidates.push(Number(source.keep_episodes) * 7);
+    if (source.keep_seasons) candidates.push(Number(source.keep_seasons) * 365);
+    return candidates.length ? Math.min(...candidates) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function sortRules(rules) {
+    const byTitle = (a, b) => (a.series_title || a.path).localeCompare(b.series_title || b.path,
+                                                                      undefined, { sensitivity: 'base' });
+    const mode = $('tvd-sort').value;
+    const sorted = rules.slice();
+    if (mode === 'title') return sorted.sort(byTitle);
+    if (mode === 'title-desc') return sorted.sort((a, b) => byTitle(b, a));
+    if (mode === 'checked') {
+      return sorted.sort((a, b) => {
+        const at = (monitoring[a.id] || {}).checked_at || '';
+        const bt = (monitoring[b.id] || {}).checked_at || '';
+        // Never checked sorts first: it is the least known, not the most recent.
+        if (!at !== !bt) return at ? 1 : -1;
+        return at.localeCompare(bt) || byTitle(a, b);
+      });
+    }
+    if (mode === 'keep') return sorted.sort((a, b) => keepWindow(a) - keepWindow(b) || byTitle(a, b));
+    if (mode === 'preset') {
+      return sorted.sort((a, b) => {
+        const an = (presetFor(a) || {}).name || '';
+        const bn = (presetFor(b) || {}).name || '';
+        return an.localeCompare(bn) || byTitle(a, b);
+      });
+    }
+    if (mode === 'instance') {
+      const name = (rule) => ((settings.instances || []).find((i) => i.id === rule.instance_id) || {}).name || '';
+      return sorted.sort((a, b) => name(a).localeCompare(name(b)) || byTitle(a, b));
+    }
+    return sorted.sort((a, b) => attentionScore(a) - attentionScore(b) || byTitle(a, b));
+  }
+
   function renderRules() {
     const container = $('tvd-rules');
     const term = ($('tvd-search').value || '').toLowerCase();
     const filter = $('tvd-filter').value;
-    const rules = (settings.rules || []).filter((rule) => {
+    const rules = sortRules((settings.rules || []).filter((rule) => {
       if (term && !(`${rule.series_title} ${rule.path}`.toLowerCase().includes(term))) return false;
       if (filter === 'enabled') return rule.enabled;
       if (filter === 'disabled') return !rule.enabled;
       if (filter === 'unmatched') return rule.match_status !== 'matched';
       return true;
-    });
+    }));
     container.replaceChildren();
     $('tvd-rules-empty').hidden = (settings.rules || []).length > 0;
     rules.forEach((rule) => {
@@ -240,16 +298,27 @@
         const data = await api('preview', { rule_ids: [rule.id] }, 'Previewing…');
         showResult(data.result, 'Preview');
       }));
+      const runButton = el('button', { type: 'button', textContent: settings.dry_run ? 'Run (dry)' : 'Run' });
+      runButton.addEventListener('click', () => guarded('', async () => {
+        if (rule.match_status !== 'matched') throw new Error('This rule is not matched to a Sonarr series.');
+        const warning = settings.dry_run
+          ? `Run ${rule.series_title} now? Dry run is on, so nothing will be deleted.`
+          : `Run ${rule.series_title} now? This will DELETE episode files through Sonarr.`;
+        if (!window.confirm(warning)) return;
+        const data = await api('run', { rule_ids: [rule.id] }, 'Running…');
+        await refresh();
+        showResult(data.result, 'Run');
+      }));
       const editButton = el('button', { type: 'button', textContent: 'Edit' });
       editButton.addEventListener('click', () => editRule(rule));
       const removeButton = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Remove' });
       removeButton.addEventListener('click', () => removeRule(rule));
       if (isChecking(rule.id)) {
         // Editing a show mid-read would save against a frame the result no longer describes.
-        [previewButton, editButton, removeButton].forEach((button) => { button.disabled = true; });
+        [previewButton, runButton, editButton, removeButton].forEach((button) => { button.disabled = true; });
         card.classList.add('tvd-busy-row');
       }
-      actions.append(previewButton, editButton, removeButton);
+      actions.append(previewButton, runButton, editButton, removeButton);
       body.append(actions);
       card.append(body);
       if (!matched && rule.match_error) card.append(el('div', { className: 'tvd-error', textContent: rule.match_error }));
@@ -259,6 +328,7 @@
 
   $('tvd-search').addEventListener('input', renderRules);
   $('tvd-filter').addEventListener('change', renderRules);
+  $('tvd-sort').addEventListener('change', renderRules);
 
   // -- background checking ----------------------------------------------
   // Nothing here blocks the page. Cached results are shown at once; stale shows are
@@ -553,6 +623,10 @@
     const state = (data.monitoring || [])[0];
     if (!state || !state.ok) throw new Error((state && state.error) || 'Could not read that show from Sonarr.');
     dialog(`${rule.series_title}: monitoring`, (body) => {
+      if (state.specials_ignored) {
+        body.append(el('p', { textContent: `${state.specials_ignored} special(s) are not counted. `
+          + 'Turn on "Count specials in the monitoring comparison" in Schedule & safety to include them.' }));
+      }
       body.append(el('p', { textContent: `${state.label}. ${state.total} episode(s) in Sonarr: `
         + `${state.in_frame} inside the keep frame (${state.unaired} not yet aired), ${state.out_frame} outside it.` }));
       const table = (title, rows) => {
@@ -1187,6 +1261,7 @@
     $('tvd-mtime-fallback').checked = !!retention.allow_mtime_fallback;
     $('tvd-unmonitor').checked = !!retention.unmonitor_deleted;
     $('tvd-remonitor').checked = !!retention.remonitor_widened;
+    $('tvd-monitor-specials').checked = !!retention.monitor_specials;
     $('tvd-recycle-mode').value = recycle.mode || 'sonarr';
     $('tvd-recycle-path').value = recycle.path || '';
     $('tvd-recycle-days').value = recycle.retention_days;
@@ -1240,6 +1315,7 @@
         allow_mtime_fallback: $('tvd-mtime-fallback').checked,
         unmonitor_deleted: $('tvd-unmonitor').checked,
         remonitor_widened: $('tvd-remonitor').checked,
+        monitor_specials: $('tvd-monitor-specials').checked,
       },
       recycle: { mode: $('tvd-recycle-mode').value, path: $('tvd-recycle-path').value.trim(), retention_days: $('tvd-recycle-days').value },
       sidecars: { enabled: $('tvd-sidecars').checked, extensions: $('tvd-sidecar-ext').value.split(',').map((value) => value.trim()).filter(Boolean) },
