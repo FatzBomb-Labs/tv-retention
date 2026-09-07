@@ -1,0 +1,3 @@
+#!/bin/bash
+# Nothing to stop: runs are short lived and hold an exclusive lock while they work.
+/usr/bin/python3 /usr/local/emhttp/plugins/tv-delete/worker/main.py stop

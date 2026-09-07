@@ -1,0 +1,4 @@
+#!/bin/bash
+# Settings live on the flash device and survive reboots; the cron entry is republished
+# once the array is up so a scheduled run never fires against unmounted shares.
+/usr/bin/python3 /usr/local/emhttp/plugins/tv-delete/worker/main.py resume

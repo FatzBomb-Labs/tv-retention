@@ -1,0 +1,101 @@
+/* TV Delete. Scoped to #tv-delete so nothing leaks into the Unraid WebGUI, and colours
+   are inherited from the active Unraid theme wherever possible. */
+#tv-delete { --tvd-line: rgba(128,128,128,.32); --tvd-soft: rgba(128,128,128,.10);
+  --tvd-warn: #d9822b; --tvd-bad: #c0392b; --tvd-good: #2e9e5b; --tvd-accent: #ff8c2b;
+  max-width: 1180px; font-size: 13px; line-height: 1.5; }
+#tv-delete * { box-sizing: border-box; }
+#tv-delete h1 { font-size: 22px; margin: 0 0 2px; }
+#tv-delete .tvd-h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em;
+  margin: 22px 0 8px; opacity: .75; }
+#tv-delete p { margin: 4px 0; }
+
+.tvd-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--tvd-line); }
+.tvd-head p { max-width: 70ch; opacity: .8; }
+.tvd-eyebrow { font-size: 10px; letter-spacing: .18em; opacity: .6; }
+.tvd-version { font-size: 11px; opacity: .55; font-weight: normal; }
+.tvd-head-actions { display: flex; gap: 8px; }
+
+#tv-delete button { font: inherit; padding: 7px 14px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--tvd-line); background: transparent; color: inherit; }
+#tv-delete button:hover { background: var(--tvd-soft); }
+#tv-delete button.tvd-primary { background: var(--tvd-accent); border-color: var(--tvd-accent); color: #1a1a1a; font-weight: 600; }
+#tv-delete button.tvd-primary:hover { filter: brightness(1.08); }
+#tv-delete button.tvd-danger { border-color: var(--tvd-bad); color: var(--tvd-bad); }
+#tv-delete button[disabled] { opacity: .45; cursor: not-allowed; }
+#tv-delete input, #tv-delete select, #tv-delete textarea { font: inherit; padding: 6px 8px;
+  border: 1px solid var(--tvd-line); border-radius: 4px; background: transparent; color: inherit; max-width: 100%; }
+
+.tvd-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 14px 0; }
+.tvd-stats > div { border: 1px solid var(--tvd-line); border-radius: 6px; padding: 10px 12px; }
+.tvd-stats span { font-size: 10px; letter-spacing: .12em; opacity: .6; display: block; }
+.tvd-stats strong { font-size: 19px; display: block; margin: 2px 0; }
+.tvd-stats small { opacity: .6; }
+
+.tvd-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--tvd-line); margin-bottom: 14px; }
+.tvd-tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 14px; opacity: .7; }
+.tvd-tabs button.active { border-bottom-color: var(--tvd-accent); opacity: 1; font-weight: 600; }
+
+.tvd-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.tvd-toolbar input[type=search] { min-width: 240px; }
+.tvd-spacer { flex: 1; }
+.tvd-lede { max-width: 85ch; opacity: .8; margin-bottom: 10px; }
+.tvd-empty { opacity: .65; padding: 18px; border: 1px dashed var(--tvd-line); border-radius: 6px; text-align: center; }
+.tvd-actions { margin-top: 16px; }
+
+.tvd-card { border: 1px solid var(--tvd-line); border-radius: 6px; padding: 14px; display: grid; gap: 12px; }
+.tvd-field { display: grid; gap: 4px; max-width: 620px; }
+.tvd-field > span { font-weight: 600; }
+.tvd-field small, .tvd-check small { opacity: .65; display: block; font-weight: normal; }
+.tvd-check { display: block; }
+.tvd-check input { margin-right: 6px; }
+.tvd-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.tvd-row .tvd-field { flex: 1 1 180px; }
+
+.tvd-rules, .tvd-instances { display: grid; gap: 10px; }
+.tvd-rule { border: 1px solid var(--tvd-line); border-left-width: 4px; border-radius: 6px; padding: 12px 14px; }
+.tvd-rule.matched { border-left-color: var(--tvd-good); }
+.tvd-rule.unmatched { border-left-color: var(--tvd-bad); }
+.tvd-rule.disabled { opacity: .58; border-left-color: var(--tvd-line); }
+.tvd-rule-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.tvd-rule-title { font-size: 15px; font-weight: 600; }
+.tvd-rule-path { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; opacity: .7; word-break: break-all; }
+.tvd-rule-body { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.tvd-rule-actions { display: flex; gap: 6px; margin-left: auto; }
+.tvd-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tvd-line); font-size: 11px; }
+.tvd-chip.on { border-color: var(--tvd-accent); }
+.tvd-badge { font-size: 10px; letter-spacing: .08em; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; }
+.tvd-badge.ok { background: rgba(46,158,91,.16); color: var(--tvd-good); }
+.tvd-badge.bad { background: rgba(192,57,43,.16); color: var(--tvd-bad); }
+.tvd-badge.off { background: var(--tvd-soft); opacity: .8; }
+.tvd-error { color: var(--tvd-bad); margin-top: 6px; }
+
+.tvd-warning, .tvd-banner { border: 1px solid var(--tvd-warn); border-radius: 6px; padding: 10px 12px; margin: 10px 0;
+  background: rgba(217,130,43,.10); }
+#tvd-notice { border-radius: 6px; padding: 10px 12px; margin: 10px 0; border: 1px solid var(--tvd-line); }
+#tvd-notice.ok { border-color: var(--tvd-good); background: rgba(46,158,91,.10); }
+#tvd-notice.bad { border-color: var(--tvd-bad); background: rgba(192,57,43,.10); }
+
+.tvd-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.tvd-table th, .tvd-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--tvd-line); vertical-align: top; }
+.tvd-table th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
+.tvd-scroll { overflow-x: auto; }
+.tvd-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; word-break: break-all; }
+.tvd-list { margin: 6px 0 0 18px; }
+.tvd-list li { margin: 3px 0; }
+
+.tvd-dialog { border: 1px solid var(--tvd-line); border-radius: 8px; padding: 0; width: min(760px, 94vw);
+  color: inherit; background: var(--background-color, #1c1c1c); }
+.tvd-dialog::backdrop { background: rgba(0,0,0,.55); }
+#tvd-dialog-body { padding: 18px; display: grid; gap: 12px; max-height: 70vh; overflow: auto; }
+.tvd-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin: 0; padding: 12px 18px;
+  border-top: 1px solid var(--tvd-line); }
+.tvd-dialog h3 { margin: 0; font-size: 16px; }
+
+.tvd-busy { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 9999; }
+.tvd-busy-box { display: flex; gap: 10px; align-items: center; padding: 14px 20px; border-radius: 8px;
+  border: 1px solid var(--tvd-line); background: var(--background-color, #1c1c1c); }
+.tvd-spinner { width: 16px; height: 16px; border: 2px solid var(--tvd-line); border-top-color: var(--tvd-accent);
+  border-radius: 50%; animation: tvd-spin .8s linear infinite; }
+@keyframes tvd-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tvd-spinner { animation: none; } }

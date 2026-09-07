@@ -1,0 +1,161 @@
+<header class="tvd-head">
+  <div>
+    <div class="tvd-eyebrow">LIBRARY RETENTION</div>
+    <h1>TV Delete <span class="tvd-version" id="tvd-version"></span></h1>
+    <p>Keep a set number of days, episodes, or seasons per show. Every rule is bound to a Sonarr series, and deletions go through Sonarr so its database and monitoring stay correct.</p>
+  </div>
+  <div class="tvd-head-actions">
+    <button type="button" id="tvd-preview" class="tvd-secondary">Preview all</button>
+    <button type="button" id="tvd-run" class="tvd-primary">Run now</button>
+  </div>
+</header>
+
+<div id="tvd-notice" role="status" aria-live="polite" hidden></div>
+<div id="tvd-array" class="tvd-warning" hidden>The array is stopped. Start it before previewing or running TV Delete.</div>
+<div id="tvd-dry" class="tvd-banner" hidden><strong>Dry run is on.</strong> Runs report what they would delete and change nothing. Turn it off in Settings when you are satisfied with the preview.</div>
+
+<section class="tvd-stats" aria-label="Summary">
+  <div><span>SHOWS</span><strong id="tvd-stat-rules">0</strong><small id="tvd-stat-rules-sub">No rules yet</small></div>
+  <div><span>UNMATCHED</span><strong id="tvd-stat-unmatched">0</strong><small>Skipped until fixed</small></div>
+  <div><span>LAST RUN</span><strong id="tvd-stat-last">Never</strong><small id="tvd-stat-last-sub">&nbsp;</small></div>
+  <div><span>SCHEDULE</span><strong id="tvd-stat-schedule">Off</strong><small id="tvd-stat-schedule-sub">&nbsp;</small></div>
+</section>
+
+<nav class="tvd-tabs" aria-label="TV Delete views">
+  <button type="button" class="active" data-tab="shows">Shows &amp; rules</button>
+  <button type="button" data-tab="sonarr">Sonarr instances</button>
+  <button type="button" data-tab="settings">Schedule &amp; safety</button>
+  <button type="button" data-tab="history">Runs &amp; history</button>
+  <button type="button" data-tab="help">Help</button>
+</nav>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-shows" class="tvd-panel">
+  <div class="tvd-toolbar">
+    <input id="tvd-search" type="search" placeholder="Search shows or folders…" aria-label="Search rules">
+    <select id="tvd-filter" aria-label="Filter rules">
+      <option value="all">All rules</option>
+      <option value="enabled">Enabled only</option>
+      <option value="disabled">Disabled only</option>
+      <option value="unmatched">Unmatched only</option>
+    </select>
+    <span class="tvd-spacer"></span>
+    <button type="button" id="tvd-rematch" class="tvd-secondary">Re-check Sonarr matches</button>
+    <button type="button" id="tvd-add" class="tvd-primary">Add show</button>
+  </div>
+  <div id="tvd-rules" class="tvd-rules"></div>
+  <p id="tvd-rules-empty" class="tvd-empty">No shows yet. Choose <strong>Add show</strong> to pick a series from Sonarr, or to point at a folder and have it matched.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-sonarr" class="tvd-panel" hidden>
+  <p class="tvd-lede">Add every Sonarr instance that owns part of your TV library. Each instance needs a path mapping when Sonarr runs in a container: the path Sonarr reports, and where that folder actually lives on Unraid.</p>
+  <div id="tvd-instances" class="tvd-instances"></div>
+  <button type="button" id="tvd-add-instance" class="tvd-secondary">Add Sonarr instance</button>
+
+  <h2 class="tvd-h2">TMDB (optional)</h2>
+  <p class="tvd-lede">Used only to fill in air dates that Sonarr leaves blank. Sonarr always takes priority.</p>
+  <div class="tvd-card">
+    <label class="tvd-check"><input type="checkbox" id="tvd-tmdb-enabled"> Use TMDB for missing air dates</label>
+    <label class="tvd-field"><span>TMDB API key</span><input type="password" id="tvd-tmdb-key" autocomplete="off" placeholder="Not set"></label>
+    <button type="button" id="tvd-tmdb-test" class="tvd-secondary">Test key</button>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-settings" class="tvd-panel" hidden>
+  <h2 class="tvd-h2">Schedule</h2>
+  <div class="tvd-card">
+    <label class="tvd-check"><input type="checkbox" id="tvd-schedule-enabled"> Run automatically on a schedule</label>
+    <label class="tvd-field"><span>Frequency</span>
+      <select id="tvd-schedule-preset">
+        <option value="0 * * * *">Hourly</option>
+        <option value="0 4 * * *">Daily at 04:00</option>
+        <option value="0 4 * * 0">Weekly, Sunday 04:00</option>
+        <option value="0 4 1 * *">Monthly, 1st at 04:00</option>
+        <option value="custom">Custom cron…</option>
+      </select>
+    </label>
+    <label class="tvd-field"><span>Cron expression</span><input type="text" id="tvd-schedule-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
+  </div>
+
+  <h2 class="tvd-h2">Safety</h2>
+  <div class="tvd-card">
+    <label class="tvd-check"><input type="checkbox" id="tvd-dry-run"> <strong>Dry run</strong> — report what would be deleted, delete nothing</label>
+    <label class="tvd-field"><span>Stop a run above this many deletions</span><input type="number" id="tvd-max-deletes" min="1" max="100000"><small>A whole run is abandoned if the plan exceeds this. Catches a bad rule or a broken path mapping.</small></label>
+    <label class="tvd-field"><span>Stop a rule above this share of its episodes (%)</span><input type="number" id="tvd-max-percent" min="1" max="100"><small>Set to 100 to disable.</small></label>
+    <label class="tvd-field"><span>Never touch files modified within (hours)</span><input type="number" id="tvd-min-age" min="0" max="8760"><small>Protects imports and in-progress copies.</small></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-include-specials"> Include specials (season 0)</label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-mtime-fallback"> Fall back to file modification time when no air date exists<small>With this off, an episode with no known air date is never deleted.</small></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-unmonitor"> Unmonitor episodes in Sonarr after deleting them</label>
+  </div>
+
+  <h2 class="tvd-h2">Deletion</h2>
+  <div class="tvd-card">
+    <label class="tvd-field"><span>How files are removed</span>
+      <select id="tvd-recycle-mode">
+        <option value="sonarr">Through Sonarr — uses Sonarr's own recycle bin if it has one</option>
+        <option value="plugin">Move to a recycle folder managed by this plugin</option>
+        <option value="none">Through Sonarr, permanently — no safety net</option>
+      </select>
+    </label>
+    <label class="tvd-field" id="tvd-recycle-path-field"><span>Recycle folder</span><input type="text" id="tvd-recycle-path" placeholder="/mnt/user/recycle/tv-delete"></label>
+    <label class="tvd-field" id="tvd-recycle-days-field"><span>Empty the recycle folder after (days)</span><input type="number" id="tvd-recycle-days" min="1" max="3650"></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-sidecars"> Also remove matching sidecar files (subtitles, artwork, .nfo)</label>
+    <label class="tvd-field"><span>Sidecar extensions</span><input type="text" id="tvd-sidecar-ext" spellcheck="false"><small>Comma separated. Only files sharing the episode's exact name are touched.</small></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-empty-dirs"> Remove season folders left empty (never the show folder)</label>
+  </div>
+
+  <h2 class="tvd-h2">Housekeeping</h2>
+  <div class="tvd-card">
+    <label class="tvd-field"><span>Journal and cache folder</span><input type="text" id="tvd-state-dir" spellcheck="false"><small>Kept off the flash device. Holds run journals and the TMDB cache.</small></label>
+    <label class="tvd-field"><span>Runs kept in history</span><input type="number" id="tvd-history-size" min="1" max="500"></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-notify"> Send an Unraid notification after each run</label>
+  </div>
+
+  <div class="tvd-actions"><button type="button" id="tvd-save" class="tvd-primary">Save settings</button></div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-history" class="tvd-panel" hidden>
+  <div class="tvd-toolbar">
+    <span class="tvd-spacer"></span>
+    <button type="button" id="tvd-clear-history" class="tvd-secondary">Clear history</button>
+  </div>
+  <div id="tvd-last-run"></div>
+  <h2 class="tvd-h2">Previous runs</h2>
+  <table class="tvd-table" id="tvd-history-table">
+    <thead><tr><th>Started</th><th>Trigger</th><th>Mode</th><th>Planned</th><th>Deleted</th><th>Reclaimed</th><th>Notes</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p id="tvd-history-empty" class="tvd-empty">No runs recorded yet.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-help" class="tvd-panel" hidden>
+  <h2 class="tvd-h2">How a rule decides</h2>
+  <p class="tvd-lede">A rule may set any combination of <strong>keep days</strong>, <strong>keep episodes</strong>, and <strong>keep seasons</strong>. Each condition votes on every episode, and the combine mode settles disagreements.</p>
+  <table class="tvd-table">
+    <thead><tr><th>Combine mode</th><th>Meaning</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td>Earliest</td><td>An episode survives if <em>any</em> condition keeps it.</td><td>Keeps the most. The safe default.</td></tr>
+      <tr><td>Latest</td><td>An episode is deleted only if <em>every</em> condition says so, and none was undecidable.</td><td>Keeps the least, without ever acting on an unknown.</td></tr>
+      <tr><td>Any</td><td>An episode is deleted if <em>any</em> condition says so.</td><td>Most aggressive. Ignores conditions it cannot judge.</td></tr>
+    </tbody>
+  </table>
+  <h2 class="tvd-h2">What is never deleted</h2>
+  <ul class="tvd-list">
+    <li>Anything under a rule that is not matched to exactly one Sonarr series.</li>
+    <li>Media files Sonarr does not know about — they are listed in the run report instead.</li>
+    <li>Specials (season 0), unless you turn them on.</li>
+    <li>Files modified inside the minimum age window.</li>
+    <li>Everything, when dry run is on, or when a guard stops the run.</li>
+  </ul>
+  <h2 class="tvd-h2">Air dates</h2>
+  <p class="tvd-lede">Sonarr's air date is used first, then TMDB if enabled, then the file's modification time. The source of each date is shown in every preview, so you can see when a decision rests on a file timestamp rather than a real air date.</p>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<dialog id="tvd-dialog" class="tvd-dialog"><form method="dialog" id="tvd-dialog-form"><div id="tvd-dialog-body"></div>
+<menu class="tvd-dialog-actions"><button value="cancel" class="tvd-secondary">Cancel</button><button value="ok" id="tvd-dialog-ok" class="tvd-primary">Save</button></menu></form></dialog>
+<div id="tvd-busy" class="tvd-busy" hidden><div class="tvd-busy-box"><span class="tvd-spinner"></span><span id="tvd-busy-text">Working…</span></div></div>
