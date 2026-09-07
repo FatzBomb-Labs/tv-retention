@@ -195,22 +195,22 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r"lifecycle === 'ended'\) kind = 'ended'")
         self.assertIn('tvd-pill.ended', (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text())
 
-    ICONS_IN_UNRAID_FONT = {'icon-bin', 'icon-archive', 'icon-clock', 'icon-folder', 'icon-log',
-                            'icon-network', 'icon-update', 'icon-dashboard', 'icon-cpu'}
+    def test_the_icon_is_a_font_awesome_name(self):
+        """A name is not enough: it has to resolve to a glyph.
 
-    def test_the_icon_exists_in_unraids_font(self):
-        """An icon- class Unraid does not ship renders as an empty element.
-
-        That is how the launch icon disappeared from the Plugins page: icon-trash is not in
-        Unraid's icon font, so the anchor was there with nothing visible inside it. Names
-        here are ones checked against the font on Unraid 7.3.
+        Two icons were shipped that rendered as nothing. icon-trash is absent from Unraid's
+        font entirely; icon-bin appears in a stylesheet but has no `:before{content}` rule,
+        which looks identical in a grep and identical on screen. Font Awesome is loaded on
+        every Unraid page and is what twelve other plugins on this server use, so the icon
+        is required to be a plain FA name. tools/check-on-host.sh confirms the glyph exists.
         """
         import xml.etree.ElementTree as ElementTree
         manifest_icon = ElementTree.parse(ROOT / 'install' / 'tv-delete.plg').getroot().get('icon')
         page = (ROOT / 'src' / 'tv-delete' / 'TVDelete.page').read_text()
         page_icon = next(line.split('=', 1)[1].strip().strip('"')
                          for line in page.splitlines() if line.startswith('Icon='))
-        self.assertEqual(manifest_icon, page_icon, 'the Tools tile and Plugins row should agree')
-        if manifest_icon.startswith('icon-'):
-            self.assertIn(manifest_icon, self.ICONS_IN_UNRAID_FONT,
-                          f'{manifest_icon} is not known to exist in Unraid\'s icon font')
+        self.assertEqual(manifest_icon, page_icon, 'the Tools tile and Plugins row must agree')
+        self.assertFalse(manifest_icon.startswith('icon-'),
+                         'Unraid font names have silently rendered empty; use a Font Awesome name')
+        self.assertFalse(manifest_icon.endswith('.png'), 'no image is shipped with this plugin')
+        self.assertRegex(manifest_icon, r'^[a-z0-9-]+$')

@@ -8,9 +8,10 @@ read-only or reversible.
 - [ ] Plugins → Install Plugin → path to `install/tv-delete.plg`. Installation reports
       the SHA256 check passing.
 - [ ] **Tools → TV Delete** loads, shows the version, and reports *Dry run is on*.
-- [ ] The Plugins page row shows the **TV Delete** description and a bin icon that opens
-      the page when clicked. An `icon-` class Unraid does not ship renders as an empty
-      element, so the icon silently disappears — verify it is actually visible.
+- [ ] The Plugins page row shows the **TV Delete** description and a trash icon that opens
+      the page when clicked. Verify the icon is actually **visible**, not merely present:
+      an icon name with no glyph behind it renders as an empty, zero-sized element, so the
+      link is there but there is nothing to click.
 - [ ] The Tools tile shows the same icon. Both come from the same name.
 - [ ] The Name column reads `tv-delete`, which is Unraid's plugin directory identifier,
       not a label.
