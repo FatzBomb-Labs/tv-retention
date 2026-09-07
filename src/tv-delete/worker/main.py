@@ -24,11 +24,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from core import (CACHE_SCHEMA, DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json, canonical_json,
-                  effective_rule, empty_directories, evaluate, new_id, normalise, redact,
-                  guard_value, scan_media, select_remonitor, sidecars_for, validate_settings,
-                  classify_monitoring, describe_lifecycle, describe_selectability,
-                  is_media, rule_fingerprint)
+from core import (CACHE_SCHEMA, DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
+                  canonical_json, classify_monitoring, describe_lifecycle, describe_selectability,
+                  effective_rule, empty_directories, evaluate, guard_value, interpolate_air_dates,
+                  is_media, new_id, normalise, redact, rule_fingerprint, scan_media,
+                  select_remonitor, sidecars_for, validate_settings)
 import alerts
 from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
@@ -274,6 +274,9 @@ def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
     if tmdb and rule.get('tvdb_id'):
         with contextlib.suppress(TMDBError):
             fill_air_dates(episodes, tmdb, rule['tvdb_id'])
+    # Anything still undated is estimated from its neighbours, which is steadier than the
+    # import date: an upgrade re-import moves that, the episodes either side do not.
+    interpolate_air_dates(episodes)
     present, missing = [], []
     for episode in episodes:
         path = Path(episode['path'])
@@ -614,14 +617,16 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
             outcome['error'] = action['error']
 
     if deleted_ids and not dry_run:
-        if rule.get('unmonitor') and (settings.get('retention') or {}).get('auto_unmonitor', True):
-            try:
-                client.unmonitor(deleted_ids)
-                outcome['unmonitored'] = len(deleted_ids)
-                entries = entries + [ledger_entry(episode) for episode in deleted]
-                ledger_dirty = True
-            except SonarrError as error:
-                outcome['error'] = f'Files removed, but unmonitoring failed: {error}'
+        # Not optional, and not a setting. Deleting a file while leaving the episode
+        # monitored guarantees Sonarr fetches it again and the next run deletes it again.
+        # Auto unmonitor governs the episodes around it, never this.
+        try:
+            client.unmonitor(deleted_ids)
+            outcome['unmonitored'] = len(deleted_ids)
+            entries = entries + [ledger_entry(episode) for episode in deleted]
+            ledger_dirty = True
+        except SonarrError as error:
+            outcome['error'] = f'Files removed, but unmonitoring failed: {error}'
         if (settings.get('recycle') or {}).get('mode') == 'plugin':
             # Moving files out of the library is invisible to Sonarr until it rescans.
             with contextlib.suppress(SonarrError):
@@ -1559,6 +1564,7 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
         episodes = client.episodes(rule['series_id'], files_only=False)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
+    interpolate_air_dates(episodes)
 
     # One walk of the folder supplies size and modification time for every episode, rather
     # than one stat call each: a long-running series has thousands of them.
@@ -1584,17 +1590,23 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
 
     decision = evaluate(present, active, settings)
     would_delete = decision['delete']
+    deleting = {item.get('episode_id') for item in would_delete}
+    outside = [row for row in (state.get('out_frame_monitored') or [])]
+    if rule_flag(settings, rule, 'auto_unmonitor', True):
+        # Everything outside the window, which necessarily includes what is being deleted.
+        unmonitor_count = len(outside)
+    else:
+        # Only what is being deleted: that part is not optional.
+        unmonitor_count = len([row for row in outside if row.get('episode_id') in deleting])
     state['plan'] = {
         'delete': len(would_delete),
         'delete_bytes': sum(int(item.get('size') or 0) for item in would_delete),
         'blocked': decision['blocked'] or '',
-        'unmonitor': len(would_delete) if (rule.get('unmonitor', True)
-                                           and (settings.get('retention') or {}).get('auto_unmonitor', True))
-                     else 0,
+        'unmonitor': unmonitor_count,
         'monitor': 0,
         'computed_at': now_iso(),
     }
-    if (settings.get('retention') or {}).get('auto_monitor'):
+    if rule_flag(settings, rule, 'auto_monitor', False):
         entries = (load_ledger(settings).get(rule['id']) or [])
         present_ids = {episode.get('episode_id') for episode in present}
         entries = [entry for entry in entries if entry.get('episode_id') not in present_ids]

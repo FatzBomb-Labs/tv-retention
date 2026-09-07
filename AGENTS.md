@@ -14,6 +14,8 @@ there. The suite is 196 tests with no expected failures.
 ## Project constraints
 
 - A rule that does not resolve to exactly one Sonarr series must never be processed.
+- Deleting an episode file always unmonitors it. That is an invariant, not a setting:
+  anything else builds a fetch-and-delete loop.
 - Nothing a series card offers happens immediately: removals and monitoring fixes queue,
   and only a run applies them. Undo is therefore always available until then.
 - The plugin never deletes a series. It asks Sonarr to, so Sonarr's recycle bin and its

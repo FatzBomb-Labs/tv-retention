@@ -175,3 +175,65 @@ class Guards(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class InterpolatedDates(unittest.TestCase):
+    """Estimating a missing air date from the episodes either side of it.
+
+    Sonarr's import date moves when an episode is re-imported at better quality, so a 2015
+    episode upgraded last week looks new. Its neighbours do not move that way.
+    """
+
+    def setUp(self):
+        from core import interpolate_air_dates
+        self.interpolate = interpolate_air_dates
+
+    def series(self, dates):
+        return [{'season': 3, 'episode': number, 'air_date': date, 'air_source': 'sonarr' if date else ''}
+                for number, date in enumerate(dates, start=1)]
+
+    def test_a_gap_is_filled_evenly(self):
+        episodes = self.series(['2015-01-01', None, None, '2015-01-22'])
+        self.assertEqual(self.interpolate(episodes), 2)
+        self.assertEqual([e['air_date'] for e in episodes],
+                         ['2015-01-01', '2015-01-08', '2015-01-15', '2015-01-22'])
+
+    def test_an_estimate_says_that_it_is_one(self):
+        episodes = self.series(['2015-01-01', None, '2015-01-15'])
+        self.interpolate(episodes)
+        self.assertEqual(episodes[1]['air_source'], 'estimated')
+
+    def test_a_leading_gap_borrows_from_the_first_known_episode(self):
+        episodes = self.series([None, None, '2015-03-01'])
+        self.interpolate(episodes)
+        self.assertEqual(episodes[0]['air_date'], '2015-03-01')
+
+    def test_a_trailing_gap_borrows_from_the_last_known_episode(self):
+        episodes = self.series(['2015-03-01', None])
+        self.interpolate(episodes)
+        self.assertEqual(episodes[1]['air_date'], '2015-03-01')
+
+    def test_a_series_with_no_dates_at_all_is_left_alone(self):
+        episodes = self.series([None, None])
+        self.assertEqual(self.interpolate(episodes), 0)
+        self.assertIsNone(episodes[0]['air_date'])
+
+    def test_specials_are_not_used_as_neighbours(self):
+        # A special sorts before episode one and would drag every estimate toward it.
+        episodes = self.series(['2015-01-01', None, '2015-01-15'])
+        episodes.append({'season': 0, 'episode': 1, 'air_date': '2001-01-01', 'air_source': 'sonarr'})
+        self.interpolate(episodes)
+        self.assertEqual(episodes[1]['air_date'], '2015-01-08')
+
+    def test_an_estimate_beats_the_import_date_for_an_upgraded_episode(self):
+        # The case that prompted this: a 2015 episode re-imported yesterday.
+        from core import effective_date
+        episode = {'season': 3, 'episode': 2, 'air_date': None,
+                   'date_added': '2026-09-01T00:00:00Z'}
+        episodes = [{'season': 3, 'episode': 1, 'air_date': '2015-01-01', 'air_source': 'sonarr'},
+                    episode,
+                    {'season': 3, 'episode': 3, 'air_date': '2015-01-15', 'air_source': 'sonarr'}]
+        self.interpolate(episodes)
+        date, source = effective_date(episode, True)
+        self.assertEqual(date, dt.date(2015, 1, 8))
+        self.assertEqual(source, 'estimated')

@@ -83,3 +83,18 @@ class SafetyMoved(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class UnmonitorOnDelete(unittest.TestCase):
+    def test_deleting_a_file_always_unmonitors_it(self):
+        """Not a setting: a deleted file left monitored is a fetch-and-delete loop.
+
+        Auto unmonitor governs the episodes *around* the deletion — the ones outside the
+        window that have no file — never the deletion itself.
+        """
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / 'src' / 'tv-delete' / 'worker' / 'main.py').read_text()
+        block = source.split('if deleted_ids and not dry_run:')[1].split('if (settings.get(')[0]
+        self.assertIn('client.unmonitor(deleted_ids)', block)
+        self.assertNotIn('auto_unmonitor', block)
+        self.assertNotIn("rule.get('unmonitor')", block)

@@ -729,13 +729,52 @@ def import_date(episode):
     return None
 
 
+def interpolate_air_dates(episodes) -> int:
+    """Estimate missing air dates from the episodes either side of them.
+
+    Sonarr's import date is a poor substitute for an air date: re-importing an episode at
+    better quality resets it, so a 2015 episode upgraded last week looks like it arrived
+    last week. Its neighbours do not lie that way. An undated episode sits between the
+    episodes before and after it in season and episode order, and a date interpolated
+    between their air dates is both stable and close to the truth.
+
+    Specials are left out of the ordering because they do not sit in sequence with the
+    numbered episodes, and estimates are marked as such so a preview can show where a
+    decision rests on one. Returns how many were filled.
+    """
+    ordered = sorted((episode for episode in episodes if (episode.get('season') or 0) > 0),
+                     key=lambda episode: (episode.get('season') or 0, episode.get('episode') or 0))
+    known = [index for index, episode in enumerate(ordered) if episode.get('air_date')]
+    if not known:
+        return 0
+    filled = 0
+    for index, episode in enumerate(ordered):
+        if episode.get('air_date'):
+            continue
+        before = max((position for position in known if position < index), default=None)
+        after = min((position for position in known if position > index), default=None)
+        if before is not None and after is not None:
+            start = dt.date.fromisoformat(ordered[before]['air_date'][:10])
+            end = dt.date.fromisoformat(ordered[after]['air_date'][:10])
+            share = (index - before) / (after - before)
+            estimate = start + dt.timedelta(days=round((end - start).days * share))
+        elif before is not None:
+            estimate = dt.date.fromisoformat(ordered[before]['air_date'][:10])
+        else:
+            estimate = dt.date.fromisoformat(ordered[after]['air_date'][:10])
+        episode['air_date'] = estimate.isoformat()
+        episode['air_source'] = 'estimated'
+        filled += 1
+    return filled
+
+
 def effective_date(episode, allow_import_fallback):
     """The date an episode is judged by, and where that date came from.
 
-    Sonarr's air date is authoritative; TMDB fills gaps Sonarr leaves blank; the date
-    Sonarr imported the file is the last resort and can be switched off, in which case an
-    undated episode is never deleted. The import date comes from Sonarr rather than the
-    filesystem, so this needs no path mapping and no disk access.
+    In order: Sonarr's air date, then TMDB, then a date interpolated from the episodes
+    either side, then the date Sonarr imported the file. The import date is genuinely last
+    because re-importing an upgrade resets it, and it can be switched off entirely, in
+    which case an undated episode is never deleted.
     """
     if episode.get('air_date'):
         value = episode['air_date']
