@@ -61,3 +61,25 @@ class Build(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Interface(unittest.TestCase):
+    """Guards against the class of bug where an author `display` rule defeats `hidden`."""
+
+    @classmethod
+    def setUpClass(cls):
+        source = ROOT / 'src' / 'tv-delete'
+        cls.css = (source / 'assets' / 'app.css').read_text()
+        cls.js = (source / 'assets' / 'app.js').read_text()
+        cls.html = (source / 'include' / 'interface.html').read_text()
+
+    def test_the_hidden_attribute_is_forced_to_win(self):
+        self.assertRegex(self.css, r'#tv-delete \[hidden\][^{]*\{[^}]*display:\s*none\s*!important')
+
+    def test_every_element_the_script_hides_exists_in_the_markup(self):
+        import re
+        for identifier in set(re.findall(r"\$\('([a-z0-9-]+)'\)\.hidden", self.js)):
+            self.assertIn(f'id="{identifier}"', self.html, f'{identifier} is toggled but not in the markup')
+
+    def test_the_busy_overlay_starts_hidden(self):
+        self.assertRegex(self.html, r'id="tvd-busy"[^>]*hidden')

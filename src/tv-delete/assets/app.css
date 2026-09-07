@@ -4,6 +4,9 @@
   --tvd-warn: #d9822b; --tvd-bad: #c0392b; --tvd-good: #2e9e5b; --tvd-accent: #ff8c2b;
   max-width: 1180px; font-size: 13px; line-height: 1.5; }
 #tv-delete * { box-sizing: border-box; }
+/* An author display rule outranks the browser's [hidden] { display: none }, so any element
+   this page hides in script needs the attribute to win explicitly. */
+#tv-delete [hidden] { display: none !important; }
 #tv-delete h1 { font-size: 22px; margin: 0 0 2px; }
 #tv-delete .tvd-h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em;
   margin: 22px 0 8px; opacity: .75; }
