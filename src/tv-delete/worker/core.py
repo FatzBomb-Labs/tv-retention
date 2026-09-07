@@ -8,6 +8,7 @@ against fixtures, and so the UI preview and the scheduled run share one code pat
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -30,6 +31,9 @@ DEFAULTS = {
     'settings_version': SETTINGS_VERSION,
     'dry_run': True,
     'schedule': {'enabled': False, 'cron': '0 4 * * *'},
+    # A read-only daily check of Sonarr, matches, folders and monitoring.
+    'health': {'enabled': True, 'cron': '0 5 * * *', 'ttl_hours': 24, 'notify_ok': False},
+    'catalogue_ttl_minutes': 60,
     'instances': [],
     # Named retention presets. A rule either points at one, or carries its own values.
     'profiles': [],
@@ -128,6 +132,17 @@ def _whole(value, field, low, high, allow_none=True):
 
 def _flag(value) -> bool:
     return value in (True, 'true', 'True', 1, '1', 'on', 'yes')
+
+
+def _tristate(value, field):
+    """A per-rule override: yes, no, or inherit the global setting."""
+    if value in (None, '', 'inherit', 'default'):
+        return None
+    if value in (True, 'true', 'True', 1, '1', 'yes', 'on'):
+        return True
+    if value in (False, 'false', 'False', 0, '0', 'no', 'off'):
+        return False
+    raise Rejected(f'{field} must be yes, no, or inherit')
 
 
 def validate_cron(expression: str) -> str:
@@ -283,6 +298,8 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         tvdb_id=_whole(raw.get('tvdb_id'), 'TVDB id', 1, 2 ** 31 - 1),
         path=validate_library_path(raw.get('path'), 'Series folder'),
         unmonitor=_flag(raw.get('unmonitor', True)),
+        # Per show, because one series' specials are worth keeping and another's are not.
+        include_specials=_tristate(raw.get('include_specials'), 'Include specials'),
         # Match state is owned by the backend; the UI cannot assert a rule is matched.
         match_status='matched' if series_id else 'unmatched',
         match_error=_text(raw.get('match_error'), 'Match error', 500),
@@ -340,6 +357,7 @@ def validate_settings(raw, previous=None) -> dict:
         raise Rejected('Two rules point at the same folder; merge them instead')
 
     schedule_raw = raw.get('schedule') or {}
+    health_raw = raw.get('health') or {}
     guards_raw = raw.get('guards') or {}
     retention_raw = raw.get('retention') or {}
     sidecars_raw = raw.get('sidecars') or {}
@@ -377,6 +395,13 @@ def validate_settings(raw, previous=None) -> dict:
             'enabled': _flag(schedule_raw.get('enabled', False)),
             'cron': validate_cron(schedule_raw.get('cron') or DEFAULTS['schedule']['cron']),
         },
+        'health': {
+            'enabled': _flag(health_raw.get('enabled', True)),
+            'cron': validate_cron(health_raw.get('cron') or DEFAULTS['health']['cron']),
+            'ttl_hours': _whole(health_raw.get('ttl_hours', 24), 'Health cache lifetime', 1, 720, allow_none=False),
+            'notify_ok': _flag(health_raw.get('notify_ok', False)),
+        },
+        'catalogue_ttl_minutes': _whole(raw.get('catalogue_ttl_minutes', 60), 'Series list cache', 1, 10080, allow_none=False),
         'instances': instances,
         'profiles': profiles,
         'rules': rules,
@@ -597,7 +622,10 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     retention = settings.get('retention', DEFAULTS['retention'])
     guards = settings.get('guards', DEFAULTS['guards'])
     allow_mtime = bool(retention.get('allow_mtime_fallback', True))
-    include_specials = bool(retention.get('include_specials', False))
+    # A rule may override the global specials decision; None means inherit it.
+    include_specials = rule.get('include_specials')
+    if include_specials is None:
+        include_specials = bool(retention.get('include_specials', False))
     min_age = dt.timedelta(hours=int(guards.get('min_file_age_hours', 0)))
 
     protected, candidates = [], []
@@ -811,3 +839,29 @@ def describe_selectability(entry, exists: bool, in_use: bool) -> dict:
                 'reason': f'Sonarr reports {entry["episode_file_count"]} file(s) but the folder is '
                           'not on this server — check the path mapping'}
     return {'selectable': False, 'reason': 'no episodes imported yet, so Sonarr has not created its folder'}
+
+
+def rule_fingerprint(rule: dict, settings: dict) -> str:
+    """Identify everything that would move a rule's keep frame.
+
+    A cached monitoring result stays valid only while this is unchanged. It covers the
+    resolved retention values — so raising a shared preset invalidates every rule using it
+    — together with the global settings that shift the frame. It deliberately says nothing
+    about Sonarr's own state, which cannot be checked without asking Sonarr.
+    """
+    active = effective_rule(rule, settings.get('profiles'))
+    retention = settings.get('retention') or {}
+    guards = settings.get('guards') or {}
+    material = {
+        'keep_days': active.get('keep_days'),
+        'keep_episodes': active.get('keep_episodes'),
+        'keep_seasons': active.get('keep_seasons'),
+        'combine': active.get('combine'),
+        'include_specials': active.get('include_specials'),
+        'path': active.get('path'),
+        'series_id': active.get('series_id'),
+        'global_specials': retention.get('include_specials'),
+        'mtime_fallback': retention.get('allow_mtime_fallback'),
+        'min_file_age_hours': guards.get('min_file_age_hours'),
+    }
+    return hashlib.sha256(canonical_json(material).encode('utf-8')).hexdigest()[:16]

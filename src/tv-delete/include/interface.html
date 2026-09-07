@@ -12,6 +12,7 @@
 
 <div id="tvd-notice" role="status" aria-live="polite" hidden></div>
 <div id="tvd-array" class="tvd-warning" hidden>The array is stopped. Start it before previewing or running TV Delete.</div>
+<div id="tvd-health" class="tvd-warning" hidden></div>
 <div id="tvd-dry" class="tvd-banner" hidden><strong>Dry run is on.</strong> Runs report what they would delete and change nothing. Turn it off in Settings when you are satisfied with the preview.</div>
 
 <section class="tvd-stats" aria-label="Summary">
@@ -41,7 +42,6 @@
       <option value="unmatched">Unmatched only</option>
     </select>
     <span class="tvd-spacer"></span>
-    <button type="button" id="tvd-check-monitoring" class="tvd-secondary">Check all monitoring</button>
     <button type="button" id="tvd-rematch" class="tvd-secondary">Re-check Sonarr matches</button>
     <button type="button" id="tvd-add" class="tvd-primary">Add show</button>
   </div>
@@ -87,6 +87,24 @@
       </select>
     </label>
     <label class="tvd-field"><span>Cron expression</span><input type="text" id="tvd-schedule-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
+  </div>
+
+  <h2 class="tvd-h2">Health check</h2>
+  <div class="tvd-card">
+    <p class="tvd-lede">A read-only check of every rule: Sonarr reachable, the series still matched, the folder present, and monitoring recomputed. Results are cached, so the page shows them instantly instead of asking Sonarr each time you open it.</p>
+    <label class="tvd-check"><input type="checkbox" id="tvd-health-enabled"> Check automatically on a schedule</label>
+    <label class="tvd-field"><span>Frequency</span>
+      <select id="tvd-health-preset">
+        <option value="0 */6 * * *">Every 6 hours</option>
+        <option value="0 5 * * *">Daily at 05:00</option>
+        <option value="0 5 * * 0">Weekly, Sunday 05:00</option>
+        <option value="custom">Custom cron…</option>
+      </select>
+    </label>
+    <label class="tvd-field"><span>Cron expression</span><input type="text" id="tvd-health-cron" spellcheck="false"></label>
+    <label class="tvd-field"><span>Treat cached results as stale after (hours)</span><input type="number" id="tvd-health-ttl" min="1" max="720"><small>Older than this and the page refreshes them in the background when you open it.</small></label>
+    <label class="tvd-field"><span>Re-read the Sonarr series list after (minutes)</span><input type="number" id="tvd-catalogue-ttl" min="1" max="10080"><small>The most expensive call Sonarr offers. It is re-read immediately whenever an instance is changed.</small></label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-health-notify-ok"> Notify even when the check finds nothing wrong<small>Problems always notify. This adds a notification for a clean result.</small></label>
   </div>
 
   <h2 class="tvd-h2">Safety</h2>

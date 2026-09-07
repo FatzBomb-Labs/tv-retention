@@ -19,6 +19,7 @@ justified by real episode metadata rather than a file timestamp.
 - [Rules](#rules)
 - [Retention presets](#retention-presets)
 - [Monitoring status](#monitoring-status)
+- [The health check and caching](#the-health-check-and-caching)
 - [Re-monitoring when a rule is widened](#re-monitoring-when-a-rule-is-widened)
 - [Sonarr instances and path mapping](#sonarr-instances-and-path-mapping)
 - [Air dates and TMDB](#air-dates-and-tmdb)
@@ -80,6 +81,10 @@ A rule holds any combination of three conditions:
 | Keep days | Keep episodes that aired within this many days |
 | Keep episodes | Keep this many newest episodes |
 | Keep seasons | Keep this many newest seasons |
+
+Each rule also carries its own **Season 0 / specials** choice: inherit the global setting,
+include, or exclude. One show’s specials are worth keeping and another’s are not, so the
+global setting is only a default.
 
 Each condition votes to keep or delete each episode. The **combine mode** decides:
 
@@ -153,6 +158,42 @@ monitoring from the next episode.
 
 Setting this is optional. The plugin unmonitors what it deletes regardless; the pill
 exists so the state a library is already in is visible and fixable in one click.
+
+## The health check and caching
+
+Everything the pills show is cached on disk, so opening the tab costs one small read
+rather than a conversation with Sonarr. On this server a page load carries about 3 KB and
+returns in 50 ms, against roughly 6 seconds to gather the same information live.
+
+A scheduled **health check** keeps that cache honest. It is read-only — it never deletes
+and never changes a monitored flag — and for every enabled rule it verifies:
+
+1. the Sonarr instance answers and accepts the API key
+2. the rule still matches exactly one series
+3. the folder is present, or legitimately not created yet
+4. monitoring, recomputed against the current keep frame
+
+Problems raise **one** Unraid notification summarising them, never one per show, and each
+affected show is flagged on its own card with a banner at the top of the page. A clean
+result is silent unless you ask for it.
+
+What is cached, and for how long:
+
+| Cache | Default lifetime | Notes |
+|---|---|---|
+| Monitoring per show | 24 hours | Refreshed quietly in the background when the page finds it stale |
+| Sonarr series list | 60 minutes | The most expensive call Sonarr offers — 12 MB and about two seconds here |
+
+A cached reading always shows its age (*read 3 h ago*), because there is no cheap way to
+learn that someone changed a monitored flag in Sonarr — nothing short of fetching the
+episodes reveals it. So a cached number is a snapshot with a timestamp, never dressed up
+as live. Anything that moves a keep frame — a rule edited, a preset widened, the specials
+or mtime settings changed — invalidates the affected entries at once, without waiting for
+the next check. A run that deletes also re-reads the shows it touched, since deleting
+unmonitors.
+
+Episode-level detail is deliberately not carried on page load. It is fetched for one show
+when you open **Show the episodes…**.
 
 ## Re-monitoring when a rule is widened
 
@@ -280,7 +321,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 121 tests
+python3 -m unittest discover -s tests -v   # 140 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

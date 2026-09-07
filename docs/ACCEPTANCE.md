@@ -73,7 +73,17 @@ read-only or reversible.
       left the ledger.
 - [ ] Confirm an episode you unmonitored by hand in Sonarr is not affected.
 
-## 7. Schedule
+## 7. Health check and caching
+
+- [ ] Open the tab and confirm every pill is already populated, with no manual check.
+- [ ] Confirm each pill's menu shows when it was read.
+- [ ] Widen a preset and confirm the affected pills refresh rather than showing stale numbers.
+- [ ] Stop Sonarr briefly and run `main.py check`. Confirm one summary notification, the
+      banner at the top of the page, and the affected shows flagged individually.
+- [ ] Confirm `schedule.cron` holds both entries when the retention run and the health
+      check are enabled, and only the health entry when the run is off.
+
+## 8. Schedule
 
 - [ ] Enable a daily schedule. Confirm `/boot/config/plugins/tv-delete/schedule.cron`
       exists and `crontab -l` contains the entry.
@@ -81,12 +91,12 @@ read-only or reversible.
       appears in history marked *schedule*, and that an Unraid notification arrived.
 - [ ] Disable the schedule and confirm the cron file is removed.
 
-## 8. Restart
+## 9. Restart
 
 - [ ] Reboot, or stop and start the array. Confirm settings and rules survive, and that
       the cron entry is republished.
 
-## 9. Uninstall
+## 10. Uninstall
 
 - [ ] Remove the plugin. Confirm the cron entry is gone, and that `settings.json` and
       the journal remain.

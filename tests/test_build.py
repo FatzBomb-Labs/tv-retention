@@ -136,3 +136,19 @@ class Interface(unittest.TestCase):
         # An aligned show must not be offered a correction that would write nothing.
         self.assertRegex(self.js, r'if \(inside\) \{')
         self.assertRegex(self.js, r'if \(outside\) \{')
+
+    def test_the_script_is_not_prefixed_by_a_stray_fragment(self):
+        # A build-time edit once prepended a fragment above the opening comment, which
+        # broke the whole file. The header is cheap to assert and would have caught it.
+        self.assertTrue(self.js.lstrip().startswith('/* TV Delete web UI.'))
+        self.assertEqual(self.js.count("function render() {"), 1)
+
+    def test_braces_and_parentheses_balance(self):
+        for pair in ('{}', '()', '[]'):
+            self.assertEqual(self.js.count(pair[0]), self.js.count(pair[1]),
+                             f'unbalanced {pair} in app.js')
+
+    def test_the_manual_check_button_is_gone(self):
+        # The pill reads from the cache; the operator should never have to ask it to look.
+        self.assertNotIn('tvd-check-monitoring', self.js)
+        self.assertNotIn('tvd-check-monitoring', self.html)

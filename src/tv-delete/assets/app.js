@@ -138,7 +138,12 @@
   async function refresh() {
     snapshot = await api('snapshot', {}, 'Loading…');
     settings = snapshot.settings;
+    applyHealth(snapshot.health);
     render();
+    if (snapshot.health_stale && snapshot.array_ready) {
+      // Quietly, in the background: the page is already usable from the cache.
+      refreshHealth(false).catch((error) => notice(`Monitoring check failed: ${error.message}`, 'bad'));
+    }
   }
 
   function render() {
@@ -151,6 +156,7 @@
     renderInstances();
     renderSettings();
     renderHistory();
+    renderHealthBanner();
   }
 
   function renderStats() {
@@ -219,6 +225,8 @@
       if (preset) body.prepend(el('span', { className: 'tvd-chip on', textContent: `preset: ${preset.name}` }));
       body.append(el('span', { className: 'tvd-chip', textContent: `combine: ${(preset || rule).combine}` }));
       if (rule.unmonitor) body.append(el('span', { className: 'tvd-chip', textContent: 'unmonitor' }));
+      if (rule.include_specials === true) body.append(el('span', { className: 'tvd-chip on', textContent: 'specials included' }));
+      if (rule.include_specials === false) body.append(el('span', { className: 'tvd-chip', textContent: 'specials excluded' }));
 
       const actions = el('div', { className: 'tvd-rule-actions' });
       const previewButton = el('button', { type: 'button', textContent: 'Preview' });
@@ -246,8 +254,9 @@
   $('tvd-filter').addEventListener('change', renderRules);
 
   // -- monitoring --------------------------------------------------------
-  // Read from Sonarr on demand rather than on page load: one call per show would make
-  // opening the tab crawl on a large library.
+  // Never fetched on demand by the operator: the snapshot carries the cached results, and
+  // a stale cache is refreshed quietly in the background. Every reading shows its age, so
+  // a cached figure is never mistaken for a live one.
   let monitoring = {};
 
   const PILL_CLASS = {
@@ -255,10 +264,26 @@
     in_frame_unmonitored: 'warn', mixed: 'bad', unmatched: 'bad', empty: 'unknown',
   };
 
+  function ago(stamp) {
+    if (!stamp) return 'never checked';
+    const seconds = Math.max(0, (Date.now() - new Date(stamp).getTime()) / 1000);
+    if (seconds < 90) return 'just now';
+    if (seconds < 5400) return `${Math.round(seconds / 60)} min ago`;
+    if (seconds < 172800) return `${Math.round(seconds / 3600)} h ago`;
+    return `${Math.round(seconds / 86400)} days ago`;
+  }
+
+  const insideCount = (state) => state.in_frame_unmonitored_count
+    ?? (state.in_frame_unmonitored || []).length;
+  const outsideCount = (state) => state.out_frame_monitored_count
+    ?? (state.out_frame_monitored || []).length;
+
   function pillText(state) {
     // Short enough to sit beside a show title; the menu carries the full sentence.
-    const outside = (state.out_frame_monitored || []).length;
-    const inside = (state.in_frame_unmonitored || []).length;
+    const outside = outsideCount(state);
+    const inside = insideCount(state);
+    if (!state.ok) return state.label || 'Sonarr problem';
+    if (state.folder_ok === false) return 'Folder missing';
     if (state.status === 'aligned') return 'Monitoring aligned';
     if (state.status === 'empty') return 'No episodes';
     if (state.status === 'all_monitored') return `All ${state.total} monitored`;
@@ -295,11 +320,12 @@
   function monitorPill(rule) {
     const state = monitoring[rule.id];
     const holder = el('span', { className: 'tvd-pill-holder' });
-    const label = state ? pillText(state) : 'Monitoring: not checked';
-    const kind = state ? (PILL_CLASS[state.status] || 'unknown') : 'unknown';
+    const label = state ? pillText(state) : 'Monitoring: checking…';
+    let kind = 'unknown';
+    if (state) kind = (state.folder_ok === false || !state.ok) ? 'bad' : (PILL_CLASS[state.status] || 'unknown');
     const pill = el('button', {
       type: 'button', className: `tvd-pill ${kind}`, textContent: `${label} ▾`,
-      title: state ? state.label : 'Read this show’s monitoring from Sonarr',
+      title: state ? `${state.label} — read ${ago(state.checked_at)}` : 'Waiting for the first check',
     });
     pill.setAttribute('aria-haspopup', 'menu');
     pill.addEventListener('click', (event) => {
@@ -315,16 +341,18 @@
   // are offered, so an aligned show cannot be "corrected" into a pointless Sonarr write.
   function monitorMenu(rule, state) {
     if (!state) {
-      return [{ heading: 'Monitoring not read yet' },
-              { label: 'Check monitoring', run: () => guarded('', () => checkMonitoring([rule.id])) }];
+      return [{ heading: 'Not checked yet' },
+              { label: 'Check now', run: () => guarded('', () => refreshHealth(true)) }];
     }
+    const items = [{ heading: `${state.label} — read ${ago(state.checked_at)}` }];
+    if (state.folder_note) items.push({ heading: state.folder_note });
     if (!state.ok) {
-      return [{ heading: state.error || state.label },
-              { label: 'Re-check monitoring', run: () => guarded('', () => checkMonitoring([rule.id])) }];
+      items.push({ heading: state.error || '' });
+      items.push({ label: 'Check again now', run: () => guarded('', () => refreshHealth(true)) });
+      return items;
     }
-    const items = [{ heading: state.label }];
-    const inside = (state.in_frame_unmonitored || []).length;
-    const outside = (state.out_frame_monitored || []).length;
+    const inside = insideCount(state);
+    const outside = outsideCount(state);
     if (inside) {
       items.push({ label: `Monitor all within keep frame (${inside})`,
                    run: () => applyMonitoring(rule, 'monitor-in-frame', inside) });
@@ -333,18 +361,38 @@
       items.push({ label: `Unmonitor all outside keep frame (${outside})`,
                    run: () => applyMonitoring(rule, 'unmonitor-out-frame', outside) });
     }
-    if (inside || outside) items.push({ label: 'Show the episodes…', run: () => showMonitoring(rule, state) });
-    items.push({ label: `Re-check monitoring (${state.monitored}/${state.total} monitored)`,
-                 run: () => guarded('', () => checkMonitoring([rule.id])) });
+    if (inside || outside) {
+      items.push({ label: "Show the episodes…", run: () => guarded("", () => showMonitoring(rule)) });
+    }
+    items.push({ label: `Check again now (${state.monitored}/${state.total} monitored)`,
+                 run: () => guarded('', () => refreshHealth(true)) });
     return items;
   }
 
-  async function checkMonitoring(ruleIds) {
-    const data = await api('monitoring', ruleIds ? { rule_ids: ruleIds } : {},
-                           ruleIds && ruleIds.length === 1 ? 'Reading Sonarr…' : 'Reading monitoring from Sonarr…');
-    data.monitoring.forEach((state) => { monitoring[state.rule_id] = state; });
+  async function refreshHealth(force) {
+    const data = await api('health', { force: !!force }, 'Checking Sonarr…');
+    applyHealth(data.health);
     renderRules();
+    renderHealthBanner();
   }
+
+  function applyHealth(health) {
+    monitoring = (health && health.rules) || {};
+    snapshot.health = health || {};
+  }
+
+  function renderHealthBanner() {
+    const health = snapshot.health || {};
+    const problems = health.problems || [];
+    const box = $('tvd-health');
+    box.replaceChildren();
+    box.hidden = !problems.length;
+    if (!problems.length) return;
+    box.append(el('strong', { textContent: `${plural(problems.length, 'show')} need attention. ` }));
+    box.append(document.createTextNode(`Checked ${ago(health.checked_at)}.`));
+    problems.slice(0, 6).forEach((message) => box.append(el('div', { textContent: message })));
+  }
+
 
   function applyMonitoring(rule, mode, count) {
     return guarded('', async () => {
@@ -353,13 +401,17 @@
         : `Unmonitor ${plural(count, 'episode')} outside the keep frame for ${rule.series_title}? No files are deleted.`;
       if (!window.confirm(what)) return;
       const data = await api('monitor-apply', { rule_id: rule.id, mode }, 'Updating Sonarr…');
-      monitoring[rule.id] = data.monitoring;
+      monitoring[rule.id] = Object.assign({ checked_at: new Date().toISOString() }, data.monitoring);
       renderRules();
       notice(data.ok_message, 'ok');
     });
   }
 
-  function showMonitoring(rule, state) {
+  async function showMonitoring(rule) {
+    // Detail is not carried in the snapshot; it is read for this one show when opened.
+    const data = await api('monitoring', { rule_ids: [rule.id] }, 'Reading the episode list…');
+    const state = (data.monitoring || [])[0];
+    if (!state || !state.ok) throw new Error((state && state.error) || 'Could not read that show from Sonarr.');
     dialog(`${rule.series_title}: monitoring`, (body) => {
       body.append(el('p', { textContent: `${state.label}. ${state.total} episode(s) in Sonarr: `
         + `${state.in_frame} inside the keep frame (${state.unaired} not yet aired), ${state.out_frame} outside it.` }));
@@ -384,13 +436,6 @@
       return {};
     }, null, 'Close');
   }
-
-  $('tvd-check-monitoring').addEventListener('click', () => guarded('', async () => {
-    const matched = (settings.rules || []).filter((rule) => rule.match_status === 'matched');
-    if (!matched.length) throw new Error('No matched rules to check.');
-    await checkMonitoring(matched.map((rule) => rule.id));
-    notice(`Monitoring read for ${plural(matched.length, 'show')}.`, 'ok');
-  }));
 
   // -- retention presets -------------------------------------------------
   function presetSummary(preset) {
@@ -600,6 +645,11 @@
       presetSelect.addEventListener('change', applyPreset);
       applyPreset();
 
+      const specials = el('select');
+      [['', 'Use the global setting'], ['no', 'Exclude specials'], ['yes', 'Include specials']]
+        .forEach(([value, label]) => specials.append(el('option', { value, textContent: label })));
+      specials.value = rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : '');
+
       const enabled = checkbox('Rule is enabled', rule.enabled);
       const unmonitor = checkbox('Unmonitor these episodes in Sonarr after deleting', rule.unmonitor);
 
@@ -611,12 +661,14 @@
           ? 'Presets are managed on the Retention presets tab.'
           : 'No presets yet — create one there to reuse the same values across shows.'),
         conditions.node,
+        field('Season 0 / specials', specials,
+              'Per show. The global setting in Schedule & safety applies unless this overrides it.'),
         enabled.node, unmonitor.node,
       );
       modeSelect.value = existing && existing.series_id ? 'series' : (existing ? 'folder' : 'series');
       applyMode();
 
-      return { instanceSelect, modeSelect, seriesSelect, pathInput, presetSelect, conditions, enabled, unmonitor };
+      return { instanceSelect, modeSelect, seriesSelect, pathInput, presetSelect, conditions, specials, enabled, unmonitor };
     }, async (context) => {
       const draft = {
         id: rule.id || undefined,
@@ -628,6 +680,7 @@
         keep_seasons: context.presetSelect.value ? null : (context.conditions.seasons.value || null),
         combine: context.conditions.combine.value,
         unmonitor: context.unmonitor.input.checked,
+        include_specials: context.specials.value,
       };
       if (context.modeSelect.value === 'series') {
         const catalogue = await seriesFor(context.instanceSelect.value, rule.id);
@@ -846,6 +899,14 @@
     $('tvd-max-percent').value = guards.max_percent_per_rule;
     $('tvd-min-age').value = guards.min_file_age_hours;
     $('tvd-include-specials').checked = !!retention.include_specials;
+    const health = settings.health || {};
+    $('tvd-health-enabled').checked = !!health.enabled;
+    $('tvd-health-cron').value = health.cron || '0 5 * * *';
+    const healthPreset = $('tvd-health-preset');
+    healthPreset.value = [...healthPreset.options].some((option) => option.value === health.cron) ? health.cron : 'custom';
+    $('tvd-health-ttl').value = health.ttl_hours;
+    $('tvd-health-notify-ok').checked = !!health.notify_ok;
+    $('tvd-catalogue-ttl').value = settings.catalogue_ttl_minutes;
     $('tvd-mtime-fallback').checked = !!retention.allow_mtime_fallback;
     $('tvd-unmonitor').checked = !!retention.unmonitor_deleted;
     $('tvd-remonitor').checked = !!retention.remonitor_widened;
@@ -876,6 +937,9 @@
   $('tvd-schedule-preset').addEventListener('change', () => {
     if ($('tvd-schedule-preset').value !== 'custom') $('tvd-schedule-cron').value = $('tvd-schedule-preset').value;
   });
+  $('tvd-health-preset').addEventListener('change', () => {
+    if ($('tvd-health-preset').value !== 'custom') $('tvd-health-cron').value = $('tvd-health-preset').value;
+  });
 
   function collectSettings() {
     return Object.assign({}, settings, {
@@ -886,6 +950,13 @@
         max_percent_per_rule: $('tvd-max-percent').value,
         min_file_age_hours: $('tvd-min-age').value,
       },
+      health: {
+        enabled: $('tvd-health-enabled').checked,
+        cron: $('tvd-health-cron').value.trim(),
+        ttl_hours: $('tvd-health-ttl').value,
+        notify_ok: $('tvd-health-notify-ok').checked,
+      },
+      catalogue_ttl_minutes: $('tvd-catalogue-ttl').value,
       retention: {
         include_specials: $('tvd-include-specials').checked,
         allow_mtime_fallback: $('tvd-mtime-fallback').checked,

@@ -26,7 +26,7 @@ if (!is_string($provided) || $expected === '' || !hash_equals($expected, $provid
 $payload = $_POST['payload'] ?? '';
 if (!is_string($payload) || strlen($payload) > 1048576) fail_request(413, 'Request too large');
 $request = json_decode($payload, true);
-$actions = ['snapshot', 'settings', 'test-instance', 'detect-mappings', 'series', 'monitoring', 'monitor-apply', 'browse', 'match', 'preview', 'run', 'test-tmdb', 'clear-history'];
+$actions = ['snapshot', 'settings', 'test-instance', 'detect-mappings', 'series', 'monitoring', 'monitor-apply', 'browse', 'match', 'preview', 'run', 'test-tmdb', 'clear-history', 'health'];
 if (!is_array($request) || !in_array($request['action'] ?? '', $actions, true)) fail_request(400, 'Unknown action');
 if (!is_executable('/usr/bin/python3')) fail_request(503, 'Python 3 is unavailable on this server.');
 
