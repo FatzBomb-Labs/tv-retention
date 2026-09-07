@@ -482,8 +482,12 @@ def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool)
     when the series asked for them, because those are downloads.
     """
     targets = monitoring_targets(state, rule)
+    chosen = set(targets['monitor'])
     result = {'monitored': len(targets['monitor']), 'unmonitored': len(targets['unmonitor']),
-              'searched': 0, 'skipped_missing': targets['skipped_missing'], 'error': ''}
+              'searched': 0, 'skipped_missing': targets['skipped_missing'], 'error': '',
+              'monitor_list': [row for row in (state.get('in_frame_unmonitored') or [])
+                               if row.get('episode_id') in chosen],
+              'unmonitor_list': list(state.get('out_frame_monitored') or [])}
     if dry_run:
         return result
     try:
@@ -523,6 +527,8 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
         'unmonitored': 0,
         'unmonitored_frame': 0,
         'monitored': 0,
+        'monitor_list': [],
+        'unmonitor_list': [],
         'searched': 0,
         'remonitored': [],
     }
@@ -572,6 +578,11 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     outcome['monitored'] = reconciled['monitored']
     outcome['unmonitored_frame'] = reconciled['unmonitored']
     outcome['searched'] = reconciled['searched']
+    outcome['monitor_skipped'] = reconciled.get('skipped_missing', 0)
+    # The episodes themselves, so a detail view can list every change rather than only
+    # the deletions.
+    outcome['monitor_list'] = reconciled.get('monitor_list') or []
+    outcome['unmonitor_list'] = reconciled.get('unmonitor_list') or []
     if reconciled['error']:
         outcome['error'] = reconciled['error']
 
@@ -1201,13 +1212,19 @@ def plan_summary(settings: dict, health: dict) -> dict:
     interface must not hide the Run button on an answer it cannot vouch for.
     """
     totals = {'delete': 0, 'delete_bytes': 0, 'unmonitor': 0, 'monitor': 0, 'remove': 0,
-              'monitor_skipped': 0, 'series': 0, 'unknown': 0, 'blocked': 0, 'oldest': None}
+              'monitor_skipped': 0, 'series': 0, 'unknown': 0, 'blocked': 0, 'oldest': None,
+              'removals_by_action': {}}
     alerts_now = health.get('alerts') or []
     blocking = {alert['rule_id'] for alert in alerts_now if alert.get('blocking') and alert.get('rule_id')}
     for rule in settings.get('rules', []):
         # A queued removal counts wherever the rule stands: it is a change the run makes.
-        if (rule.get('queue') or {}).get('removal'):
+        removal = (rule.get('queue') or {}).get('removal')
+        if removal:
+            # Counted by what it asks Sonarr to do, not merely that something happens.
             totals['remove'] += 1
+            totals.setdefault('removals_by_action', {})
+            totals['removals_by_action'][removal['action']] = \
+                totals['removals_by_action'].get(removal['action'], 0) + 1
             totals['series'] += 1
             continue
         if not rule.get('enabled'):

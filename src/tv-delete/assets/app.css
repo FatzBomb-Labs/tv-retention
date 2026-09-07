@@ -336,17 +336,6 @@
 .tvd-inline-label { font-weight: 600; flex: 0 0 auto; min-width: 130px; }
 .tvd-instance-line .tvd-spacer { flex: 1; }
 
-/* Every scheduled change is a link to itself: the total opens all of them, each line
-   opens only what it names. */
-.tvd-plan-header { display: grid; gap: 2px; justify-items: start; }
-#tv-delete button.tvd-plan-total { border: none; background: none; padding: 0; font-weight: 600;
-  text-decoration: underline; border-radius: 0; }
-#tv-delete button.tvd-plan { border: none; background: none; padding: 0; font-size: 12px;
-  text-align: left; text-decoration: underline; border-radius: 0; }
-#tv-delete button.tvd-plan:hover { background: none; filter: brightness(1.15); }
-#tv-delete button.tvd-plan.delete { color: var(--tvd-bad); }
-#tv-delete button.tvd-plan.unmonitor { color: var(--tvd-warn); }
-#tv-delete button.tvd-plan.monitor { color: var(--tvd-good); }
 
 /* Severity as a dot, with no character to be sized by the font. */
 .tvd-sev { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%;
@@ -357,3 +346,26 @@
 .tvd-alert-line { align-items: center; }
 #tv-delete .tvd-sonarr-link { opacity: .5; font-size: 11px; text-decoration: none; color: inherit; }
 #tv-delete .tvd-sonarr-link:hover { opacity: 1; }
+
+/* Scheduled changes: tight lines under the run button, right aligned, with the refresh
+   control beside them rather than above. Every line opens what it names. */
+.tvd-head-actions { flex-direction: column; align-items: flex-end; gap: 6px; }
+.tvd-head-plan { display: flex; align-items: flex-start; gap: 8px; }
+.tvd-plan-header { display: grid; gap: 0; justify-items: end; text-align: right; }
+.tvd-plan-list { display: grid; gap: 0; }
+.tvd-plan, .tvd-plan-quiet { line-height: 1.35; }
+#tv-delete button.tvd-plan-total { border: none; background: none; padding: 0; font-weight: 600;
+  text-decoration: underline; border-radius: 0; line-height: 1.35; }
+#tv-delete button.tvd-plan { border: none; background: none; padding: 0; font-size: 12px;
+  text-align: inherit; text-decoration: underline; border-radius: 0; }
+#tv-delete button.tvd-plan:hover { background: none; filter: brightness(1.15); }
+#tv-delete button.tvd-plan.delete { color: var(--tvd-bad); }
+#tv-delete button.tvd-plan.unmonitor { color: var(--tvd-warn); }
+#tv-delete button.tvd-plan.monitor { color: var(--tvd-good); }
+
+/* Icon buttons are square: the generic button padding made them oblong. */
+#tv-delete button.tvd-icon-button { width: 28px; height: 28px; min-width: 28px; padding: 0;
+  display: inline-grid; place-items: center; border-radius: 4px; opacity: .6; flex: 0 0 28px; }
+#tv-delete button.tvd-icon-button:hover { opacity: 1; }
+#tv-delete button.tvd-icon-large { width: 34px; height: 34px; min-width: 34px; flex-basis: 34px;
+  font-size: 15px; }

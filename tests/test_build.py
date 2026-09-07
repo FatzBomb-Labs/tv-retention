@@ -356,23 +356,18 @@ class Interface(unittest.TestCase):
         for word in ('Remove', 'Delete'):
             self.assertNotIn(f"textContent: '{word}", card.group(1))
 
-    def test_shows_is_only_used_where_it_is_defined(self):
-        """A helper referenced outside its closure throws at runtime, not at parse time.
+    def test_the_change_filter_is_passed_not_captured(self):
+        """`shows` once leaked out of its closure and would have thrown at runtime.
 
-        `shows` belongs to the scheduled-changes dialog; the run-result dialog renders the
-        same shape of data and once picked it up by mistake.
+        The shared renderer now takes it as a parameter, so it cannot be referenced where
+        it does not exist — this asserts it stays a parameter rather than a free variable.
         """
-        import re
-        for match in re.finditer(r'function (\w+)\([^)]*\)\s*\{', self.js):
-            name = match.group(1)
-            if name != 'changeList':
-                continue
-            start = match.end()
-            depth, index = 1, start
-            while depth and index < len(self.js):
-                depth += {'{': 1, '}': -1}.get(self.js[index], 0)
-                index += 1
-            inside = self.js[start:index]
-            outside = self.js[:start] + self.js[index:]
-            self.assertIn("shows('delete')", inside)
-            self.assertNotIn("shows('delete')", outside, 'shows() escaped changeList')
+        self.assertRegex(self.js, r'function changeRows\(rule, shows\)')
+        self.assertRegex(self.js, r'changeRows\(rule, \(\) => true\)')
+        self.assertRegex(self.js, r'changeRows\(rule, shows\)')
+
+    def test_one_component_describes_every_change(self):
+        # Four places used to render changes; adding a kind meant editing all four.
+        for name in ('function changeSummary', 'function changeLines', 'function changeRows'):
+            self.assertIn(name, self.js)
+        self.assertNotIn('function planLines', self.js)

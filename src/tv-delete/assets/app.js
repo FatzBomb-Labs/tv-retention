@@ -430,31 +430,92 @@
 
   // Each line opens exactly what it names. The total replaces the old button: a count you
   // can read is more use than a button that only promises one.
-  const PLAN_KINDS = [
-    ['remove', 'delete', (plan) => `${plural(plan.remove, 'series')} will be removed`],
-    ['delete', 'delete', (plan) => `${plural(plan.delete, 'episode')} scheduled for deletion (${bytes(plan.delete_bytes)})`],
-    ['monitor', 'monitor', (plan) => `${plural(plan.monitor, 'episode')} will be set to monitored`],
-    ['unmonitor', 'unmonitor', (plan) => `${plural(plan.unmonitor, 'episode')} will be set to unmonitored`],
-  ];
+  // -- changes -----------------------------------------------------------
+  // One description of what a change is, used everywhere one is shown: the header, a
+  // series card, the detail view and the report after a run. Adding a kind of change means
+  // adding it here once, rather than in four places that then drift apart.
+  const REMOVAL_SUMMARY = {
+    'remove': (n) => `${plural(n, 'series')} will stop being managed here`,
+    'monitor-all': (n) => `${plural(n, 'series')} will be set to fully monitored in Sonarr`,
+    'unmonitor-all': (n) => `${plural(n, 'series')} will be set to fully unmonitored in Sonarr`,
+    'monitor-in-frame': (n) => `${plural(n, 'series')} will have their kept episodes monitored`,
+    'delete-series': (n) => `${plural(n, 'series')} will be deleted from Sonarr, keeping files`,
+    'delete-series-files': (n) => `${plural(n, 'series')} will be deleted from Sonarr with their files`,
+  };
 
-  // Not a scheduled change — the opposite — but worth saying, because it is the difference
-  // between a run that costs nothing and one that starts hundreds of downloads.
-  function skippedLine(plan) {
-    if (!plan.monitor_skipped) return null;
-    return el('div', { className: 'tvd-plan-quiet',
-                       textContent: `${plural(plan.monitor_skipped, 'missing episode')} inside the keep `
-                         + 'window left unmonitored — enable “missing episodes” per series to fetch them' });
+  // kind -> [tone, count, description]. Tone is the colour; the verb lives in the text.
+  function changeSummary(plan) {
+    const rows = [];
+    Object.entries((plan.removals_by_action) || {}).forEach(([action, count]) => {
+      rows.push({ kind: 'remove', tone: action.startsWith('delete') ? 'delete' : 'unmonitor',
+                  text: (REMOVAL_SUMMARY[action] || REMOVAL_SUMMARY.remove)(count) });
+    });
+    if (plan.delete) {
+      rows.push({ kind: 'delete', tone: 'delete',
+                  text: `${plural(plan.delete, 'episode')} scheduled for deletion (${bytes(plan.delete_bytes)})` });
+    }
+    if (plan.monitor) {
+      rows.push({ kind: 'monitor', tone: 'monitor',
+                  text: `${plural(plan.monitor, 'episode')} will be set to monitored` });
+    }
+    if (plan.unmonitor) {
+      rows.push({ kind: 'unmonitor', tone: 'unmonitor',
+                  text: `${plural(plan.unmonitor, 'episode')} will be set to unmonitored` });
+    }
+    return rows;
   }
 
-  function planLines(plan, onOpen, className) {
-    const list = el('div', { className: `tvd-plan-list${className ? ' ' + className : ''}` });
-    PLAN_KINDS.forEach(([key, tone, describe]) => {
-      if (!plan[key]) return;
-      const line = el('button', { type: 'button', className: `tvd-plan ${tone}`, textContent: describe(plan) });
-      line.addEventListener('click', () => onOpen(key));
+  function changeLines(plan, onOpen) {
+    const rows = changeSummary(plan);
+    const list = el('div', { className: 'tvd-plan-list' });
+    // The total only earns its line when more than one kind of thing is happening.
+    if (rows.length > 1 && onOpen) {
+      const total = el('button', { type: 'button', className: 'tvd-plan-total',
+                                   textContent: plural(plan.actionable, 'scheduled change') });
+      total.addEventListener('click', () => onOpen('all'));
+      list.append(total);
+    }
+    rows.forEach((row) => {
+      const line = onOpen
+        ? el('button', { type: 'button', className: `tvd-plan ${row.tone}`, textContent: row.text })
+        : el('div', { className: `tvd-plan ${row.tone}`, textContent: row.text });
+      if (onOpen) line.addEventListener('click', () => onOpen(row.kind));
       list.append(line);
     });
+    if (plan.monitor_skipped) {
+      list.append(el('div', { className: 'tvd-plan-quiet',
+                              textContent: `${plural(plan.monitor_skipped, 'missing episode')} left unmonitored` }));
+    }
     return list;
+  }
+
+  // Every episode a change touches, coloured by what happens to it. Shown in full: if you
+  // opened the detail you already asked for it, and hiding it behind a second click only
+  // meant the monitoring changes were never visible at all.
+  function changeRows(rule, shows) {
+    const rows = el('div', { className: 'tvd-changes' });
+    const label = (item) => `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')}`
+      + ` — ${item.title || ''}`;
+    if (shows('delete')) {
+      (rule.deleted || []).slice(0, 300).forEach((item) => rows.append(el('div', { className: 'tvd-change delete' }, [
+        el('span', { className: 'tvd-change-verb', textContent: 'delete' }),
+        el('span', { textContent: `${label(item)} · ${item.air_date || 'undated'} (${item.air_source}) · ${bytes(item.size)}` }),
+        el('span', { className: 'tvd-change-why', textContent: item.reason || '' }),
+      ])));
+    }
+    if (shows('monitor')) {
+      (rule.monitor_list || []).slice(0, 300).forEach((item) => rows.append(el('div', { className: 'tvd-change monitor' }, [
+        el('span', { className: 'tvd-change-verb', textContent: 'monitor' }),
+        el('span', { textContent: `${label(item)}${item.has_file ? '' : ' · missing'}` }),
+      ])));
+    }
+    if (shows('unmonitor')) {
+      (rule.unmonitor_list || []).slice(0, 300).forEach((item) => rows.append(el('div', { className: 'tvd-change unmonitor' }, [
+        el('span', { className: 'tvd-change-verb', textContent: 'unmonitor' }),
+        el('span', { textContent: `${label(item)}${item.has_file ? '' : ' · missing'}` }),
+      ])));
+    }
+    return rows;
   }
 
   function renderPlanHeader() {
@@ -473,12 +534,7 @@
       const data = await api('preview', {}, 'Working out what would change…');
       changeList(data.result, 'Scheduled changes', kind);
     });
-    const total = el('button', { type: 'button', className: 'tvd-plan-total',
-                                 textContent: `${plural(plan.actionable, 'scheduled change')}` });
-    total.addEventListener('click', () => open('all'));
-    box.append(total, planLines(plan, open));
-    const skipped = skippedLine(plan);
-    if (skipped) box.append(skipped);
+    box.append(changeLines(plan, open));
   }
 
   function renderStats() {
@@ -507,38 +563,27 @@
     dialog(title, (body) => {
       const rows = result.rules.filter((rule) =>
         (shows('delete') && rule.deleted.length)
-        || (shows('unmonitor') && rule.unmonitored_frame)
-        || (shows('monitor') && rule.monitored));
-      const removals = wanted ? [] : (result.removals || []);
+        || (shows('unmonitor') && (rule.unmonitor_list || []).length)
+        || (shows('monitor') && (rule.monitor_list || []).length));
+      const removals = shows('remove') ? (result.removals || []) : [];
       if (!rows.length && !removals.length) {
         body.append(el('p', { textContent: 'Nothing would change.' }));
         return {};
       }
-      const totals = { del: 0, bytes: 0, unmon: 0, mon: 0 };
-      rows.forEach((rule) => {
-        totals.del += rule.deleted.length;
-        totals.bytes += rule.freed_bytes || 0;
-        totals.unmon += rule.unmonitored_frame || 0;
-        totals.mon += rule.monitored || 0;
+      const totals = { delete: 0, delete_bytes: 0, monitor: 0, unmonitor: 0, monitor_skipped: 0,
+                       removals_by_action: {}, actionable: 0 };
+      removals.forEach((record) => {
+        totals.removals_by_action[record.action] = (totals.removals_by_action[record.action] || 0) + 1;
       });
-      const summary = el('div', { className: 'tvd-plan-list tvd-plan-summary' });
-      if (removals.length) {
-        summary.append(el('div', { className: 'tvd-plan delete',
-                                   textContent: `${plural(removals.length, 'series')} will be removed` }));
-      }
-      if (totals.del) {
-        summary.append(el('div', { className: 'tvd-plan delete',
-                                   textContent: `${plural(totals.del, 'episode')} scheduled for deletion (${bytes(totals.bytes)})` }));
-      }
-      if (totals.mon) {
-        summary.append(el('div', { className: 'tvd-plan monitor',
-                                   textContent: `${plural(totals.mon, 'episode')} will be set to monitored` }));
-      }
-      if (totals.unmon) {
-        summary.append(el('div', { className: 'tvd-plan unmonitor',
-                                   textContent: `${plural(totals.unmon, 'episode')} will be set to unmonitored` }));
-      }
-      body.append(summary);
+      rows.forEach((rule) => {
+        totals.delete += rule.deleted.length;
+        totals.delete_bytes += rule.freed_bytes || 0;
+        totals.monitor += (rule.monitor_list || []).length;
+        totals.unmonitor += (rule.unmonitor_list || []).length;
+        totals.monitor_skipped += rule.monitor_skipped || 0;
+      });
+      totals.actionable = totals.delete + totals.monitor + totals.unmonitor + removals.length;
+      body.append(el('div', { className: 'tvd-plan-summary' }, [changeLines(totals, null)]));
 
       removals.forEach((record) => {
         body.append(el('div', { className: 'tvd-change-series' }, [
@@ -549,32 +594,7 @@
       rows.forEach((rule) => {
         const card = el('div', { className: 'tvd-change-series' });
         card.append(el('strong', { textContent: rule.series_title }));
-        const lines = el('div', { className: 'tvd-plan-list' });
-        if (rule.deleted.length && shows('delete')) {
-          lines.append(el('div', { className: 'tvd-plan delete',
-                                   textContent: `${plural(rule.deleted.length, 'episode')} deleted (${bytes(rule.freed_bytes)})` }));
-        }
-        if (rule.monitored && shows('monitor')) {
-          lines.append(el('div', { className: 'tvd-plan monitor',
-                                   textContent: `${plural(rule.monitored, 'episode')} set to monitored` }));
-        }
-        if (rule.unmonitored_frame && shows('unmonitor')) {
-          lines.append(el('div', { className: 'tvd-plan unmonitor',
-                                   textContent: `${plural(rule.unmonitored_frame, 'episode')} set to unmonitored` }));
-        }
-        card.append(lines);
-        if (rule.deleted.length && shows('delete')) {
-          const detail = el('div', { className: 'tvd-alert-files', hidden: true });
-          rule.deleted.slice(0, 200).forEach((item) => detail.append(el('div', {
-            className: 'tvd-mono',
-            textContent: `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')}`
-              + ` — ${item.title || ''} · ${item.air_date || 'undated'} (${item.air_source}) · ${bytes(item.size)}`,
-          })));
-          const show = el('button', { type: 'button', className: 'tvd-link',
-                                      textContent: `List ${plural(rule.deleted.length, 'episode')}` });
-          show.addEventListener('click', () => { detail.hidden = !detail.hidden; });
-          card.append(show, detail);
-        }
+        card.append(changeRows(rule, shows));
         body.append(card);
       });
       return {};
@@ -805,9 +825,7 @@
           const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
           changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
         });
-        const lines = planLines(plan, open);
-        const skipped = skippedLine(plan);
-        if (skipped) lines.append(skipped);
+        const lines = changeLines(plan, open);
         line.append(lines);
         line.append(el('span', { className: 'tvd-plan-quiet', textContent: `checked ${ago(state.checked_at)}` }));
       } else {
@@ -1696,45 +1714,23 @@
       if (result.aborted) body.append(el('div', { className: 'tvd-warning', textContent: result.aborted }));
       (result.blocked || []).forEach((message) => body.append(el('div', { className: 'tvd-warning', textContent: message })));
       body.append(el('p', { textContent:
-        `${result.planned} file(s) selected across ${result.rules.length} series in ${result.duration_seconds}s.`
-        + (result.dry_run ? ' Preview: nothing was changed.' : ` ${bytes(result.freed_bytes)} reclaimed.`)
-        + (result.remonitored ? ` ${result.remonitored} episode(s) re-monitored.` : '') }));
-      result.rules.forEach((rule) => {
-        const card = el('div', { className: `tvd-rule ${rule.ok ? 'ok' : 'blocked'}` });
-        card.append(el('div', { className: 'tvd-rule-head' }, [
-          el('span', { className: 'tvd-rule-title', textContent: rule.series_title }),
-          el('span', { className: 'tvd-chip', textContent: `${rule.deleted.length} selected` }),
-          el('span', { className: 'tvd-chip', textContent: `${rule.kept} kept` }),
-          el('span', { className: 'tvd-chip', textContent: `${rule.protected} protected` }),
+        `${result.planned} file(s) across ${result.rules.length} series in ${result.duration_seconds}s.`
+        + (result.dry_run ? ' Nothing was changed.' : ` ${bytes(result.freed_bytes)} reclaimed.`) }));
+      (result.removals || []).forEach((record) => {
+        body.append(el('div', { className: 'tvd-change-series' }, [
+          el('strong', { textContent: record.series_title }),
+          el('div', { className: 'tvd-plan delete', textContent: record.label }),
         ]));
-        if (rule.preset) card.append(el('small', { textContent: `Preset: ${rule.preset}` }));
-        if (rule.note) card.append(el('small', { textContent: rule.note }));
+      });
+      result.rules.forEach((rule) => {
+        if (!rule.deleted.length && !(rule.monitor_list || []).length
+            && !(rule.unmonitor_list || []).length && !rule.error) return;
+        const card = el('div', { className: 'tvd-change-series' });
+        card.append(el('strong', { textContent: rule.series_title }));
         if (rule.error) card.append(el('div', { className: 'tvd-error', textContent: rule.error }));
-        if (rule.blocked) card.append(el('div', { className: 'tvd-warning', textContent: rule.blocked }));
-        if ((rule.remonitored || []).length) {
-          card.append(el('p', { textContent: `${rule.remonitored.length} previously removed episode(s) `
-            + `${result.dry_run ? 'would be' : 'were'} re-monitored.` }));
-        }
-        if (rule.deleted.length) {
-          const table = el('table', { className: 'tvd-table' });
-          table.append(el('thead', { innerHTML: '<tr><th>Episode</th><th>Aired</th><th>Size</th><th>Why</th></tr>' }));
-          const tbody = el('tbody');
-          rule.deleted.slice(0, 200).forEach((item) => {
-            const tr = el('tr');
-            tr.append(el('td', {}, [
-              el('div', { textContent: `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')} — ${item.title || ''}` }),
-              el('div', { className: 'tvd-mono', textContent: item.path })]));
-            tr.append(el('td', { textContent: item.air_date ? `${item.air_date} (${item.air_source})` : 'unknown' }));
-            tr.append(el('td', { textContent: bytes(item.size) }));
-            tr.append(el('td', { textContent: (item.error ? `FAILED: ${item.error} — ` : '') + (item.reason || '') }));
-            tbody.append(tr);
-          });
-          table.append(tbody);
-          card.append(el('div', { className: 'tvd-scroll' }, [table]));
-          if (rule.deleted.length > 200) {
-            card.append(el('small', { textContent: `…and ${rule.deleted.length - 200} more. The full list is in the journal.` }));
-          }
-        }
+        if (rule.note) card.append(el('small', { textContent: rule.note }));
+        // The same renderer the scheduled view uses, so a report and a plan read alike.
+        card.append(changeRows(rule, () => true));
         body.append(card);
       });
       return {};
