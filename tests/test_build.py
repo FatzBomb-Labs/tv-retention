@@ -164,3 +164,32 @@ class Interface(unittest.TestCase):
     def test_a_background_sweep_is_watched_not_duplicated(self):
         self.assertIn('startPolling', self.js)
         self.assertIn('data.busy', self.js)
+
+    def test_every_module_constant_used_is_declared(self):
+        """Catch a constant left behind when an edit replaced the block that declared it.
+
+        A syntax check cannot see this: `PILL_ENDED is not defined` is a runtime error, and
+        it broke the whole page once because a batched edit dropped the declaration while
+        leaving two uses behind. Only SCREAMING_SNAKE names are considered — that is the
+        shape every constant in this file has, and it keeps prose like "TVDB" or "HTTP"
+        out of the comparison without needing an allowlist to be maintained.
+        """
+        import re
+        code = re.sub(r'/\*.*?\*/', ' ', self.js, flags=re.S)
+        code = re.sub(r'//[^\n]*', ' ', code)
+        # Template literals first: they nest the other quote styles inside ${...}, so
+        # stripping the plain quotes first would eat across their boundaries.
+        for quote in ('`', '"', "'"):
+            code = re.sub(quote + r'(?:\\.|[^' + quote + r'\\])*' + quote, ' ', code, flags=re.S)
+        shape = r'\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b'
+        declared = set(re.findall(r'\b(?:const|let|var)\s+' + shape, code))
+        used = set(re.findall(shape, code))
+        missing = sorted(used - declared)
+        self.assertEqual(missing, [], f'used but never declared in app.js: {missing}')
+        self.assertIn('PILL_ENDED', declared, 'the test must be seeing real constants')
+
+    def test_an_ended_show_still_keeping_episodes_reads_differently(self):
+        # Same options, deliberately not the same colour or wording.
+        self.assertIn("PILL_ENDED_SPENT", self.js)
+        self.assertRegex(self.js, r"lifecycle === 'ended'\) kind = 'ended'")
+        self.assertIn('tvd-pill.ended', (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text())

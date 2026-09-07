@@ -396,6 +396,9 @@
     if (state.folder_ok === false) return 'Folder missing';
     if (state.lifecycle === 'ended_expired') return 'Ended · retention expired';
     if (state.lifecycle === 'ended_empty') return 'Ended · no files left';
+    // Ended, but the rule is still keeping episodes: worth saying, not worth warning about.
+    if (state.lifecycle === 'ended') return `Ended · ${state.files_in_frame} kept`;
+
     if (state.status === 'aligned') return 'Monitoring aligned';
     if (state.status === 'empty') return 'No episodes';
     if (state.status === 'all_monitored') return `All ${state.total} monitored`;
@@ -429,6 +432,14 @@
     openMenu = box;
   }
 
+  // Every lifecycle that ends a show, whether or not anything is still being kept. The
+  // menu is the same in both cases; the pill deliberately is not.
+  const PILL_ENDED = new Set(['ended', 'ended_expired', 'ended_empty']);
+  // Only these two mean the rule has nothing left to do, and only they get the warning
+  // colour. A show that ended while still inside its keep frame is simply a fact.
+  const PILL_ENDED_SPENT = new Set(['ended_expired', 'ended_empty']);
+
+
   function monitorPill(rule) {
     const state = monitoring[rule.id];
     const busyNow = isChecking(rule.id);
@@ -438,7 +449,8 @@
     if (busyNow) kind = 'busy';
     else if (state) {
       if (state.folder_ok === false || !state.ok) kind = 'bad';
-      else if (PILL_ENDED.has(state.lifecycle)) kind = 'warn';
+      else if (PILL_ENDED_SPENT.has(state.lifecycle)) kind = 'warn';
+      else if (state.lifecycle === 'ended') kind = 'ended';
       else kind = PILL_CLASS[state.status] || 'unknown';
     }
     const pill = el('button', {
@@ -486,9 +498,13 @@
       items.push({ label: "Show the episodes…", run: () => guarded("", () => showMonitoring(rule)) });
     }
     if (PILL_ENDED.has(state.lifecycle)) {
+      const spent = PILL_ENDED_SPENT.has(state.lifecycle);
       items.push({ heading: state.lifecycle === 'ended_empty'
         ? 'Sonarr says this show has ended and no files remain.'
-        : 'Sonarr says this show has ended and nothing is left inside the keep frame.' });
+        : (spent
+          ? 'Sonarr says this show has ended and nothing is left inside the keep frame.'
+          : `Sonarr says this show has ended. ${state.files_in_frame} file(s) are still inside `
+            + 'the keep frame, so the rule is still keeping them.') });
       items.push({ label: 'Remove this rule (keeps every file)', run: () => removeRule(rule) });
       if (settings.allow_series_deletion) {
         items.push({ label: 'Delete the show from disk and Sonarr…', danger: true,
@@ -905,8 +921,15 @@
         + 'dry run, it is not covered by the deletion guards, and it cannot be undone from '
         + 'here — only Sonarr’s own recycle bin, if you have one, will hold anything.' }));
       body.append(el('p', { textContent:
-        `${state.files_total || 0} file(s) belong to this series. Sonarr reports it as ended, `
-        + 'and nothing remains inside the keep frame.' }));
+        `${state.files_total || 0} file(s) belong to this series. Sonarr reports it as ended.` }));
+      if (!PILL_ENDED_SPENT.has(state.lifecycle) && state.files_in_frame) {
+        // Deleting a show the rule is still actively keeping deserves saying out loud.
+        body.append(el('div', { className: 'tvd-warning', textContent:
+          `${state.files_in_frame} of those file(s) are inside the keep frame — this rule is `
+          + 'still keeping them. Deleting the show discards them anyway.' }));
+      } else {
+        body.append(el('p', { textContent: 'Nothing remains inside the keep frame.' }));
+      }
       body.append(el('div', { className: 'tvd-mono', textContent: rule.path }));
       const confirm = el('input', { type: 'text', autocomplete: 'off', spellcheck: false });
       body.append(field(`Type the show’s name to confirm: ${rule.series_title}`, confirm));

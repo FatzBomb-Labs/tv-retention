@@ -148,8 +148,13 @@ like an orphan to an instance that does not own it.
 When Sonarr reports a series as ended and nothing remains inside its keep frame, the pill
 says so — the rule will otherwise sit there for ever doing nothing. Its menu then offers:
 
-- **Remove this rule** — keeps every file. 
+- **Remove this rule** — keeps every file.
 - **Delete the show from disk and Sonarr** — only when enabled in *Schedule & safety*.
+
+A show that has ended while its rule is **still keeping episodes** says so too, in a
+deliberately different colour: it is a statement of fact, not a decision waiting to be
+made. The same two options are offered, and choosing to delete it warns that the files it
+is about to discard are ones the rule is actively keeping.
 
 The second is the only action here that destroys a whole show. It is refused while dry run
 is on, it is not covered by the deletion guards, and it requires the show’s name typed
@@ -374,7 +379,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 170 tests
+python3 -m unittest discover -s tests -v   # 172 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

@@ -145,3 +145,7 @@
 #tv-delete button.tvd-pill.busy { border-style: dashed; opacity: .85; cursor: progress; }
 .tvd-busy-row { opacity: .82; }
 #tvd-checking { display: flex; align-items: center; gap: 8px; }
+
+/* A show Sonarr says has ended. Two distinct readings: still keeping episodes is a plain
+   statement of fact, while nothing left in the frame is a decision waiting to be made. */
+#tv-delete button.tvd-pill.ended { border-color: #6a7f97; color: #8aa6c4; background: rgba(106,127,151,.14); }
