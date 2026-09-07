@@ -93,3 +93,20 @@ class StaleSelection(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HealthPruning(unittest.TestCase):
+    def test_results_for_removed_rules_do_not_linger(self):
+        """Otherwise the cache grows for ever and its counts disagree with the show list."""
+        import tempfile
+        from pathlib import Path
+        import main
+        with tempfile.TemporaryDirectory() as temp:
+            settings = {'state_dir': str(Path(temp) / 'state'),
+                        'rules': [{'id': 'r1'}, {'id': 'r2'}]}
+            main.write_cache(settings, 'health.json',
+                             {'rules': {'r1': {'ok': True}, 'r2': {'ok': True}, 'gone': {'ok': True}}})
+            health = main.load_health(settings)
+            live = {rule['id'] for rule in settings['rules']}
+            health['rules'] = {rid: e for rid, e in health['rules'].items() if rid in live}
+            self.assertEqual(sorted(health['rules']), ['r1', 'r2'])

@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from core import (DEFAULTS, VERSION, Rejected, atomic_json, canonical_json, derive_mappings,
+from core import (CACHE_SCHEMA, DEFAULTS, VERSION, Rejected, atomic_json, canonical_json, derive_mappings,
                   effective_rule, empty_directories, evaluate, new_id, normalise, redact,
                   scan_media, select_remonitor, sidecars_for, validate_cron, validate_settings,
                   classify_monitoring, classify_orphan, describe_lifecycle, describe_selectability,
@@ -690,16 +690,22 @@ def catalogue_for(settings: dict, instance_id: str, force: bool = False) -> list
 
     This is the single most expensive Sonarr call — 12 MB and about two seconds on a
     three thousand series library — and it is needed for matching, for the series picker,
-    and for the connection test. Caching it is worth more than caching anything else.
+    and for the connection test.
+
+    The cache holds *mapped* series, so it is keyed by the cache schema as well as by age:
+    adding a field to the mapping has to retire what is stored, or the new field reads as
+    absent everywhere until the entry happens to expire. That is exactly how the ended
+    pill stayed blank after the mapping learned to carry a series' ended flag.
     """
     cache = read_cache(settings, 'catalogue.json')
     entry = cache.get(instance_id) or {}
     ttl = int(settings.get('catalogue_ttl_minutes', 60)) * 60
     age = age_seconds(entry.get('fetched_at'))
-    if not force and entry.get('series') and age is not None and age < ttl:
+    fresh = entry.get('series') and entry.get('schema') == CACHE_SCHEMA and age is not None and age < ttl
+    if not force and fresh:
         return entry['series']
     series = client_for(settings, instance_id).series()
-    cache[instance_id] = {'fetched_at': now_iso(), 'series': series}
+    cache[instance_id] = {'schema': CACHE_SCHEMA, 'fetched_at': now_iso(), 'series': series}
     write_cache(settings, 'catalogue.json', cache)
     return series
 
@@ -884,6 +890,10 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
                 problems.append(f'{state["series_title"]}: {state.get("folder_note")}')
 
         health = load_health(settings)
+        # Results for rules that no longer exist would otherwise accumulate for ever and
+        # make the counts disagree with the list on screen.
+        live = {rule['id'] for rule in settings.get('rules', [])}
+        health['rules'] = {rid: entry for rid, entry in (health.get('rules') or {}).items() if rid in live}
         health['checked_at'] = started
         health['duration_seconds'] = round(time.monotonic() - clock, 1)
         health['scheduled'] = scheduled

@@ -229,3 +229,13 @@ class Interface(unittest.TestCase):
                          'Unraid font names have silently rendered empty; use a Font Awesome name')
         self.assertFalse(manifest_icon.endswith('.png'), 'no image is shipped with this plugin')
         self.assertRegex(manifest_icon, r'^[a-z0-9-]+$')
+
+    def test_a_show_can_be_enabled_from_its_card(self):
+        # The most frequent change to a rule should not require opening the editor.
+        self.assertIn('function enableToggle', self.js)
+        self.assertRegex(self.js, r'head\.append\(enableToggle\(rule\)\)')
+        self.assertIn('tvd-toggle', (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text())
+
+    def test_a_refused_toggle_is_reverted(self):
+        # Leaving the switch showing a state the backend rejected would be a lie.
+        self.assertRegex(self.js, r'target\.enabled = !wanted')

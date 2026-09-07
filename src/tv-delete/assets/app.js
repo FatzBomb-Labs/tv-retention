@@ -254,6 +254,36 @@
     return sorted.sort((a, b) => attentionScore(a) - attentionScore(b) || byTitle(a, b));
   }
 
+  // Enabling or disabling a show is the most frequent change anyone makes to a rule, so it
+  // lives on the card rather than behind the editor. It saves immediately and reverts
+  // visibly if the save is refused.
+  function enableToggle(rule) {
+    const input = el('input', { type: 'checkbox', checked: !!rule.enabled, disabled: isChecking(rule.id) });
+    input.setAttribute('aria-label', `${rule.series_title || rule.path} enabled`);
+    const text = el('span', { textContent: rule.enabled ? 'Enabled' : 'Disabled' });
+    const label = el('label', { className: `tvd-toggle${rule.enabled ? ' on' : ''}`,
+                                title: 'Disabled rules are skipped by runs and by the health check' },
+                     [input, text]);
+    input.addEventListener('change', () => {
+      const wanted = input.checked;
+      input.disabled = true;
+      text.textContent = 'Saving…';
+      guarded('', async () => {
+        const target = (settings.rules || []).find((other) => other.id === rule.id);
+        if (!target) throw new Error('That rule no longer exists.');
+        target.enabled = wanted;
+        try {
+          await saveSettings(null, true);
+        } catch (error) {
+          target.enabled = !wanted;
+          renderRules();
+          throw error;
+        }
+      });
+    });
+    return label;
+  }
+
   function renderRules() {
     const container = $('tvd-rules');
     const term = ($('tvd-search').value || '').toLowerCase();
@@ -274,13 +304,12 @@
       const head = el('div', { className: 'tvd-rule-head' }, [
         el('span', { className: 'tvd-rule-title', textContent: rule.series_title || '(unmatched folder)' }),
         el('span', { className: `tvd-badge ${matched ? 'ok' : 'bad'}`, textContent: matched ? 'matched' : 'not matched' }),
-        rule.enabled ? el('span', { className: 'tvd-badge off', textContent: 'enabled' })
-                     : el('span', { className: 'tvd-badge off', textContent: 'disabled' }),
         el('span', { className: 'tvd-chip', textContent: instance ? instance.name : 'unknown instance' }),
       ]);
       // Monitoring sits with the title, because it is a fact about the show rather than
       // an action on the rule.
       if (matched) head.append(monitorPill(rule));
+      head.append(enableToggle(rule));
       card.append(head);
       card.append(el('div', { className: 'tvd-rule-path', textContent: rule.path }));
       const body = el('div', { className: 'tvd-rule-body' });
@@ -1328,8 +1357,9 @@
     });
   }
 
-  async function saveSettings(message) {
-    const data = await api('settings', { settings: collectSettings() }, 'Saving…');
+  async function saveSettings(message, quiet) {
+    const data = await api('settings', { settings: collectSettings() }, 'Saving…', quiet);
+
     settings = data.settings;
     snapshot.settings = settings;
     snapshot.schedule_active = data.schedule_active;

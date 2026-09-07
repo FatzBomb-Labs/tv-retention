@@ -102,3 +102,62 @@ class CacheSchema(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CatalogueCacheShape(unittest.TestCase):
+    """The catalogue caches mapped series, so a mapping change must retire it."""
+
+    def test_the_cache_schema_is_shared_by_both_caches(self):
+        import main
+        from core import CACHE_SCHEMA
+        self.assertIs(main.CACHE_SCHEMA, CACHE_SCHEMA)
+
+    def test_a_cached_catalogue_of_an_older_shape_is_refused(self):
+        import tempfile
+        from pathlib import Path
+        import main
+        from core import CACHE_SCHEMA
+        with tempfile.TemporaryDirectory() as temp:
+            settings = {'state_dir': str(Path(temp) / 'state'), 'catalogue_ttl_minutes': 60,
+                        'instances': [dict(INSTANCE, enabled=True)]}
+            # A cached entry written before the mapping carried 'ended', still within its TTL.
+            main.write_cache(settings, 'catalogue.json', {'i1': {
+                'fetched_at': main.now_iso(), 'schema': CACHE_SCHEMA - 1,
+                'series': [{'series_id': 1, 'title': 'Old Shape'}]}})
+            calls = []
+
+            class Stub:
+                def series(self):
+                    calls.append(1)
+                    return [{'series_id': 1, 'title': 'Fresh', 'ended': True, 'status': 'ended'}]
+
+            original = main.client_for
+            main.client_for = lambda *args, **kwargs: Stub()
+            try:
+                series = main.catalogue_for(settings, 'i1')
+            finally:
+                main.client_for = original
+            self.assertEqual(calls, [1], 'a stale-shaped cache must be re-read, not served')
+            self.assertIn('ended', series[0])
+
+    def test_a_cached_catalogue_of_the_current_shape_is_served(self):
+        import tempfile
+        from pathlib import Path
+        import main
+        from core import CACHE_SCHEMA
+        with tempfile.TemporaryDirectory() as temp:
+            settings = {'state_dir': str(Path(temp) / 'state'), 'catalogue_ttl_minutes': 60,
+                        'instances': [dict(INSTANCE, enabled=True)]}
+            main.write_cache(settings, 'catalogue.json', {'i1': {
+                'fetched_at': main.now_iso(), 'schema': CACHE_SCHEMA,
+                'series': [{'series_id': 1, 'title': 'Cached', 'ended': False, 'status': 'continuing'}]}})
+
+            def explode(*args, **kwargs):
+                raise AssertionError('the cache should have been served without calling Sonarr')
+
+            original = main.client_for
+            main.client_for = explode
+            try:
+                self.assertEqual(main.catalogue_for(settings, 'i1')[0]['title'], 'Cached')
+            finally:
+                main.client_for = original

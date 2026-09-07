@@ -149,3 +149,12 @@
 /* A show Sonarr says has ended. Two distinct readings: still keeping episodes is a plain
    statement of fact, while nothing left in the frame is a decision waiting to be made. */
 #tv-delete button.tvd-pill.ended { border-color: #6a7f97; color: #8aa6c4; background: rgba(106,127,151,.14); }
+
+/* Enable switch on each show card. Sits at the end of the header row, opposite the title. */
+.tvd-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; padding: 2px 10px 2px 8px; border: 1px solid var(--tvd-line);
+  border-radius: 999px; cursor: pointer; opacity: .75; white-space: nowrap; }
+.tvd-toggle.on { border-color: var(--tvd-good); color: var(--tvd-good);
+  background: rgba(46,158,91,.10); opacity: 1; }
+.tvd-toggle input { margin: 0; cursor: pointer; }
+.tvd-toggle:has(input:disabled) { cursor: progress; opacity: .5; }

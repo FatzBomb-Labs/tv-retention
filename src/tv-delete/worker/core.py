@@ -18,9 +18,10 @@ from pathlib import Path
 
 VERSION = '2026.09.06'
 SETTINGS_VERSION = 1
-# Bumped whenever a cached health result gains a field. It rides in the fingerprint, so an
-# upgrade retires results written by an older shape instead of showing them missing a value.
-CACHE_SCHEMA = 2
+# Bumped whenever anything cached changes shape — a health result, or the mapped series in
+# the catalogue. Both caches store mapped objects, so a change to the mapping must retire
+# them; otherwise a new field reads as absent until the cache happens to expire.
+CACHE_SCHEMA = 3
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
