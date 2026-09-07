@@ -437,6 +437,15 @@
     ['unmonitor', 'unmonitor', (plan) => `${plural(plan.unmonitor, 'episode')} will be set to unmonitored`],
   ];
 
+  // Not a scheduled change — the opposite — but worth saying, because it is the difference
+  // between a run that costs nothing and one that starts hundreds of downloads.
+  function skippedLine(plan) {
+    if (!plan.monitor_skipped) return null;
+    return el('div', { className: 'tvd-plan-quiet',
+                       textContent: `${plural(plan.monitor_skipped, 'missing episode')} inside the keep `
+                         + 'window left unmonitored — enable “missing episodes” per series to fetch them' });
+  }
+
   function planLines(plan, onOpen, className) {
     const list = el('div', { className: `tvd-plan-list${className ? ' ' + className : ''}` });
     PLAN_KINDS.forEach(([key, tone, describe]) => {
@@ -468,6 +477,8 @@
                                  textContent: `${plural(plan.actionable, 'scheduled change')}` });
     total.addEventListener('click', () => open('all'));
     box.append(total, planLines(plan, open));
+    const skipped = skippedLine(plan);
+    if (skipped) box.append(skipped);
   }
 
   function renderStats() {
@@ -794,7 +805,10 @@
           const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
           changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
         });
-        line.append(planLines(plan, open));
+        const lines = planLines(plan, open);
+        const skipped = skippedLine(plan);
+        if (skipped) lines.append(skipped);
+        line.append(lines);
         line.append(el('span', { className: 'tvd-plan-quiet', textContent: `checked ${ago(state.checked_at)}` }));
       } else {
         line.append(el('span', { className: 'tvd-plan-quiet',

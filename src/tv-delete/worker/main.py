@@ -450,31 +450,55 @@ def apply_removals(settings: dict, rules, dry_run: bool) -> list:
     return done
 
 
+def monitoring_targets(state: dict, rule: dict) -> dict:
+    """Which episodes a run will actually switch, and which it deliberately will not.
+
+    Unmonitored inside the keep window splits in two, and the halves are nothing alike.
+    An episode that is on disk costs nothing to monitor: the file is already there, and
+    monitoring it only means Sonarr will consider an upgrade and stop treating it as
+    unwanted. An episode that is *missing* is a download waiting to happen — several
+    hundred of them on a real library — so that half is opted into per series.
+    """
+    inside = state.get('in_frame_unmonitored') or []
+    outside = state.get('out_frame_monitored') or []
+    on_disk = [row for row in inside if row.get('has_file')]
+    missing = [row for row in inside if not row.get('has_file')]
+    wanted = on_disk + (missing if rule.get('monitor_missing') else [])
+    return {
+        'monitor': [row['episode_id'] for row in wanted if row.get('episode_id')],
+        'unmonitor': [row['episode_id'] for row in outside if row.get('episode_id')],
+        'on_disk': len(on_disk),
+        'missing': len(missing),
+        'skipped_missing': 0 if rule.get('monitor_missing') else len(missing),
+    }
+
+
 def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool) -> dict:
     """Bring a series' monitoring in line with its keep window.
 
     Unmonitoring everything outside the window is unconditional: an episode out there with
     no file, still monitored, is the fetch-and-delete loop, and nothing else ends it.
-    Monitoring the gaps inside the window is the opposite — it starts downloads — so it
-    happens only for a series that asked for it.
+    Inside the window, episodes already on disk are always monitored; missing ones only
+    when the series asked for them, because those are downloads.
     """
-    result = {'monitored': 0, 'unmonitored': 0, 'searched': 0, 'error': ''}
-    outside = [row['episode_id'] for row in (state.get('out_frame_monitored') or []) if row.get('episode_id')]
-    inside = [row['episode_id'] for row in (state.get('in_frame_unmonitored') or []) if row.get('episode_id')]
-    result['unmonitored'] = len(outside)
-    result['monitored'] = len(inside) if rule.get('monitor_missing') else 0
+    targets = monitoring_targets(state, rule)
+    result = {'monitored': len(targets['monitor']), 'unmonitored': len(targets['unmonitor']),
+              'searched': 0, 'skipped_missing': targets['skipped_missing'], 'error': ''}
     if dry_run:
         return result
     try:
         client = client_for(settings, rule['instance_id'])
-        if outside:
-            client.set_monitored(outside, False)
-        if result['monitored']:
-            client.set_monitored(inside, True)
-            if (settings.get('retention') or {}).get('search_after_monitor'):
-                # Only what this run newly monitored, never a blanket series search.
-                client.search_episodes(inside)
-                result['searched'] = len(inside)
+        if targets['unmonitor']:
+            client.set_monitored(targets['unmonitor'], False)
+        if targets['monitor']:
+            client.set_monitored(targets['monitor'], True)
+            if rule.get('monitor_missing') and (settings.get('retention') or {}).get('search_after_monitor'):
+                # Only the episodes that have no file: searching one already on disk would
+                # ask Sonarr to look for an upgrade nobody requested.
+                missing = [row['episode_id'] for row in (state.get('in_frame_unmonitored') or [])
+                           if not row.get('has_file') and row.get('episode_id')]
+                client.search_episodes(missing)
+                result['searched'] = len(missing)
     except SonarrError as error:
         result['error'] = str(error)
     return result
@@ -1177,7 +1201,7 @@ def plan_summary(settings: dict, health: dict) -> dict:
     interface must not hide the Run button on an answer it cannot vouch for.
     """
     totals = {'delete': 0, 'delete_bytes': 0, 'unmonitor': 0, 'monitor': 0, 'remove': 0,
-              'series': 0, 'unknown': 0, 'blocked': 0, 'oldest': None}
+              'monitor_skipped': 0, 'series': 0, 'unknown': 0, 'blocked': 0, 'oldest': None}
     alerts_now = health.get('alerts') or []
     blocking = {alert['rule_id'] for alert in alerts_now if alert.get('blocking') and alert.get('rule_id')}
     for rule in settings.get('rules', []):
@@ -1198,7 +1222,7 @@ def plan_summary(settings: dict, health: dict) -> dict:
             continue
         if plan['delete'] or plan['unmonitor'] or plan['monitor']:
             totals['series'] += 1
-        for key in ('delete', 'delete_bytes', 'unmonitor', 'monitor'):
+        for key in ('delete', 'delete_bytes', 'unmonitor', 'monitor', 'monitor_skipped'):
             totals[key] += int(plan.get(key) or 0)
         stamp = entry.get('checked_at')
         if stamp and (totals['oldest'] is None or stamp < totals['oldest']):
@@ -1441,7 +1465,7 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
     would_delete = decision['delete']
     deleting = {item.get('episode_id') for item in would_delete}
     outside = state.get('out_frame_monitored') or []
-    inside = state.get('in_frame_unmonitored') or []
+    targets = monitoring_targets(state, rule)
     # Deleting always unmonitors, and the run also unmonitors everything else outside the
     # window; both are counted here because both are changes someone would want to see.
     unmonitor = {row.get('episode_id') for row in outside} | deleting
@@ -1450,8 +1474,8 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
         'delete_bytes': sum(int(item.get('size') or 0) for item in would_delete),
         'blocked': decision['blocked'] or '',
         'unmonitor': len([row for row in outside if row.get('episode_id') in unmonitor]),
-        # Monitoring episodes that have no file starts downloads, so only when asked for.
-        'monitor': len(inside) if rule.get('monitor_missing') else 0,
+        'monitor': len(targets['monitor']),
+        'monitor_skipped': targets['skipped_missing'],
         'computed_at': now_iso(),
     }
     return state

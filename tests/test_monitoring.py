@@ -132,3 +132,45 @@ class Specials(unittest.TestCase):
         counted = validate_settings(dict(base, retention={'include_specials': True}))
         self.assertNotEqual(rule_fingerprint(plain['rules'][0], plain),
                             rule_fingerprint(counted['rules'][0], counted))
+
+
+class MonitoringTargets(unittest.TestCase):
+    """Unmonitored inside the window is two different situations, not one.
+
+    An episode already on disk costs nothing to monitor. A missing one is a download, and
+    a real library had 262 of those against 28 on disk — so treating them alike would turn
+    a free tidy-up into hundreds of gigabytes.
+    """
+
+    def setUp(self):
+        import main
+        self.targets = main.monitoring_targets
+
+    def state(self):
+        return {
+            'in_frame_unmonitored': [
+                {'episode_id': 1, 'has_file': True},
+                {'episode_id': 2, 'has_file': True},
+                {'episode_id': 3, 'has_file': False},
+            ],
+            'out_frame_monitored': [{'episode_id': 9}],
+        }
+
+    def test_episodes_on_disk_are_always_monitored(self):
+        result = self.targets(self.state(), {'monitor_missing': False})
+        self.assertEqual(sorted(result['monitor']), [1, 2])
+        self.assertEqual(result['on_disk'], 2)
+
+    def test_missing_episodes_are_left_alone_unless_asked_for(self):
+        result = self.targets(self.state(), {'monitor_missing': False})
+        self.assertNotIn(3, result['monitor'])
+        self.assertEqual(result['skipped_missing'], 1)
+
+    def test_missing_episodes_are_included_when_asked_for(self):
+        result = self.targets(self.state(), {'monitor_missing': True})
+        self.assertEqual(sorted(result['monitor']), [1, 2, 3])
+        self.assertEqual(result['skipped_missing'], 0)
+
+    def test_everything_outside_the_window_is_unmonitored_either_way(self):
+        for choice in (True, False):
+            self.assertEqual(self.targets(self.state(), {'monitor_missing': choice})['unmonitor'], [9])

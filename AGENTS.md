@@ -17,6 +17,9 @@ there. The suite is 196 tests with no expected failures.
 - The plugin touches no filesystem at all. Sonarr owns it: sizes, air dates, import dates
   and monitoring arrive with the episodes, and deletion is a Sonarr call. There is no
   path mapping, and no setting that duplicates something Sonarr already does.
+- Unmonitored inside the keep window is two situations: an episode on disk is always
+  monitored, because it costs nothing; a missing one is a download and is opted into per
+  series. Conflating them turns a free tidy-up into hundreds of gigabytes.
 - Deleting an episode file always unmonitors it. That is an invariant, not a setting:
   anything else builds a fetch-and-delete loop.
 - Nothing a series card offers happens immediately: removals and monitoring fixes queue,
