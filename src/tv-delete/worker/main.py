@@ -897,7 +897,7 @@ def forget_episodes(settings: dict, rule_id: str) -> None:
         cache_path(settings, f'episodes/{rule_id}.json').unlink()
 
 
-def episodes_for(settings: dict, rule: dict, force: bool = False) -> tuple:
+def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool = False) -> tuple:
     """One rule's reading of Sonarr: its episodes, its series record, and when it was read.
 
     Fetches when asked to, when nothing is stored, or when what is stored has aged past
@@ -911,6 +911,12 @@ def episodes_for(settings: dict, rule: dict, force: bool = False) -> tuple:
     ttl = int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
     age = age_seconds(fetched_at)
     if not force and cached and age is not None and age < ttl:
+        return cached, series, fetched_at, True
+    if offline:
+        # The TTL governs when to fetch, not what may be used: an old reading shown with
+        # its true age beats no reading at all, and the caller promised not to go out.
+        if not cached:
+            raise Rejected('Nothing has been read for this series yet.')
         return cached, series, fetched_at, True
     client = client_for(settings, rule['instance_id'])
     episodes = client.episodes(rule['series_id'], files_only=False)
@@ -987,6 +993,83 @@ def watch_and_recheck(settings: dict, min_interval: int = 30, limit: int = 25) -
             check_one_rule(settings, rule)
     announce_alerts(settings, previous, load_health(settings).get('alerts') or [])
     return len(dirty)
+
+
+def recompute_plans(settings: dict, health: dict) -> int:
+    """Re-decide every rule from the reading already stored. No network at all.
+
+    Time moves a keep window on its own: an episode inside it this morning is outside it
+    tonight, and a page left open would otherwise go on showing the plan it was handed
+    when it loaded. Deciding is arithmetic — the whole library in a few hundredths of a
+    second — so the page can afford to do it on every heartbeat. Nothing is written unless
+    a rule's result actually differs, or an open page would rewrite the cache every
+    fifteen seconds to say nothing had changed.
+    """
+    changed = 0
+    for rule in settings.get('rules', []):
+        if not rule.get('enabled'):
+            continue
+        try:
+            fresh = monitoring_for(settings, rule, offline=True)
+        except Rejected:
+            continue          # never read; the check queue will fetch it
+        if not fresh.get('ok'):
+            continue
+        fresh['fingerprint'] = rule_fingerprint(rule, settings)
+        previous = (health.get('rules') or {}).get(rule['id']) or {}
+        # Compared with the old timestamp in place, so "nothing changed" is about the
+        # result and not about when it was worked out.
+        fresh['checked_at'] = previous.get('checked_at') or now_iso()
+        if canonical_json(fresh) == canonical_json(previous):
+            continue
+        fresh['checked_at'] = now_iso()
+        health.setdefault('rules', {})[rule['id']] = fresh
+        others = [alert for alert in (health.get('alerts') or []) if alert.get('rule_id') != rule['id']]
+        health['alerts'] = alerts.merge(health.get('alerts') or [],
+                                        others + alerts_for_rule(settings, rule, fresh))
+        changed += 1
+    return changed
+
+
+def watch_new_series(settings: dict, health: dict, min_hours: int = 6) -> list:
+    """Notice series added to Sonarr, so they can be managed rather than accumulate.
+
+    There is no cheap way to ask this one. /series ignores paging and sorting — the same
+    11.5 MiB whatever is requested — so it is refreshed on a slow cadence instead, which
+    the picker and the matcher want kept warm anyway, and this moves that cost off the
+    interactive path onto the tick.
+
+    The first refresh only records where we are. Announcing three thousand series as newly
+    added would be true and useless.
+    """
+    seen = health.setdefault('series_seen', {})
+    announced = []
+    for instance in settings.get('instances', []):
+        if not instance.get('enabled', True):
+            continue
+        entry = seen.get(instance['id']) or {}
+        age = age_seconds(entry.get('checked_at'))
+        if age is not None and age < min_hours * 3600:
+            continue
+        try:
+            catalogue = catalogue_for(settings, instance['id'], force=True)
+        except Rejected:
+            continue
+        latest = max((series.get('added') or '' for series in catalogue), default='')
+        mark = entry.get('latest_added')
+        seen[instance['id']] = {'latest_added': latest, 'checked_at': now_iso()}
+        if not mark:
+            continue
+        fresh = [series for series in catalogue if (series.get('added') or '') > mark]
+        if not fresh:
+            continue
+        titles = ', '.join(series['title'] for series in fresh[:8])
+        notify(settings, f'Sonarr added {len(fresh)} series',
+               f'{titles}. Add a rule in TV Delete if you want retention applied.',
+               event='series_added')
+        log_line(settings, 'warning', f'Sonarr added {len(fresh)} series: {titles}')
+        announced.extend(fresh)
+    return announced
 
 
 def announce_alerts(settings: dict, previous: list, current: list) -> list:
@@ -1517,6 +1600,16 @@ def tick() -> int:
         if watched:
             actions.append(f'sonarr reported {watched} changed series')
 
+    # Series added to Sonarr, on a slow cadence because there is no cheap way to ask.
+    with contextlib.suppress(Rejected, SonarrError):
+        health = load_health(settings)
+        before = canonical_json(health.get('series_seen') or {})
+        added = watch_new_series(settings, health)
+        if canonical_json(health.get('series_seen') or {}) != before:
+            write_cache(settings, 'health.json', health)
+        if added:
+            actions.append(f'sonarr added {len(added)} series')
+
     match_schedule = (settings.get('health') or {}).get('series_match') or {}
     if schedules.is_due(match_schedule, now, state.get('last_series_match')):
         actions.append('series match check')
@@ -1595,6 +1688,11 @@ def action_watch(settings, request):
     # caller passes when it means "ask now".
     requested = request.get('min_interval')
     if watch_sonarr(settings, health, min_interval=15 if requested is None else int(requested)):
+        write_cache(settings, 'health.json', health)
+        health = load_health(settings)
+    # Free, and the reason the page can call this every fifteen seconds: the plan is
+    # arithmetic over episodes already in hand, and time alone can move a keep window.
+    if recompute_plans(settings, health):
         write_cache(settings, 'health.json', health)
         health = load_health(settings)
     return {'array_ready': True,
@@ -1693,7 +1791,7 @@ def action_test_instance(settings, request):
 
 
 
-def monitoring_for(settings: dict, rule: dict, force: bool = False) -> dict:
+def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: bool = False) -> dict:
     """Everything one check knows about a series: monitoring, lifecycle, and the plan.
 
     Entirely from Sonarr. Sizes, air dates, import dates, monitoring and season numbers all
@@ -1709,7 +1807,7 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False) -> dict:
                     status='unmatched', label='Not matched to Sonarr')
     try:
         active = effective_rule(rule, settings.get('profiles'))
-        episodes, series, read_at, from_cache = episodes_for(settings, rule, force=force)
+        episodes, series, read_at, from_cache = episodes_for(settings, rule, force=force, offline=offline)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
 

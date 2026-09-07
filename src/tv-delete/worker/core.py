@@ -23,7 +23,7 @@ SETTINGS_VERSION = 4
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
-CACHE_SCHEMA = 7
+CACHE_SCHEMA = 8
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
@@ -73,6 +73,7 @@ DEFAULTS = {
         'run_completed': True,
         'series_removed': True,
         'series_ended': True,
+        'series_added': True,
         'health_ok': False,
         'health_problems': True,
         'errors': True,

@@ -143,6 +143,9 @@ class Sonarr:
             'size_on_disk': int(statistics.get('sizeOnDisk') or 0),
             'path': normalise(path) if path else '',
             'tags': entry.get('tags') or [],
+            # When Sonarr took the series on. The only way to notice a new one: /series
+            # ignores paging and sorting, so there is nothing lighter to ask.
+            'added': entry.get('added') or '',
         }
 
     def episodes(self, series_id: int, files_only: bool = True) -> list:

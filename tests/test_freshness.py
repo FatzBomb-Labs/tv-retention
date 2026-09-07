@@ -427,3 +427,132 @@ class Heartbeat(unittest.TestCase):
         # consequence, and saying both would say it twice.
         import alerts as alert_module
         self.assertFalse(alert_module.KINDS['ended-expired']['notify'])
+
+
+class LiveWhileWatching(unittest.TestCase):
+    """What an open page updates by itself, and at what cost."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = validate_settings({
+            'instances': [INSTANCE],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                       'series_title': 'A', 'keep_days': 500}],
+        })
+        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
+        self.rule = self.settings['rules'][0]
+        self.client = Counter()
+        self.original = main.client_for
+        main.client_for = lambda *args, **kwargs: self.client
+        main.episodes_for(self.settings, self.rule)      # one reading, as a page load makes
+        self.client.calls.clear()
+
+    def tearDown(self):
+        main.client_for = self.original
+        self.temp.cleanup()
+
+    def test_a_heartbeat_re_decides_without_asking_sonarr_anything(self):
+        health = main.load_health(self.settings)
+        main.recompute_plans(self.settings, health)
+        self.assertEqual(self.client.calls, [])
+        self.assertEqual(health['rules']['r1']['plan']['delete'], 0)
+
+    def test_a_keep_window_that_moved_is_picked_up(self):
+        # Nothing changed in Sonarr; the window did. A page left open must not go on
+        # showing the plan it was handed when it loaded.
+        health = main.load_health(self.settings)
+        main.recompute_plans(self.settings, health)
+        self.rule['keep_days'] = 30
+        self.assertEqual(main.recompute_plans(self.settings, health), 1)
+        self.assertEqual(health['rules']['r1']['plan']['delete'], 5)
+        self.assertEqual(self.client.calls, [])
+
+    def test_an_unchanged_result_is_not_rewritten(self):
+        # Otherwise an open page rewrites the cache every fifteen seconds to say nothing.
+        health = main.load_health(self.settings)
+        main.recompute_plans(self.settings, health)
+        stamp = health['rules']['r1']['checked_at']
+        self.assertEqual(main.recompute_plans(self.settings, health), 0)
+        self.assertEqual(health['rules']['r1']['checked_at'], stamp)
+
+    def test_a_series_never_read_is_left_to_the_queue(self):
+        self.settings['rules'].append({'id': 'r2', 'instance_id': 'i1', 'series_id': 2,
+                                       'path': '/tv/B', 'enabled': True, 'keep_days': 30,
+                                       'match_status': 'matched'})
+        health = main.load_health(self.settings)
+        main.recompute_plans(self.settings, health)
+        self.assertNotIn('r2', health.get('rules') or {})
+        self.assertEqual(self.client.calls, [], 'the heartbeat must never go out to Sonarr')
+
+    def test_a_disabled_rule_is_not_recomputed(self):
+        self.rule['enabled'] = False
+        self.assertEqual(main.recompute_plans(self.settings, main.load_health(self.settings)), 0)
+
+
+class NewSeries(unittest.TestCase):
+    """Noticing a series added to Sonarr, which no cheap endpoint will tell you."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = validate_settings({'instances': [INSTANCE], 'rules': []})
+        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
+        self.catalogue = [
+            {'series_id': 1, 'title': 'Old One', 'added': '2020-01-01T00:00:00Z'},
+            {'series_id': 2, 'title': 'Older', 'added': '2019-01-01T00:00:00Z'},
+        ]
+        self.notified = []
+        holder = self
+
+        class Stub:
+            def series(self):
+                return [dict(row) for row in holder.catalogue]
+
+        self.originals = (main.client_for, main.notify)
+        main.client_for = lambda *args, **kwargs: Stub()
+        main.notify = lambda settings, subject, description, importance='normal', event='errors': \
+            self.notified.append((subject, description, event))
+
+    def tearDown(self):
+        main.client_for, main.notify = self.originals
+        self.temp.cleanup()
+
+    def test_the_first_look_only_records_where_we_are(self):
+        """Announcing three thousand series as newly added would be true and useless."""
+        health = {}
+        self.assertEqual(main.watch_new_series(self.settings, health, min_hours=0), [])
+        self.assertEqual(self.notified, [])
+        self.assertEqual(health['series_seen']['i1']['latest_added'], '2020-01-01T00:00:00Z')
+
+    def test_a_series_added_since_is_announced(self):
+        health = {}
+        main.watch_new_series(self.settings, health, min_hours=0)
+        self.catalogue.append({'series_id': 3, 'title': 'Brand New', 'added': '2026-09-07T12:00:00Z'})
+        added = main.watch_new_series(self.settings, health, min_hours=0)
+        self.assertEqual([series['title'] for series in added], ['Brand New'])
+        self.assertEqual(len(self.notified), 1)
+        self.assertIn('Brand New', self.notified[0][1])
+        self.assertEqual(self.notified[0][2], 'series_added')
+
+    def test_the_same_series_is_not_announced_twice(self):
+        health = {}
+        main.watch_new_series(self.settings, health, min_hours=0)
+        self.catalogue.append({'series_id': 3, 'title': 'Brand New', 'added': '2026-09-07T12:00:00Z'})
+        main.watch_new_series(self.settings, health, min_hours=0)
+        self.notified.clear()
+        main.watch_new_series(self.settings, health, min_hours=0)
+        self.assertEqual(self.notified, [])
+
+    def test_the_library_is_not_pulled_on_every_tick(self):
+        health = {}
+        main.watch_new_series(self.settings, health, min_hours=0)
+        self.catalogue.append({'series_id': 3, 'title': 'Brand New', 'added': '2026-09-07T12:00:00Z'})
+        self.assertEqual(main.watch_new_series(self.settings, health, min_hours=6), [],
+                         '11.5 MiB is not a per-minute question')
+
+    def test_the_added_date_survives_the_mapping(self):
+        # It is stored in both caches, so the mapping carrying it means a schema bump.
+        client = Sonarr(INSTANCE)
+        client._request = lambda *a, **k: [
+            {'id': 4, 'title': 'X', 'sortTitle': 'x', 'added': '2026-09-01T00:00:00Z',
+             'path': '/tv/X', 'statistics': {}}]
+        self.assertEqual(client.series()[0]['added'], '2026-09-01T00:00:00Z')

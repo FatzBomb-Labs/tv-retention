@@ -1731,6 +1731,7 @@
     ['run_completed', 'A run has finished'],
     ['series_removed', 'A series was removed from Sonarr'],
     ['series_ended', 'Sonarr reports a series has ended'],
+    ['series_added', 'Sonarr has a new series this plugin does not manage'],
     ['health_problems', 'A check found something wrong'],
     ['health_ok', 'A check found nothing wrong'],
     ['errors', 'Any error'],
