@@ -114,8 +114,9 @@ class Specials(unittest.TestCase):
         self.assertEqual(state['in_frame_unmonitored'], [])
 
     def test_specials_are_counted_when_asked_for(self):
+        # One decision: keeping specials is what makes them count in monitoring too.
         document = settings()
-        document['retention']['monitor_specials'] = True
+        document['retention']['include_specials'] = True
         state = classify_monitoring(self.episodes, RULE, document, now=NOW)
         self.assertEqual(state['specials_ignored'], 0)
         self.assertEqual(state['total'], 3)
@@ -133,6 +134,6 @@ class Specials(unittest.TestCase):
                 'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1,
                            'path': '/mnt/user/media/TV/A', 'keep_days': 30}]}
         plain = validate_settings(base)
-        counted = validate_settings(dict(base, retention={'monitor_specials': True}))
+        counted = validate_settings(dict(base, retention={'include_specials': True}))
         self.assertNotEqual(rule_fingerprint(plain['rules'][0], plain),
                             rule_fingerprint(counted['rules'][0], counted))

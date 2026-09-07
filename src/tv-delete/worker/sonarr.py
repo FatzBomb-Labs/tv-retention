@@ -30,7 +30,10 @@ class Sonarr:
         self.name = instance['name']
         self.url = instance['url'].rstrip('/')
         self.key = instance['api_key']
-        self.path_maps = instance.get('path_maps') or []
+        # Roots are the storage form; the path mapper wants prefix pairs.
+        self.path_maps = [{'from': root['sonarr_path'], 'to': root['unraid_path']}
+                          for root in instance.get('roots') or []
+                          if root.get('enabled', True) and root.get('unraid_path')]
         self.timeout = timeout
         self.context = None
         if not instance.get('verify_tls', True):

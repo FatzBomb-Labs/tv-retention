@@ -12,7 +12,7 @@ from core import describe_lifecycle, describe_selectability
 from sonarr import Sonarr
 
 INSTANCE = {'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32,
-            'path_maps': [{'from': '/tv', 'to': '/mnt/user/media/TV'}]}
+            'roots': [{'sonarr_path': '/tv', 'unraid_path': '/mnt/user/media/TV', 'enabled': True}]}
 
 # Trimmed from a real /api/v3/series response.
 PAYLOAD = [

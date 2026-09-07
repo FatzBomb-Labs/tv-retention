@@ -30,10 +30,11 @@ class Cron(unittest.TestCase):
 
 class Settings(unittest.TestCase):
     def test_defaults_are_valid(self):
-        self.assertEqual(validate_settings(DEFAULTS)['dry_run'], True)
+        self.assertEqual(validate_settings(DEFAULTS)['preview'], True)
 
-    def test_dry_run_defaults_on(self):
-        self.assertTrue(validate_settings({})['dry_run'])
+    def test_preview_defaults_on(self):
+        # A fresh install must never be able to delete before anyone has looked at it.
+        self.assertTrue(validate_settings({})['preview'])
 
     def test_rule_requires_a_condition(self):
         document = base()
@@ -96,7 +97,12 @@ class Settings(unittest.TestCase):
 
     def test_guard_bounds_are_enforced(self):
         with self.assertRaises(Rejected):
-            validate_settings(base(guards={'max_percent_per_rule': 500}))
+            validate_settings(base(guards={'max_percent_per_rule': {'enabled': True, 'value': 500}}))
+
+    def test_a_guard_can_be_switched_off_without_losing_its_number(self):
+        settings = validate_settings(base(guards={'max_deletes_per_run': {'enabled': False, 'value': 200}}))
+        self.assertFalse(settings['guards']['max_deletes_per_run']['enabled'])
+        self.assertEqual(settings['guards']['max_deletes_per_run']['value'], 200)
 
     def test_combine_mode_is_checked(self):
         document = base()

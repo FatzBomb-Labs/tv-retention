@@ -116,12 +116,17 @@ class SpecialsSettings(unittest.TestCase):
         with self.assertRaises(Rejected):
             validate_settings(document)
 
-    def test_the_health_schedule_is_validated(self):
+    def test_the_series_match_schedule_is_validated(self):
         with self.assertRaises(Rejected):
-            validate_settings({'health': {'enabled': True, 'cron': 'nightly'}})
+            validate_settings({'health': {'series_match': {'enabled': True, 'frequency': 'never'}}})
 
-    def test_the_health_schedule_defaults_on(self):
-        self.assertTrue(validate_settings({})['health']['enabled'])
+    def test_the_series_match_check_cannot_be_switched_off(self):
+        # A rule that no longer resolves to a series must not act, so the check that
+        # notices is not optional. Only its cadence is.
+        self.assertTrue(validate_settings({})['health']['series_match']['enabled'])
+        off = validate_settings({'health': {'series_match': {'enabled': False, 'frequency': 'weekly'}}})
+        self.assertTrue(off['health']['series_match']['enabled'])
+        self.assertEqual(off['health']['series_match']['frequency'], 'weekly')
 
 
 if __name__ == '__main__':

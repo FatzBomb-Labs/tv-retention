@@ -136,19 +136,15 @@ class Interface(unittest.TestCase):
         self.assertTrue(root.get('icon'))
 
     def test_the_picker_refuses_unselectable_series(self):
-        self.assertIn('!entry.selectable', self.js)
-        self.assertIn('cannot be given a rule', self.js)
+        self.assertIn("usable: (entry) => entry.selectable", self.js)
+        self.assertIn("cannot be used", self.js)
 
 
-    def test_the_monitoring_pill_sits_with_the_title(self):
-        self.assertRegex(self.js, r'head\.append\(monitorPill\(rule\)\)')
-
-    def test_the_pill_opens_a_menu_built_from_its_state(self):
-        self.assertIn('aria-haspopup', self.js)
-        self.assertIn('function monitorMenu', self.js)
-        # An aligned show must not be offered a correction that would write nothing.
-        self.assertRegex(self.js, r'if \(inside\) \{')
-        self.assertRegex(self.js, r'if \(outside\) \{')
+    def test_series_problems_surface_on_the_card(self):
+        # A badge only when something needs attention, and the fixes live behind it.
+        self.assertIn("function alertBadge", self.js)
+        self.assertIn("function showSeriesAlerts", self.js)
+        self.assertRegex(self.js, r"head\.append\(enableToggle\(rule\)\)")
 
     def test_the_script_is_not_prefixed_by_a_stray_fragment(self):
         # A build-time edit once prepended a fragment above the opening comment, which
@@ -202,13 +198,14 @@ class Interface(unittest.TestCase):
         used = set(re.findall(shape, code))
         missing = sorted(used - declared)
         self.assertEqual(missing, [], f'used but never declared in app.js: {missing}')
-        self.assertIn('PILL_ENDED', declared, 'the test must be seeing real constants')
+        # Prove the scan is actually finding constants rather than passing on an empty set.
+        self.assertIn('DEFAULT_TIMEOUT', declared, 'the test must be seeing real constants')
 
-    def test_an_ended_show_still_keeping_episodes_reads_differently(self):
-        # Same options, deliberately not the same colour or wording.
-        self.assertIn("PILL_ENDED_SPENT", self.js)
-        self.assertRegex(self.js, r"lifecycle === 'ended'\) kind = 'ended'")
-        self.assertIn('tvd-pill.ended', (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text())
+    def test_blocking_problems_are_visibly_different_from_advisory_ones(self):
+        css = (ROOT / "src" / "tv-delete" / "assets" / "app.css").read_text()
+        self.assertIn("tvd-alert-badge.error", css)
+        self.assertIn("tvd-alert-badge.warning", css)
+        self.assertIn("blocked", self.js)
 
     def test_the_icon_is_a_font_awesome_name(self):
         """A name is not enough: it has to resolve to a glyph.
@@ -230,11 +227,10 @@ class Interface(unittest.TestCase):
         self.assertFalse(manifest_icon.endswith('.png'), 'no image is shipped with this plugin')
         self.assertRegex(manifest_icon, r'^[a-z0-9-]+$')
 
-    def test_a_show_can_be_enabled_from_its_card(self):
+    def test_a_series_can_be_enabled_from_its_card(self):
         # The most frequent change to a rule should not require opening the editor.
-        self.assertIn('function enableToggle', self.js)
-        self.assertRegex(self.js, r'head\.append\(enableToggle\(rule\)\)')
-        self.assertIn('tvd-toggle', (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text())
+        self.assertIn("function enableToggle", self.js)
+        self.assertIn("tvd-switch", (ROOT / "src" / "tv-delete" / "assets" / "app.css").read_text())
 
     def test_a_refused_toggle_is_reverted(self):
         # Leaving the switch showing a state the backend rejected would be a lie.

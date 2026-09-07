@@ -2,7 +2,7 @@ import datetime as dt
 import unittest
 
 import context  # noqa: F401
-from core import DEFAULTS, derive_mappings, select_remonitor
+from core import DEFAULTS, select_remonitor
 
 NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 
@@ -63,37 +63,6 @@ class Remonitor(unittest.TestCase):
         self.assertEqual([entry['season'] for entry in chosen], [2])
 
 
-class DeriveMappings(unittest.TestCase):
-    MOUNTS = [
-        {'source': '/mnt/user/appdata/sonarr-series', 'destination': '/config'},
-        {'source': '/mnt/user/media/TV', 'destination': '/tv'},
-        {'source': '/mnt/user/downloads', 'destination': '/complete'},
-    ]
-
-    def test_a_root_folder_resolves_to_its_mount(self):
-        self.assertEqual(derive_mappings(['/tv/Series'], self.MOUNTS),
-                         [{'from': '/tv', 'to': '/mnt/user/media/TV'}])
-
-    def test_unrelated_mounts_are_not_proposed(self):
-        proposals = derive_mappings(['/tv/Series', '/tv/Anime'], self.MOUNTS)
-        self.assertEqual(proposals, [{'from': '/tv', 'to': '/mnt/user/media/TV'}])
-
-    def test_several_roots_yield_several_mappings(self):
-        mounts = self.MOUNTS + [{'source': '/mnt/user/media/Anime', 'destination': '/anime'}]
-        proposals = derive_mappings(['/tv/Series', '/anime'], mounts)
-        self.assertEqual(proposals, [{'from': '/anime', 'to': '/mnt/user/media/Anime'},
-                                     {'from': '/tv', 'to': '/mnt/user/media/TV'}])
-
-    def test_the_most_specific_mount_wins(self):
-        mounts = self.MOUNTS + [{'source': '/mnt/user/media/TV4K', 'destination': '/tv/4k'}]
-        self.assertEqual(derive_mappings(['/tv/4k/Series'], mounts),
-                         [{'from': '/tv/4k', 'to': '/mnt/user/media/TV4K'}])
-
-    def test_nothing_is_invented_without_a_matching_mount(self):
-        self.assertEqual(derive_mappings(['/media/tv'], self.MOUNTS), [])
-
-    def test_no_mounts_at_all(self):
-        self.assertEqual(derive_mappings(['/tv'], []), [])
 
 
 if __name__ == '__main__':
