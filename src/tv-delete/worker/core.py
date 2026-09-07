@@ -62,14 +62,20 @@ DEFAULTS = {
         'max_deletes_per_run': {'enabled': True, 'value': 200},
         'max_percent_per_rule': {'enabled': True, 'value': 50},
         'min_file_age_hours': {'enabled': True, 'value': 6},
+        # A safety switch rather than a number: with it off, an episode with no known air
+        # date is never deleted rather than being judged on when Sonarr imported it.
+        'allow_import_date_fallback': {'enabled': True},
     },
     'retention': {
         # One decision: specials are kept, and counted in monitoring, together or not at all.
         'include_specials': False,
-        'allow_mtime_fallback': True,
         'auto_unmonitor': True,
         # Off by default: re-monitoring an episode invites Sonarr to download it again.
         'auto_monitor': False,
+        # Monitoring an episode does not fetch it until Sonarr's next RSS pass. Searching
+        # closes that gap, and can turn a metadata change into a great many downloads, so
+        # it stays off until asked for.
+        'search_after_monitor': False,
     },
     # With no extensions listed, every sidecar sharing an episode's name is removed.
     'sidecars': {'enabled': True, 'extensions': []},
@@ -358,6 +364,44 @@ def effective_rule(rule: dict, profiles) -> dict:
     return resolved
 
 
+# What a queued removal asks Sonarr to do on its way out. The plugin never deletes a
+# series itself: options five and six ask Sonarr to, so its bookkeeping and its recycle
+# bin apply. Everything the plugin removes on its own is still individual episode files.
+REMOVAL_ACTIONS = {
+    'remove': 'Leave the series untouched in Sonarr',
+    'monitor-all': 'Set the entire series to monitored',
+    'unmonitor-all': 'Set the entire series to unmonitored',
+    'monitor-in-frame': 'Set only episodes inside the keep window to monitored',
+    'delete-series': 'Ask Sonarr to delete the series, keeping the files',
+    'delete-series-files': 'Ask Sonarr to delete the series and its files',
+}
+# What has to be typed for the two that destroy something.
+REMOVAL_CONFIRMATIONS = {'delete-series': 'DELETE', 'delete-series-files': 'DELETE ALL'}
+QUEUED_FIXES = ['monitor-in-frame', 'unmonitor-out-frame']
+
+
+def validate_queue(raw) -> dict:
+    """A rule's pending intent. Nothing here has happened yet; a run is what applies it."""
+    raw = raw if isinstance(raw, dict) else {}
+    queue = {'removal': None, 'fixes': []}
+    removal = raw.get('removal')
+    if isinstance(removal, dict) and removal.get('action'):
+        action = _text(removal.get('action'), 'Removal action', 32)
+        if action not in REMOVAL_ACTIONS:
+            raise Rejected(f'Unknown removal action "{action}"')
+        queue['removal'] = {'action': action,
+                            'created_at': _text(removal.get('created_at'), 'Queued at', 40) or ''}
+    for entry in raw.get('fixes') or []:
+        kind = _text((entry or {}).get('kind'), 'Queued fix', 32)
+        if kind not in QUEUED_FIXES:
+            raise Rejected(f'Unknown queued fix "{kind}"')
+        if any(existing['kind'] == kind for existing in queue['fixes']):
+            continue
+        queue['fixes'].append({'kind': kind,
+                               'created_at': _text((entry or {}).get('created_at'), 'Queued at', 40) or ''})
+    return queue
+
+
 def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
     if not isinstance(raw, dict):
         raise Rejected('Invalid rule')
@@ -385,6 +429,9 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         unmonitor=_flag(raw.get('unmonitor', True)),
         # Per show, because one series' specials are worth keeping and another's are not.
         include_specials=_tristate(raw.get('include_specials'), 'Include specials'),
+        auto_unmonitor=_tristate(raw.get('auto_unmonitor'), 'Auto unmonitor'),
+        auto_monitor=_tristate(raw.get('auto_monitor'), 'Auto monitor'),
+        queue=validate_queue(raw.get('queue')),
         # Match state is owned by the backend; the UI cannot assert a rule is matched.
         match_status='matched' if series_id else 'unmatched',
         match_error=_text(raw.get('match_error'), 'Match error', 500),
@@ -503,12 +550,14 @@ def validate_settings(raw, previous=None) -> dict:
             'max_deletes_per_run': _guard(guards_raw.get('max_deletes_per_run'), 'Max deletes per run', 1, 100000, 200),
             'max_percent_per_rule': _guard(guards_raw.get('max_percent_per_rule'), 'Max percent per rule', 1, 100, 50),
             'min_file_age_hours': _guard(guards_raw.get('min_file_age_hours'), 'Minimum file age', 0, 8760, 6),
+            'allow_import_date_fallback': {'enabled': _flag(
+                (guards_raw.get('allow_import_date_fallback') or {'enabled': True}).get('enabled', True))},
         },
         'retention': {
             'include_specials': _flag(retention_raw.get('include_specials', False)),
-            'allow_mtime_fallback': _flag(retention_raw.get('allow_mtime_fallback', True)),
             'auto_unmonitor': _flag(retention_raw.get('auto_unmonitor', True)),
             'auto_monitor': _flag(retention_raw.get('auto_monitor', False)),
+            'search_after_monitor': _flag(retention_raw.get('search_after_monitor', False)),
         },
         'sidecars': {'enabled': _flag(sidecars_raw.get('enabled', True)), 'extensions': sorted(set(extensions))},
         'delete_empty_dirs': _flag(raw.get('delete_empty_dirs', True)),
@@ -667,26 +716,52 @@ def empty_directories(root) -> list:
 # Retention evaluation
 # ---------------------------------------------------------------------------
 
-def effective_date(episode, allow_mtime_fallback):
+def import_date(episode):
+    """When Sonarr imported the file, as a date."""
+    stamp = episode.get('date_added')
+    if stamp:
+        try:
+            return dt.date.fromisoformat(str(stamp)[:10])
+        except ValueError:
+            pass
+    if episode.get('mtime'):
+        return dt.datetime.fromtimestamp(episode['mtime'], dt.timezone.utc).date()
+    return None
+
+
+def effective_date(episode, allow_import_fallback):
     """The date an episode is judged by, and where that date came from.
 
-    Sonarr's air date is authoritative; TMDB fills gaps Sonarr leaves blank; the file's
-    modification time is a last resort and can be switched off entirely, in which case
-    undated episodes are never deleted.
+    Sonarr's air date is authoritative; TMDB fills gaps Sonarr leaves blank; the date
+    Sonarr imported the file is the last resort and can be switched off, in which case an
+    undated episode is never deleted. The import date comes from Sonarr rather than the
+    filesystem, so this needs no path mapping and no disk access.
     """
     if episode.get('air_date'):
         value = episode['air_date']
         if isinstance(value, str):
             value = dt.date.fromisoformat(value[:10])
         return value, episode.get('air_source') or 'sonarr'
-    if allow_mtime_fallback and episode.get('mtime'):
-        return dt.datetime.fromtimestamp(episode['mtime'], dt.timezone.utc).date(), 'mtime'
+    if allow_import_fallback:
+        added = import_date(episode)
+        if added:
+            return added, 'imported'
     return None, 'unknown'
 
 
-def _order_key(episode, allow_mtime_fallback):
-    date, _ = effective_date(episode, allow_mtime_fallback)
+def _order_key(episode, allow_import_fallback):
+    date, _ = effective_date(episode, allow_import_fallback)
     return (date or dt.date.min, episode.get('season') or 0, episode.get('episode') or 0)
+
+
+def guard_flag(settings: dict, name: str, default=True):
+    """A safety switch stored beside the numeric guards."""
+    guard = (settings.get('guards') or {}).get(name)
+    if isinstance(guard, dict):
+        return bool(guard.get('enabled', default))
+    if guard is None:
+        return default
+    return bool(guard)
 
 
 def guard_value(settings: dict, name: str, when_off=None):
@@ -708,7 +783,7 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     retention = settings.get('retention', DEFAULTS['retention'])
     guards = settings.get('guards', DEFAULTS['guards'])
-    allow_mtime = bool(retention.get('allow_mtime_fallback', True))
+    allow_mtime = bool(guard_flag(settings, 'allow_import_date_fallback', True))
     # A rule may override the global specials decision; None means inherit it.
     include_specials = rule.get('include_specials')
     if include_specials is None:
@@ -723,8 +798,9 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
         if season == 0 and not include_specials:
             protected.append(dict(episode, reason='Specials (season 0) are excluded'))
             continue
-        mtime = episode.get('mtime')
-        if min_age and mtime and dt.datetime.fromtimestamp(mtime, dt.timezone.utc) > now - min_age:
+        # Judged on when Sonarr imported the file, which is what "still importing" means.
+        added = import_date(episode)
+        if min_age and added and dt.datetime.combine(added, dt.time(), dt.timezone.utc) > now - min_age:
             protected.append(dict(episode, reason=f'Modified within the last {int(min_age.total_seconds() // 3600)}h'))
             continue
         candidates.append(episode)
@@ -873,7 +949,7 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
 
     unaired, aired = [], []
     for episode in considered:
-        date, _ = effective_date(episode, allow_mtime_fallback=False)
+        date, _ = effective_date(episode, allow_import_fallback=False)
         # No air date and no file means Sonarr does not know when it airs; treat it as
         # forthcoming rather than as something to strip the monitoring from.
         if date is None or date > today:
@@ -974,7 +1050,7 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'path': active.get('path'),
         'series_id': active.get('series_id'),
         'global_specials': retention.get('include_specials'),
-        'mtime_fallback': retention.get('allow_mtime_fallback'),
+        'import_date_fallback': guard_flag(settings, 'allow_import_date_fallback', True),
         'min_file_age_hours': guard_value(settings, 'min_file_age_hours', 0),
     }
     return hashlib.sha256(canonical_json(material).encode('utf-8')).hexdigest()[:16]

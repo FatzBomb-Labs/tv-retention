@@ -213,11 +213,22 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r'alertBadge\(rule\),\s*\n\s*el\(.span., \{ className: .tvd-rule-title')
         self.assertIn('tvd-dot-badge', self.js)
 
-    def test_removing_a_series_spells_out_what_it_destroys(self):
-        # There is no mode left for it to override; the typed word is the whole guard.
-        self.assertIn('This cannot be undone.', self.js)
-        self.assertRegex(self.js, r'WILL be deleted from disk')
-        self.assertRegex(self.js, r'WILL be removed from Sonarr')
+    def test_removing_a_series_is_queued_and_asks_for_the_right_word(self):
+        """Two different consequences, two different words, and neither happens at once.
+
+        The plugin never deletes a series itself: the destructive options ask Sonarr to,
+        so Sonarr's own recycle bin and bookkeeping apply.
+        """
+        self.assertIn("'delete-series': 'DELETE'", self.js)
+        self.assertIn("'delete-series-files': 'DELETE ALL'", self.js)
+        self.assertIn('Queue removal', self.js)
+        self.assertIn('function queuedCard', self.js)
+        self.assertRegex(self.js, r'Ask Sonarr to delete the series')
+
+    def test_nothing_on_a_card_acts_immediately(self):
+        # Every destructive control queues; only a run applies. Undo is the safety net.
+        self.assertNotRegex(self.js, r"api\('remove-series'")
+        self.assertIn('Undo', self.js)
 
     def test_test_mode_governs_the_scheduler_only(self):
         # A manual run is always live, so the confirmation has to say so when Test Mode is

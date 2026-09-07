@@ -10,7 +10,10 @@ NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 def settings(**overrides):
     document = {
         'retention': dict(DEFAULTS['retention']),
-        'guards': {'max_deletes_per_run': 1000, 'max_percent_per_rule': 100, 'min_file_age_hours': 0},
+        'guards': {'max_deletes_per_run': {'enabled': True, 'value': 1000},
+                   'max_percent_per_rule': {'enabled': True, 'value': 100},
+                   'min_file_age_hours': {'enabled': True, 'value': 0},
+                   'allow_import_date_fallback': {'enabled': True}},
     }
     for key, value in overrides.items():
         if isinstance(value, dict) and key in document:
@@ -45,9 +48,13 @@ class Dates(unittest.TestCase):
         self.assertEqual(source, 'sonarr')
         self.assertEqual(date, NOW.date() - dt.timedelta(days=10))
 
-    def test_mtime_is_the_fallback(self):
-        date, source = effective_date(episode(1, 1, days_ago=10, air_date=False), True)
-        self.assertEqual(source, 'mtime')
+    def test_sonarrs_import_date_is_the_fallback(self):
+        # Not the filesystem's modification time: Sonarr knows when it imported the file,
+        # which a later copy or permission change cannot rewrite.
+        entry = dict(episode(1, 1, days_ago=10, air_date=False), date_added='2026-08-01T10:00:00Z')
+        date, source = effective_date(entry, True)
+        self.assertEqual(source, 'imported')
+        self.assertEqual(date, dt.date(2026, 8, 1))
 
     def test_fallback_can_be_switched_off(self):
         date, source = effective_date(episode(1, 1, days_ago=10, air_date=False), False)
@@ -63,7 +70,7 @@ class KeepDays(unittest.TestCase):
 
     def test_undated_episode_survives_without_the_mtime_fallback(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False)]
-        document = settings(retention={'allow_mtime_fallback': False})
+        document = settings(guards={'allow_import_date_fallback': {'enabled': False}})
         result = evaluate(episodes, {'keep_days': 180, 'combine': 'earliest'}, document, now=NOW)
         self.assertEqual(result['delete'], [])
         self.assertIn('No air date', result['keep'][0]['reason'])
@@ -111,13 +118,13 @@ class Combine(unittest.TestCase):
 
     def test_latest_never_acts_on_an_unknown(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False), episode(1, 2, days_ago=10)]
-        document = settings(retention={'allow_mtime_fallback': False})
+        document = settings(guards={'allow_import_date_fallback': {'enabled': False}})
         rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'latest'}
         self.assertEqual(evaluate(episodes, rule, document, now=NOW)['delete'], [])
 
     def test_any_ignores_an_unknown_and_uses_the_rest(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False), episode(1, 2, days_ago=10)]
-        document = settings(retention={'allow_mtime_fallback': False})
+        document = settings(guards={'allow_import_date_fallback': {'enabled': False}})
         rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'any'}
         result = evaluate(episodes, rule, document, now=NOW)
         self.assertEqual(paths(result['delete']), [episodes[0]['path']])

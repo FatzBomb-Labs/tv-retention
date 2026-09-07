@@ -316,3 +316,11 @@
   margin-bottom: 12px; }
 .tvd-editor-foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--tvd-line); }
 @media (max-width: 700px) { .tvd-change { grid-template-columns: 1fr; } .tvd-retention { margin-left: 0; } }
+
+/* A series waiting to be removed. Red frame, its intent in three plain lines, and an undo
+   that costs nothing — because nothing has happened yet. */
+.tvd-rule.queued { border-left-color: var(--tvd-bad); opacity: .95; }
+.tvd-queued-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
+  border-radius: 50%; background: var(--tvd-bad); color: #fff; font-weight: 700; font-size: 13px; line-height: 1; }
+.tvd-queued-lines { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 12px; opacity: .85; }
+.tvd-queued-danger { color: var(--tvd-bad); font-weight: 600; }

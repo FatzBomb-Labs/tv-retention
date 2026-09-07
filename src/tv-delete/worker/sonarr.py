@@ -130,6 +130,7 @@ class Sonarr:
             has_file = bool(entry.get('hasFile') and file_id and file_info.get('path'))
             if files_only and not has_file:
                 continue
+            added = file_info.get('dateAdded')
             air = entry.get('airDateUtc') or entry.get('airDate')
             air_date = None
             if air:
@@ -147,6 +148,10 @@ class Sonarr:
                 'title': entry.get('title') or '',
                 'air_date': air_date.isoformat() if air_date else None,
                 'air_source': 'sonarr' if air_date else '',
+                # When Sonarr imported the file. More meaningful than the filesystem's
+                # modification time, which a copy or a permission change can rewrite, and
+                # it arrives with the episode rather than needing the disk.
+                'date_added': str(added) if added else '',
                 'monitored': bool(entry.get('monitored')),
                 'sonarr_path': normalise(file_info['path']) if has_file else '',
                 # A fileless episode still needs a stable key for the retention pass.
@@ -186,6 +191,13 @@ class Sonarr:
         self._request('DELETE', f'series/{int(series_id)}',
                       query={'deleteFiles': 'true' if delete_files else 'false',
                              'addImportListExclusion': 'false'})
+
+    def search_episodes(self, episode_ids) -> None:
+        """Ask Sonarr to look for specific episodes. Only ever the ones just monitored."""
+        ids = [int(value) for value in episode_ids if value]
+        if not ids:
+            return
+        self._request('POST', 'command', body={'name': 'EpisodeSearch', 'episodeIds': ids})
 
     def rescan(self, series_id: int) -> None:
         self._request('POST', 'command', body={'name': 'RescanSeries', 'seriesId': int(series_id)})

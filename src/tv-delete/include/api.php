@@ -28,7 +28,7 @@ if (!is_string($payload) || strlen($payload) > 1048576) fail_request(413, 'Reque
 $request = json_decode($payload, true);
 $actions = ['snapshot', 'settings', 'health', 'test-instance', 'series',
             'monitoring', 'monitor-apply', 'remove-series', 'browse', 'match',
-            'progress', 'check-rule', 'log', 'alerts', 'alert-action',
+            'progress', 'check-rule', 'log', 'alerts', 'alert-action', 'enable-recycle-bin',
             'preview', 'run', 'test-tmdb', 'clear-history'];
 if (!is_array($request) || !in_array($request['action'] ?? '', $actions, true)) fail_request(400, 'Unknown action');
 if (!is_executable('/usr/bin/python3')) fail_request(503, 'Python 3 is unavailable on this server.');

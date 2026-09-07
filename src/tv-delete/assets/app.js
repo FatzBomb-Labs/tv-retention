@@ -661,11 +661,10 @@
     return button;
   }
 
-  function renderRules() {
-    const container = $('tvd-rules');
+  function visibleRules() {
     const term = ($('tvd-search').value || '').toLowerCase();
     const filter = $('tvd-filter').value;
-    const rules = sortRules((settings.rules || []).filter((rule) => {
+    return sortRules((settings.rules || []).filter((rule) => {
       if (term && !(`${rule.series_title} ${rule.path}`.toLowerCase().includes(term))) return false;
       if (filter === 'enabled') return rule.enabled;
       if (filter === 'disabled') return !rule.enabled;
@@ -673,9 +672,19 @@
       if (filter === 'blocked') return isBlocked(rule.id);
       return true;
     }));
+  }
+
+  function renderRules() {
+    const container = $('tvd-rules');
+    const rules = visibleRules();
+    $('tvd-enable-all').textContent = `Enable shown (${rules.length})`;
+    $('tvd-disable-all').textContent = `Disable shown (${rules.length})`;
     container.replaceChildren();
     $('tvd-rules-empty').hidden = (settings.rules || []).length > 0;
     rules.forEach((rule) => {
+      // A queued series shows its intent instead of its retention: nothing about the
+      // keep window matters once you have decided to stop managing it.
+      if (queuedRemoval(rule)) { container.append(queuedCard(rule)); return; }
       const blocked = isBlocked(rule.id);
       const card = el('div', { className: `tvd-rule ${blocked ? 'blocked' : 'ok'}${rule.enabled ? '' : ' disabled'}` });
       const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
@@ -735,22 +744,23 @@
           const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
           changeList(data.result, `${rule.series_title}: scheduled changes`);
         }));
-        const runButton = el('button', { type: 'button', textContent: 'Run' });
-        runButton.addEventListener('click', () => guarded('', async () => {
-          let warning = `Run ${rule.series_title} now?\n\nThis will ${planText(plan)}.\n\n`;
-          warning += snapshot.test_mode
-            ? 'Test mode is active on the scheduler, but a manual run makes real changes.'
-            : 'This cannot be undone from here.';
-          if (!window.confirm(warning)) return;
-          const data = await api('run', { rule_ids: [rule.id] }, 'Running…');
-          await refresh();
-          showResult(data.result, 'Run');
-        }));
-        actions.append(changesButton, runButton);
+        actions.append(changesButton);
       }
       const editButton = el('button', { type: 'button', textContent: 'Edit' });
       editButton.addEventListener('click', () => editRule(rule));
-      actions.append(editButton);
+      const removeButton = el('button', { type: 'button', className: 'tvd-small',
+                                          title: 'Stop managing this series here at the next run',
+                                          textContent: 'Remove' });
+      removeButton.addEventListener('click', () => guarded('', async () => {
+        // The quick path: queues the harmless option, undoable from the card.
+        const target = (settings.rules || []).find((other) => other.id === rule.id);
+        target.queue = Object.assign({}, target.queue,
+                                     { removal: { action: 'remove', created_at: new Date().toISOString() } });
+        await saveSettings('Queued for removal. Undo it from the card until the next run.');
+      }));
+      const deleteButton = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Remove…' });
+      deleteButton.addEventListener('click', () => deleteSeries(rule));
+      actions.append(editButton, removeButton, deleteButton);
       if (isChecking(rule.id)) {
         [...actions.children].forEach((button) => { button.disabled = true; });
         card.classList.add('tvd-busy-row');
@@ -764,6 +774,25 @@
   $('tvd-search').addEventListener('input', renderRules);
   $('tvd-filter').addEventListener('change', renderRules);
   $('tvd-sort').addEventListener('change', renderRules);
+
+  // Acts on what the filter is showing, and says how many, because "all" on a filtered
+  // list of nine out of thirty-six is not what anybody means.
+  function setAllShown(wanted) {
+    return guarded('', async () => {
+      const shown = visibleRules();
+      const changing = shown.filter((rule) => !!rule.enabled !== wanted);
+      if (!changing.length) throw new Error(`Every series shown is already ${wanted ? 'enabled' : 'disabled'}.`);
+      if (!window.confirm(`${wanted ? 'Enable' : 'Disable'} ${plural(changing.length, 'series')}?`)) return;
+      changing.forEach((rule) => {
+        const target = (settings.rules || []).find((other) => other.id === rule.id);
+        if (target) target.enabled = wanted;
+      });
+      await saveSettings(`${plural(changing.length, 'series')} ${wanted ? 'enabled' : 'disabled'}.`);
+    });
+  }
+
+  $('tvd-enable-all').addEventListener('click', () => setAllShown(true));
+  $('tvd-disable-all').addEventListener('click', () => setAllShown(false));
 
   // -- alerts ------------------------------------------------------------
   // One card per series, not one per problem. The series is the thing you act on, so it
@@ -790,6 +819,7 @@
     'remove-rule': 'Remove from TV Delete',
     'open-instance': 'Open Sonarr settings',
     'test-instance': 'Test the connection',
+    'enable-recycle-bin': 'Give Sonarr a recycle bin',
   };
   let severityFilter = 'all';
 
@@ -881,6 +911,31 @@
 
   function runAlertAction(alert) {
     return guarded('', async () => {
+      if (alert.action === 'enable-recycle-bin') {
+        // Writes to Sonarr's own configuration, so it asks for the path and says plainly
+        // that the change applies to everything Sonarr deletes.
+        const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
+        dialog('Give Sonarr a recycle bin', (body) => {
+          body.append(el('p', { textContent:
+            'Sonarr will move deleted files here instead of removing them, and clean the folder '
+            + 'out after a while. This changes Sonarr’s own setting, so it applies to everything '
+            + 'Sonarr deletes — not only to TV Delete.' }));
+          const path = el('input', { type: 'text', spellcheck: false, placeholder: '/tv/.recycle',
+                                     value: '' });
+          body.append(field('Recycle bin path, as Sonarr sees it', path,
+                            'A path inside Sonarr, on the same filesystem as your library so moves '
+                            + 'are instant. Sonarr creates it if it does not exist.'));
+          return { path };
+        }, async (inner) => {
+          const data = await api('enable-recycle-bin',
+                                 { instance_id: alert.instance_id, path: inner.path.value.trim() },
+                                 'Updating Sonarr…');
+          queueChecks((settings.rules || []).filter((r) => r.instance_id === alert.instance_id)
+            .map((r) => r.id).slice(0, 1));
+          notice(data.ok_message, 'ok');
+        }, 'Set it');
+        return;
+      }
       if (alert.action === 'open-instance' || alert.action === 'test-instance') {
         document.querySelector('.tvd-tabs button[data-tab="settings"]').click();
         const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
@@ -1134,6 +1189,13 @@
       const specials = options(el('select'), [['', 'Use the global setting'], ['no', 'Exclude specials'],
                                               ['yes', 'Include specials']],
         rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : ''));
+      const globals = settings.retention || {};
+      const override = (value, onLabel, offLabel, globalValue) => options(el('select'),
+        [['', `Use the global setting (currently ${globalValue ? onLabel : offLabel})`],
+         ['yes', onLabel], ['no', offLabel]],
+        value === true ? 'yes' : (value === false ? 'no' : ''));
+      const autoUnmonitor = override(rule.auto_unmonitor, 'On', 'Off', globals.auto_unmonitor);
+      const autoMonitor = override(rule.auto_monitor, 'On', 'Off', globals.auto_monitor);
       const enabled = toggle('Series is enabled', rule.enabled, null, { className: 'tvd-row-switch' });
 
       body.append(
@@ -1143,7 +1205,12 @@
         field('Retention', presetSelect, (settings.profiles || []).length
           ? 'Presets are managed on the Presets tab.' : 'No presets yet — create one to reuse values.'),
         conditions.node,
-        field('Season 0 / specials', specials, 'Overrides the global setting for this series only.'),
+        el('h3', { className: 'tvd-card-title', textContent: 'Overrides for this series' }),
+        el('div', { className: 'tvd-row' }, [
+          field('Season 0 / specials', specials),
+          field('Auto unmonitor', autoUnmonitor),
+          field('Auto monitor', autoMonitor),
+        ]),
         enabled.node,
       );
       if (existing) {
@@ -1159,7 +1226,7 @@
         body.append(el('div', { className: 'tvd-editor-foot' }, [remove]));
       }
       return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions,
-               specials, enabled };
+               specials, autoUnmonitor, autoMonitor, enabled };
     }, async (context) => {
       const chosen = context.getSeries();
       const draft = {
@@ -1172,6 +1239,8 @@
         keep_seasons: context.presetSelect.value ? null : (context.conditions.seasons.value || null),
         combine: context.conditions.combine.value,
         include_specials: context.specials.value,
+        auto_unmonitor: context.autoUnmonitor.value,
+        auto_monitor: context.autoMonitor.value,
         unmonitor: true,
       };
       if (chosen) {
@@ -1198,66 +1267,96 @@
 
   $('tvd-add').addEventListener('click', () => editRule(null));
 
-  // The only action that can destroy a whole series, and the only one that ignores
-  // Preview. That is deliberate — tidying up is normally done with Preview on, and a
-  // removal that silently did nothing would be worse — so the dialog says it outright.
+  const REMOVAL_ACTIONS = [
+    ['remove', 'Leave the series untouched in Sonarr'],
+    ['monitor-all', 'Set the entire series to monitored'],
+    ['unmonitor-all', 'Set the entire series to unmonitored'],
+    ['monitor-in-frame', 'Set only episodes inside the keep window to monitored'],
+    ['delete-series', 'Ask Sonarr to delete the series, keeping the files'],
+    ['delete-series-files', 'Ask Sonarr to delete the series and its files'],
+  ];
+  const REMOVAL_CONFIRM = { 'delete-series': 'DELETE', 'delete-series-files': 'DELETE ALL' };
+  const REMOVAL_SONARR = {
+    'remove': 'Sonarr will not be touched',
+    'monitor-all': 'Sonarr will monitor the whole series',
+    'unmonitor-all': 'Sonarr will unmonitor the whole series',
+    'monitor-in-frame': 'Sonarr will monitor the episodes inside the keep window',
+    'delete-series': 'Sonarr will delete the series record',
+    'delete-series-files': 'Sonarr will delete the series record',
+  };
+  const REMOVAL_FILES = {
+    'delete-series-files': 'Sonarr will delete its files',
+  };
+
+  const queuedRemoval = (rule) => (rule.queue || {}).removal || null;
+  const queuedFixes = (rule) => ((rule.queue || {}).fixes || []).map((entry) => entry.kind);
+
+  // A queued series states its intent on the card and can be taken back until a run
+  // applies it. Nothing has happened yet, so the card says exactly what will.
+  function queuedCard(rule) {
+    const queued = queuedRemoval(rule);
+    const card = el('div', { className: 'tvd-rule queued' });
+    card.append(el('div', { className: 'tvd-rule-head' }, [
+      el('span', { className: 'tvd-queued-mark', textContent: '×' }),
+      el('span', { className: 'tvd-rule-title', textContent: rule.series_title || rule.path }),
+      el('span', { className: 'tvd-alert-age', textContent: `queued ${ago(queued.created_at)}` }),
+    ]));
+    const lines = el('div', { className: 'tvd-queued-lines' });
+    lines.append(el('div', { textContent: 'Queued for removal from TV Delete at the next run.' }));
+    lines.append(el('div', { textContent: REMOVAL_SONARR[queued.action] || '' }));
+    lines.append(el('div', { className: REMOVAL_FILES[queued.action] ? 'tvd-queued-danger' : '',
+                             textContent: REMOVAL_FILES[queued.action] || 'No files will be removed' }));
+    card.append(lines);
+    const undo = el('button', { type: 'button', className: 'tvd-action', textContent: 'Undo' });
+    undo.addEventListener('click', () => guarded('', async () => {
+      const target = (settings.rules || []).find((other) => other.id === rule.id);
+      target.queue = Object.assign({}, target.queue, { removal: null });
+      await saveSettings('Removal cancelled.');
+    }));
+    card.append(el('div', { className: 'tvd-alert-foot' }, [undo]));
+    return card;
+  }
+
+  // Removing a series is an intent, not an act: it queues, and the two destructive Sonarr
+  // options each demand their own word before they can be queued at all.
   function deleteSeries(rule) {
     dialog(`Remove ${rule.series_title || rule.path}`, (body) => {
-      const state = monitoring[rule.id] || {};
       body.append(el('p', { textContent:
-        'Removing this series from TV Delete stops it being managed here and touches nothing '
-        + 'else. The two options below go further.' }));
-      const fromSonarr = toggle('Also remove the series from Sonarr', false, null, { className: 'tvd-row-switch' });
-      const fromDisk = toggle('Also delete its episode files from disk', false, null, { className: 'tvd-row-switch' });
-      body.append(fromSonarr.node, fromDisk.node);
-      if (state.files_total) {
-        body.append(el('small', { textContent: `Sonarr reports ${plural(state.files_total, 'file')} for this series.` }));
-      }
+        'This queues the series for removal from TV Delete. Nothing happens until the next '
+        + 'run, and it can be undone from the series card until then.' }));
+      const action = options(el('select'), REMOVAL_ACTIONS, 'remove');
       const warning = el('div', { className: 'tvd-danger-box', hidden: true });
-      const confirm = el('input', { type: 'text', autocomplete: 'off', spellcheck: false, placeholder: 'DELETE' });
-      const confirmField = field('Type DELETE to confirm', confirm);
+      const confirm = el('input', { type: 'text', autocomplete: 'off', spellcheck: false });
+      const confirmField = field('Confirm', confirm);
       confirmField.hidden = true;
       const review = () => {
-        const destructive = fromSonarr.input.checked || fromDisk.input.checked;
-        warning.hidden = !destructive;
-        confirmField.hidden = !destructive;
-        warning.replaceChildren();
-        if (!destructive) return;
-        const parts = [];
-        if (fromDisk.input.checked) parts.push('every episode file WILL be deleted from disk');
-        if (fromSonarr.input.checked) parts.push('the series WILL be removed from Sonarr');
-        warning.append(el('strong', { textContent: 'This cannot be undone.' }));
-        warning.append(el('span', { textContent: ` ${parts.join(' and ')}. `
-          + 'It is not covered by the run guards, and only Sonarr’s own recycle bin, if you '
-          + 'have one, will hold anything.' }));
+        const word = REMOVAL_CONFIRM[action.value];
+        warning.hidden = !word;
+        confirmField.hidden = !word;
+        confirm.placeholder = word || '';
+        confirmField.querySelector('span').textContent = word ? `Type ${word} to confirm` : 'Confirm';
+        if (!word) return;
+        warning.replaceChildren(
+          el('strong', { textContent: 'Sonarr will delete this series.' }),
+          el('span', { textContent: action.value === 'delete-series-files'
+            ? ' Its episode files go too, and only Sonarr’s own recycle bin will hold them. '
+              + 'TV Delete does not remove the series itself — it asks Sonarr to.'
+            : ' The files stay on disk; only Sonarr’s record of the series is removed.' }));
       };
-      fromSonarr.input.addEventListener('change', review);
-      fromDisk.input.addEventListener('change', review);
-      body.append(warning, confirmField);
-      return { fromSonarr, fromDisk, confirm };
+      action.addEventListener('change', review);
+      body.append(field('Sonarr action', action,
+                        'What Sonarr should do as the series leaves TV Delete.'), warning, confirmField);
+      return { action, confirm };
     }, async (context) => {
-      const destructive = context.fromSonarr.input.checked || context.fromDisk.input.checked;
-      if (destructive && context.confirm.value.trim() !== 'DELETE') {
-        throw new Error('Type DELETE to confirm. Nothing was removed.');
+      const word = REMOVAL_CONFIRM[context.action.value];
+      if (word && context.confirm.value.trim() !== word) {
+        throw new Error(`Type ${word} to confirm. Nothing was queued.`);
       }
-      if (!destructive) {
-        const data = await api('alert-action', { kind: 'remove-rule', rule_id: rule.id }, 'Removing…');
-        settings = data.settings;
-        snapshot.settings = settings;
-        await refresh();
-        notice('Series removed from TV Delete. No files were touched.', 'ok');
-        return;
-      }
-      const data = await api('remove-series', {
-        rule_id: rule.id, confirm_title: rule.series_title,
-        delete_files: context.fromDisk.input.checked,
-        remove_from_sonarr: context.fromSonarr.input.checked,
-      }, 'Removing the series…');
-      await refresh();
-      notice(`${data.removed.series_title} removed`
-             + (data.removed.deleted_files ? ` (${plural(data.removed.files, 'file')}, ${bytes(data.removed.bytes)})` : '')
-             + '.', 'ok');
-    }, 'Remove');
+      const target = (settings.rules || []).find((other) => other.id === rule.id);
+      target.queue = Object.assign({}, target.queue,
+                                   { removal: { action: context.action.value, created_at: new Date().toISOString() } });
+      await saveSettings('Queued. It will be applied at the next run, and can be undone until then.');
+    }, 'Queue removal');
   }
 
   // -- schedule ----------------------------------------------------------
@@ -1543,6 +1642,10 @@
   ];
 
   const guardInputs = {};
+  const guardFlag = (name, fallback) => {
+    const guard = (settings.guards || {})[name];
+    return guard && typeof guard === 'object' ? guard.enabled !== false : fallback;
+  };
   const notifyInputs = {};
 
   function renderSettings() {
@@ -1583,11 +1686,19 @@
     safety.append(row(emptySwitch.node, 'Remove empty season folders',
       'Season folders left empty by a deletion. The series folder itself is never removed.'));
 
+    const fallbackSwitch = toggle('', guardFlag('allow_import_date_fallback', true), null,
+                                  { label: 'Use the import date when no air date is known',
+                                    className: 'tvd-cell-switch' });
+    guardInputs.fallback = { enabled: fallbackSwitch.input };
+    safety.append(row(fallbackSwitch.node, 'Judge undated episodes by when Sonarr imported them',
+      'Sonarr’s air date is used first, then TMDB if a key is set. With this off, an episode '
+      + 'with no known air date is never deleted rather than being judged on its import date.'));
+
     const retention = settings.retention || {};
     $('tvd-include-specials').checked = !!retention.include_specials;
     $('tvd-auto-unmonitor').checked = !!retention.auto_unmonitor;
     $('tvd-auto-monitor').checked = !!retention.auto_monitor;
-    $('tvd-mtime-fallback').checked = !!retention.allow_mtime_fallback;
+    $('tvd-search-after').checked = !!retention.search_after_monitor;
     $('tvd-tmdb-key').value = (settings.tmdb || {}).api_key || '';
     $('tvd-state-dir').value = settings.state_dir || '';
     $('tvd-history-size').value = settings.log_retention_runs;
@@ -1613,7 +1724,7 @@
       guards,
       retention: {
         include_specials: $('tvd-include-specials').checked,
-        allow_mtime_fallback: $('tvd-mtime-fallback').checked,
+        search_after_monitor: $('tvd-search-after').checked,
         auto_unmonitor: $('tvd-auto-unmonitor').checked,
         auto_monitor: $('tvd-auto-monitor').checked,
       },
@@ -1622,6 +1733,9 @@
         extensions: guardInputs.sidecars.value.value.split(',').map((value) => value.trim()).filter(Boolean),
       },
       delete_empty_dirs: guardInputs.empty.enabled.checked,
+      guards: Object.assign({}, guards, {
+        allow_import_date_fallback: { enabled: guardInputs.fallback.enabled.checked },
+      }),
       tmdb: { api_key: $('tvd-tmdb-key').value },
       state_dir: $('tvd-state-dir').value.trim(),
       log_retention_runs: $('tvd-history-size').value,

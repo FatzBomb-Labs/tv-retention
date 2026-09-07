@@ -83,6 +83,14 @@ KINDS = {
                 'root mapping before running anything.',
         'action': 'open-instance',
     },
+    'no-recycle-bin': {
+        'severity': WARNING, 'blocking': False, 'scope': 'system',
+        'title': 'Sonarr has no recycle bin',
+        'help': 'Sonarr deletes files outright. Giving it a recycle bin makes every deletion '
+                'recoverable for a while, including the ones this plugin asks for. It applies '
+                'to everything Sonarr deletes, not only to TV Delete.',
+        'action': 'enable-recycle-bin',
+    },
     'run-aborted': {
         'severity': ERROR, 'blocking': False, 'scope': 'system',
         'title': 'A run was stopped by a guard',

@@ -56,6 +56,8 @@
       <option value="blocked">Blocked only</option>
     </select></label>
     <span class="tvd-spacer"></span>
+    <button type="button" id="tvd-enable-all" class="tvd-small">Enable shown</button>
+    <button type="button" id="tvd-disable-all" class="tvd-small">Disable shown</button>
     <button type="button" id="tvd-add" class="tvd-primary">Add series</button>
   </div>
   <div id="tvd-rules" class="tvd-rules"></div>
@@ -189,8 +191,8 @@
     <small>Unmonitor episodes in Sonarr as they are deleted, so they are not fetched again.</small>
     <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-auto-monitor"><span class="tvd-slider"></span><span class="tvd-switch-text">Auto monitor</span></label>
     <small>When a keep window widens, re-monitor episodes this plugin previously unmonitored. Sonarr may download them again.</small>
-    <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-mtime-fallback"><span class="tvd-slider"></span><span class="tvd-switch-text">Fall back to file modification time</span></label>
-    <small>With this off, an episode with no known air date is never deleted.</small>
+    <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-search-after"><span class="tvd-slider"></span><span class="tvd-switch-text">Search for newly monitored episodes</span></label>
+    <small>After a run monitors an episode, ask Sonarr to look for it rather than waiting for its next RSS pass. Only episodes that run newly monitored, never the whole series — but monitoring many at once means downloading many at once.</small>
   </div>
 
   <h2 class="tvd-h2">App storage</h2>

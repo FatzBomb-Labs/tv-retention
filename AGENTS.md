@@ -14,6 +14,10 @@ there. The suite is 196 tests with no expected failures.
 ## Project constraints
 
 - A rule that does not resolve to exactly one Sonarr series must never be processed.
+- Nothing a series card offers happens immediately: removals and monitoring fixes queue,
+  and only a run applies them. Undo is therefore always available until then.
+- The plugin never deletes a series. It asks Sonarr to, so Sonarr's recycle bin and its
+  bookkeeping apply. The plugin removes individual episode files, through Sonarr's API.
 - Test Mode governs the scheduler only: a scheduled run does everything except write. A
   manual run is always live, so its confirmation must state the actual plan, and removing
   a series is guarded by a typed confirmation rather than by a mode.
