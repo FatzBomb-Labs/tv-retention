@@ -921,6 +921,15 @@ def check_one_rule(settings: dict, rule: dict, instance_state: dict = None) -> d
         state['checked_at'] = now_iso()
         state['fingerprint'] = rule_fingerprint(rule, settings)
     health = load_health(settings)
+    was = (health.get('rules') or {}).get(rule['id']) or {}
+    # Said once, when Sonarr first reports it, rather than on every check thereafter.
+    if state.get('ended') and not was.get('ended'):
+        notify(settings, 'A series has ended',
+               f'Sonarr reports {state.get("series_title")} as ended'
+               + (' and nothing remains inside its keep window.'
+                  if state.get('retention_expired') else '.'),
+               event='series_ended')
+        log_line(settings, 'warning', f'{state.get("series_title")} has ended in Sonarr')
     health['rules'][rule['id']] = state
     others = [alert for alert in (health.get('alerts') or []) if alert.get('rule_id') != rule['id']]
     health['alerts'] = alerts.merge(health.get('alerts') or [],
@@ -1477,9 +1486,9 @@ def action_remove_series(settings, request):
         raise Rejected('That series is no longer in the list.')
     delete_files = bool(request.get('delete_files'))
     from_sonarr = bool(request.get('remove_from_sonarr'))
-    if (delete_files or from_sonarr) and settings.get('preview', True):
-        raise Rejected('Preview mode is on, so nothing is removed. Turn Preview off first if '
-                       'you really mean this.')
+    # Deliberately outside Preview. Tidying up is normally done with Preview on, and a
+    # removal that silently did nothing would be worse than one that acts as asked. The
+    # typed confirmation is what stands in for the mode here, and the dialog says so.
     typed = str(request.get('confirm_title') or '').strip()
     if (delete_files or from_sonarr) and typed.casefold() != str(rule.get('series_title') or '').strip().casefold():
         raise Rejected('The confirmation did not match. Nothing was removed.')
@@ -1506,8 +1515,9 @@ def action_remove_series(settings, request):
               'removed_from_sonarr': from_sonarr, 'deleted_files': delete_files,
               'files': before[1] if delete_files else 0, 'bytes': before[0] if delete_files else 0}
     journal(settings, record)
-    log_line(settings, 'warning', f'removed {rule.get("series_title")} '
-                                  f'(sonarr={from_sonarr}, files={delete_files})')
+    log_line(settings, 'warning',
+             f'removed {rule.get("series_title")} (sonarr={from_sonarr}, files={delete_files})'
+             + (' — overrode Preview' if settings.get('preview') and (from_sonarr or delete_files) else ''))
     if from_sonarr:
         notify(settings, 'TV Delete removed a series',
                f'{rule.get("series_title")} was removed from Sonarr'

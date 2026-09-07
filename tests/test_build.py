@@ -202,10 +202,22 @@ class Interface(unittest.TestCase):
         self.assertIn('DEFAULT_TIMEOUT', declared, 'the test must be seeing real constants')
 
     def test_blocking_problems_are_visibly_different_from_advisory_ones(self):
-        css = (ROOT / "src" / "tv-delete" / "assets" / "app.css").read_text()
-        self.assertIn("tvd-alert-badge.error", css)
-        self.assertIn("tvd-alert-badge.warning", css)
-        self.assertIn("blocked", self.js)
+        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        self.assertIn('.tvd-dot-badge.error', css)
+        self.assertIn('.tvd-dot-badge.warning', css)
+        self.assertIn('.tvd-dot-badge.blocked', css)
+        self.assertIn('blocked', self.js)
+
+    def test_the_series_badge_is_a_count_left_of_the_title(self):
+        # A circle carrying a number, before the name — not a pill competing with it.
+        self.assertRegex(self.js, r'alertBadge\(rule\),\s*\n\s*el\(.span., \{ className: .tvd-rule-title')
+        self.assertIn('tvd-dot-badge', self.js)
+
+    def test_removing_a_series_states_that_it_ignores_preview(self):
+        # It genuinely does, by design, so the dialog has to say so before it happens.
+        self.assertIn('This ignores Preview.', self.js)
+        self.assertRegex(self.js, r'WILL be deleted from disk')
+        self.assertRegex(self.js, r'WILL be removed from Sonarr')
 
     def test_the_icon_is_a_font_awesome_name(self):
         """A name is not enough: it has to resolve to a glyph.

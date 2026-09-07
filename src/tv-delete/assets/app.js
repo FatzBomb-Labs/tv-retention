@@ -127,9 +127,17 @@
     return { node, input, caption };
   }
 
-  function field(label, control, hint) {
+  // A "?" the reader can ask, rather than a paragraph under every row shouting at once.
+  function hint(explanation) {
+    const mark = el('button', { type: 'button', className: 'tvd-hint', textContent: '?',
+                                title: explanation, 'aria-label': explanation });
+    mark.addEventListener('click', (event) => { event.preventDefault(); window.alert(explanation); });
+    return mark;
+  }
+
+  function field(label, control, note) {
     const wrapper = el('label', { className: 'tvd-field' }, [el('span', { textContent: label }), control]);
-    if (hint) wrapper.append(el('small', { textContent: hint }));
+    if (note) wrapper.append(el('small', { textContent: note }));
     return wrapper;
   }
 
@@ -552,25 +560,30 @@
     return control.node;
   }
 
-  // A badge appears only when something needs attention. Hovering summarises it; clicking
-  // opens that series' own alerts, where the fixes live.
+  // A small round badge, left of the title, the way a count belongs. It carries the worst
+  // severity present and nothing else: the detail is one click away and does not need to
+  // compete with the series name for space.
   function alertBadge(rule) {
     const list = seriesAlerts(rule.id);
     if (isChecking(rule.id)) {
-      return el('span', { className: 'tvd-badge checking', textContent: 'reading…' });
+      return el('span', { className: 'tvd-dot-badge checking', title: 'Reading this series from Sonarr', textContent: '' });
     }
     if (!list.length) {
       const state = monitoring[rule.id];
-      return el('span', { className: 'tvd-badge quiet',
-                          title: state ? `Checked ${ago(state.checked_at)}` : 'Not checked yet',
-                          textContent: state ? 'ok' : 'unchecked' });
+      return el('span', {
+        className: `tvd-dot-badge ${state ? 'clear' : 'unknown'}`,
+        title: state ? `No problems — checked ${ago(state.checked_at)}` : 'Not checked yet',
+        textContent: '',
+      });
     }
     const severity = worstSeverity(list);
     const blocked = isBlocked(rule.id);
     const button = el('button', {
-      type: 'button', className: `tvd-alert-badge ${severity}${blocked ? ' blocked' : ''}`,
-      textContent: `${blocked ? 'Blocked · ' : ''}${list.length}`,
-      title: list.map((alert) => `${alert.title}: ${alert.detail}`).join('\n'),
+      type: 'button',
+      className: `tvd-dot-badge ${severity}${blocked ? ' blocked' : ''}`,
+      textContent: String(list.length),
+      title: (blocked ? 'Blocked — skipped by every run.\n' : '')
+             + list.map((alert) => `• ${alert.title}: ${alert.detail}`).join('\n'),
     });
     button.addEventListener('click', () => showSeriesAlerts(rule));
     return button;
@@ -595,8 +608,8 @@
       const card = el('div', { className: `tvd-rule ${blocked ? 'blocked' : 'ok'}${rule.enabled ? '' : ' disabled'}` });
       const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
       const head = el('div', { className: 'tvd-rule-head' }, [
-        el('span', { className: 'tvd-rule-title', textContent: rule.series_title || '(unmatched)' }),
         alertBadge(rule),
+        el('span', { className: 'tvd-rule-title', textContent: rule.series_title || '(unmatched)' }),
         el('span', { className: 'tvd-chip', textContent: instance ? instance.name : 'unknown instance' }),
       ]);
       head.append(enableToggle(rule));
@@ -652,51 +665,64 @@
   const SEVERITY_LABEL = { error: 'Error', warning: 'Warning', notice: 'Notice' };
   let severityFilter = 'all';
 
-  function alertRow(alert, options) {
+  function alertRow(alert, config) {
+    const options = config || {};
     const rule = (settings.rules || []).find((r) => r.id === alert.rule_id);
-    const card = el('div', { className: `tvd-alert ${alert.severity}` });
-    const head = el('div', { className: 'tvd-rule-head' }, [
-      el('span', { className: `tvd-badge ${alert.severity}`, textContent: SEVERITY_LABEL[alert.severity] }),
-      el('span', { className: 'tvd-rule-title', textContent: alert.title }),
-    ]);
-    if (alert.blocking) head.append(el('span', { className: 'tvd-badge error', textContent: 'blocks runs' }));
-    if (rule && !(options || {}).hideSeries) {
-      head.append(el('span', { className: 'tvd-chip', textContent: rule.series_title || rule.path }));
-    }
-    card.append(head);
-    card.append(el('p', { textContent: alert.detail }));
-    card.append(el('small', { textContent: alert.help }));
-    if ((alert.data || {}).files) {
-      (alert.data.files || []).slice(0, 10).forEach((path) =>
-        card.append(el('div', { className: 'tvd-mono', textContent: path })));
-    }
-    const actions = el('div', { className: 'tvd-rule-actions' });
+    const row = el('div', { className: `tvd-alert ${alert.severity}` });
+
+    const heading = el('div', { className: 'tvd-alert-head' });
+    heading.append(el('span', { className: `tvd-dot-badge ${alert.severity} tvd-static`, textContent: '' }));
+    heading.append(el('span', { className: 'tvd-alert-title', textContent: alert.title }));
+    if (alert.blocking) heading.append(el('span', { className: 'tvd-tag blocking', textContent: 'blocks runs' }));
+    if (rule && !options.hideSeries) heading.append(el('span', { className: 'tvd-tag', textContent: rule.series_title || rule.path }));
+    heading.append(el('span', { className: 'tvd-alert-age', textContent: `since ${ago(alert.first_seen)}` }));
+    row.append(heading);
+
+    row.append(el('p', { className: 'tvd-alert-detail', textContent: alert.detail }));
+    const help = el('p', { className: 'tvd-alert-help', textContent: alert.help, hidden: true });
+    row.append(help);
+
+    const foot = el('div', { className: 'tvd-alert-foot' });
     if (alert.action) {
       const label = {
-        'monitor-in-frame': 'Monitor everything inside the window',
-        'unmonitor-out-frame': 'Unmonitor everything outside the window',
+        'monitor-in-frame': 'Monitor inside the window',
+        'unmonitor-out-frame': 'Unmonitor outside the window',
         'rematch': 'Re-check against Sonarr',
         'accept-path': 'Accept the new folder',
-        'remove-rule': 'Remove this series from TV Delete',
+        'remove-rule': 'Remove from TV Delete',
         'open-instance': 'Open Sonarr settings',
         'test-instance': 'Test the connection',
       }[alert.action] || 'Fix';
-      const button = el('button', { type: 'button', className: 'tvd-primary', textContent: label });
+      const button = el('button', { type: 'button', className: 'tvd-primary tvd-small', textContent: label });
       button.addEventListener('click', () => runAlertAction(alert));
-      actions.append(button);
+      foot.append(button);
     }
-    if (rule) {
-      const open = el('button', { type: 'button', textContent: 'Show the series' });
+    if (rule && !options.hideSeries) {
+      const open = el('button', { type: 'button', className: 'tvd-small', textContent: 'Show series' });
       open.addEventListener('click', () => {
         document.querySelector('.tvd-tabs button[data-tab="series"]').click();
         $('tvd-search').value = rule.series_title || rule.path;
         renderRules();
       });
-      actions.append(open);
+      foot.append(open);
     }
-    actions.append(el('span', { className: 'tvd-chip', textContent: `since ${ago(alert.first_seen)}` }));
-    card.append(actions);
-    return card;
+    const why = el('button', { type: 'button', className: 'tvd-link', textContent: 'What does this mean?' });
+    why.addEventListener('click', () => {
+      help.hidden = !help.hidden;
+      why.textContent = help.hidden ? 'What does this mean?' : 'Hide explanation';
+    });
+    foot.append(why);
+    if ((alert.data || {}).files) {
+      const files = el('div', { className: 'tvd-alert-files', hidden: true });
+      (alert.data.files || []).slice(0, 10).forEach((path) =>
+        files.append(el('div', { className: 'tvd-mono', textContent: path })));
+      const show = el('button', { type: 'button', className: 'tvd-link', textContent: `List ${alert.count} file(s)` });
+      show.addEventListener('click', () => { files.hidden = !files.hidden; });
+      foot.append(show);
+      row.append(files);
+    }
+    row.append(foot);
+    return row;
   }
 
   function runAlertAction(alert) {
@@ -721,14 +747,18 @@
 
   function showSeriesAlerts(rule) {
     const list = seriesAlerts(rule.id);
-    dialog(`${rule.series_title || rule.path}`, (body) => {
+    const blocked = isBlocked(rule.id);
+    dialog(rule.series_title || rule.path, (body) => {
       const state = monitoring[rule.id];
-      body.append(el('p', { textContent: isBlocked(rule.id)
-        ? 'This series is blocked and will be skipped by every run until the errors below are resolved.'
-        : 'This series will still be processed. The items below are advisory.' }));
-      if (state) body.append(el('small', { textContent: `Checked ${ago(state.checked_at)}.` }));
+      body.append(el('div', { className: `tvd-status ${blocked ? 'bad' : 'ok'}` }, [
+        el('strong', { textContent: blocked ? 'Blocked' : 'Runs normally' }),
+        el('span', { textContent: blocked
+          ? 'Skipped by every run until the errors below are resolved.'
+          : 'The items below are advisory and do not stop this series.' }),
+        el('span', { className: 'tvd-alert-age', textContent: state ? `checked ${ago(state.checked_at)}` : 'not checked yet' }),
+      ]));
       list.forEach((alert) => body.append(alertRow(alert, { hideSeries: true })));
-      const recheck = el('button', { type: 'button', textContent: 'Re-check this series now' });
+      const recheck = el('button', { type: 'button', className: 'tvd-small', textContent: 'Re-check this series now' });
       recheck.addEventListener('click', () => { $('tvd-dialog').close('cancel'); queueChecks([rule.id]); });
       body.append(recheck);
       return {};
@@ -983,41 +1013,42 @@
 
   $('tvd-add').addEventListener('click', () => editRule(null));
 
-  // The only action that can destroy a whole series. Both removals are unchecked every
-  // time it opens, and either one demands the word DELETE typed out.
+  // The only action that can destroy a whole series, and the only one that ignores
+  // Preview. That is deliberate — tidying up is normally done with Preview on, and a
+  // removal that silently did nothing would be worse — so the dialog says it outright.
   function deleteSeries(rule) {
     dialog(`Remove ${rule.series_title || rule.path}`, (body) => {
       const state = monitoring[rule.id] || {};
       body.append(el('p', { textContent:
-        'Removing this series from TV Delete stops it being managed here. The options below '
-        + 'go further and cannot be undone from this page.' }));
+        'Removing this series from TV Delete stops it being managed here and touches nothing '
+        + 'else. The two options below go further.' }));
       const fromSonarr = toggle('Also remove the series from Sonarr', false, null, { className: 'tvd-row-switch' });
       const fromDisk = toggle('Also delete its episode files from disk', false, null, { className: 'tvd-row-switch' });
       body.append(fromSonarr.node, fromDisk.node);
       if (state.files_total) {
         body.append(el('small', { textContent: `Sonarr reports ${plural(state.files_total, 'file')} for this series.` }));
       }
-      const warning = el('div', { className: 'tvd-warning', hidden: true });
-      const confirm = el('input', { type: 'text', autocomplete: 'off', spellcheck: false });
+      const warning = el('div', { className: 'tvd-danger-box', hidden: true });
+      const confirm = el('input', { type: 'text', autocomplete: 'off', spellcheck: false, placeholder: 'DELETE' });
       const confirmField = field('Type DELETE to confirm', confirm);
       confirmField.hidden = true;
       const review = () => {
         const destructive = fromSonarr.input.checked || fromDisk.input.checked;
         warning.hidden = !destructive;
         confirmField.hidden = !destructive;
-        warning.textContent = fromDisk.input.checked
-          ? 'This permanently deletes every episode file this series owns, and is not covered by the '
-            + 'run guards. Only Sonarr’s own recycle bin, if you have one, will hold anything.'
-          : 'This removes the series from Sonarr, including its history and monitoring.';
+        warning.replaceChildren();
+        if (!destructive) return;
+        const parts = [];
+        if (fromDisk.input.checked) parts.push('every episode file WILL be deleted from disk');
+        if (fromSonarr.input.checked) parts.push('the series WILL be removed from Sonarr');
+        warning.append(el('strong', { textContent: 'This ignores Preview.' }));
+        warning.append(el('span', { textContent: ` Even with Preview on, ${parts.join(' and ')}. `
+          + 'It is not covered by the run guards and cannot be undone from here — only Sonarr’s '
+          + 'own recycle bin, if you have one, will hold anything.' }));
       };
       fromSonarr.input.addEventListener('change', review);
       fromDisk.input.addEventListener('change', review);
       body.append(warning, confirmField);
-      if (settings.preview) {
-        body.append(el('div', { className: 'tvd-banner', textContent:
-          'Preview is on, so the Sonarr and disk options are refused. Removing it from TV Delete '
-          + 'alone is still allowed.' }));
-      }
       return { fromSonarr, fromDisk, confirm };
     }, async (context) => {
       const destructive = context.fromSonarr.input.checked || context.fromDisk.input.checked;
@@ -1038,8 +1069,9 @@
         remove_from_sonarr: context.fromSonarr.input.checked,
       }, 'Removing the series…');
       await refresh();
-      notice(`${data.removed.series_title} removed (${plural(data.removed.files, 'file')}, `
-             + `${bytes(data.removed.bytes)}).`, 'ok');
+      notice(`${data.removed.series_title} removed`
+             + (data.removed.deleted_files ? ` (${plural(data.removed.files, 'file')}, ${bytes(data.removed.bytes)})` : '')
+             + '.', 'ok');
     }, 'Remove');
   }
 
@@ -1329,6 +1361,12 @@
   function renderSettings() {
     const safety = $('tvd-safety');
     safety.replaceChildren();
+    const row = (control, label, explanation, value) => el('div', { className: 'tvd-three' }, [
+      control,
+      el('div', { className: 'tvd-three-label' }, [el('span', { textContent: label }), hint(explanation)]),
+      value || el('span'),
+    ]);
+
     GUARDS.forEach(([name, label, help, low, high]) => {
       const stored = (settings.guards || {})[name] || { enabled: true, value: low };
       const number = el('input', { type: 'number', min: String(low), max: String(high), value: stored.value });
@@ -1336,11 +1374,7 @@
                              { label, className: 'tvd-cell-switch' });
       number.disabled = !stored.enabled;
       guardInputs[name] = { enabled: control.input, value: number };
-      safety.append(el('div', { className: 'tvd-three' }, [
-        control.node,
-        el('div', {}, [el('strong', { textContent: label }), el('small', { textContent: help })]),
-        number,
-      ]));
+      safety.append(row(control.node, label, help, number));
     });
 
     const sidecars = settings.sidecars || {};
@@ -1351,25 +1385,16 @@
                                  { label: 'Remove matching sidecar files', className: 'tvd-cell-switch' });
     extensions.disabled = !sidecars.enabled;
     guardInputs.sidecars = { enabled: sidecarSwitch.input, value: extensions };
-    safety.append(el('div', { className: 'tvd-three' }, [
-      sidecarSwitch.node,
-      el('div', {}, [el('strong', { textContent: 'Remove matching sidecar files on media deletion' }),
-                     el('small', { textContent: 'Subtitles, artwork and .nfo files sharing the episode name. '
-                                                + 'Leave the list empty to remove all of them, or name extensions to '
-                                                + 'restrict it. Another video file is never treated as a sidecar.' })]),
-      extensions,
-    ]));
+    safety.append(row(sidecarSwitch.node, 'Remove matching sidecar files on media deletion',
+      'Subtitles, artwork and .nfo files sharing the episode name. Leave the list empty to remove '
+      + 'all of them, or name extensions to restrict it. Another video file is never treated as a '
+      + 'sidecar.', extensions));
 
     const emptySwitch = toggle('', settings.delete_empty_dirs, null,
                                { label: 'Remove empty season folders', className: 'tvd-cell-switch' });
     guardInputs.empty = { enabled: emptySwitch.input };
-    safety.append(el('div', { className: 'tvd-three' }, [
-      emptySwitch.node,
-      el('div', {}, [el('strong', { textContent: 'Remove empty season folders' }),
-                     el('small', { textContent: 'Season folders left empty by a deletion. The series folder '
-                                                + 'itself is never removed.' })]),
-      el('span'),
-    ]));
+    safety.append(row(emptySwitch.node, 'Remove empty season folders',
+      'Season folders left empty by a deletion. The series folder itself is never removed.'));
 
     const retention = settings.retention || {};
     $('tvd-include-specials').checked = !!retention.include_specials;
@@ -1384,7 +1409,7 @@
     const box = $('tvd-notifications');
     box.replaceChildren();
     NOTIFICATIONS.forEach(([name, label]) => {
-      const control = toggle(label, (settings.notifications || {})[name], null, { className: 'tvd-row-switch' });
+      const control = toggle(label, (settings.notifications || {})[name], null, { className: 'tvd-notify-row' });
       notifyInputs[name] = control.input;
       box.append(control.node);
     });
