@@ -139,3 +139,9 @@
 .tvd-combo-note { opacity: .6; font-size: 11px; }
 .tvd-combo-blocked { color: var(--tvd-warn); font-size: 11px; }
 .tvd-combo-empty { padding: 8px 10px; opacity: .6; }
+
+/* A show being read from Sonarr. It stays visible and legible; only its own controls are
+   held, so the rest of the page carries on. */
+#tv-delete button.tvd-pill.busy { border-style: dashed; opacity: .85; cursor: progress; }
+.tvd-busy-row { opacity: .82; }
+#tvd-checking { display: flex; align-items: center; gap: 8px; }

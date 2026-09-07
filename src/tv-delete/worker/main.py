@@ -720,25 +720,37 @@ def load_health(settings: dict) -> dict:
     return health
 
 
-def health_is_stale(settings: dict, health: dict) -> bool:
-    """True when any enabled rule has no usable cached result.
+def stale_rule_ids(settings: dict, health: dict) -> list:
+    """The enabled rules whose cached result is missing, outdated, or no longer applicable.
 
-    Stale means the page should refresh quietly in the background, not that the figure on
-    screen is wrong: a cached result is always shown with its age.
+    Only these are re-read when the page opens. Everything else is served from the cache,
+    which is the whole point of keeping one.
     """
     ttl = int(settings.get('health', {}).get('ttl_hours', 24)) * 3600
+    stale = []
     for rule in settings.get('rules', []):
         if not rule.get('enabled'):
             continue
         entry = (health.get('rules') or {}).get(rule['id'])
         if not entry:
-            return True
-        if entry.get('fingerprint') != rule_fingerprint(rule, settings):
-            return True
+            stale.append(rule['id'])
+            continue
+        try:
+            if entry.get('fingerprint') != rule_fingerprint(rule, settings):
+                stale.append(rule['id'])
+                continue
+        except Rejected:
+            stale.append(rule['id'])
+            continue
         age = age_seconds(entry.get('checked_at'))
         if age is None or age > ttl:
-            return True
-    return False
+            stale.append(rule['id'])
+    return stale
+
+
+def health_is_stale(settings: dict, health: dict) -> bool:
+    """True when any enabled rule has no usable cached result."""
+    return bool(stale_rule_ids(settings, health))
 
 
 def record_monitoring(settings: dict, rule: dict, state: dict) -> None:
@@ -748,6 +760,60 @@ def record_monitoring(settings: dict, rule: dict, state: dict) -> None:
     health['rules'][rule['id']] = dict(state, checked_at=now_iso(),
                                        fingerprint=rule_fingerprint(rule, settings))
     write_cache(settings, 'health.json', health)
+
+
+# ---------------------------------------------------------------------------
+# Check progress
+# ---------------------------------------------------------------------------
+
+def read_progress(settings: dict) -> dict:
+    """What a check is currently doing, if one is running.
+
+    Written to disk rather than held in memory because the reader is a different process
+    every time: each RPC call is its own interpreter, and the scheduled check is another.
+    A stale marker from a killed process is ignored after a few minutes rather than
+    blocking the interface for ever.
+    """
+    progress = read_cache(settings, 'checking.json')
+    if not progress.get('running'):
+        return {'running': False}
+    age = age_seconds(progress.get('started'))
+    if age is None or age > 3600:
+        return {'running': False}
+    return progress
+
+
+def set_progress(settings: dict, **fields) -> None:
+    progress = read_cache(settings, 'checking.json')
+    progress.update(fields)
+    write_cache(settings, 'checking.json', progress)
+
+
+def clear_progress(settings: dict) -> None:
+    write_cache(settings, 'checking.json', {'running': False, 'finished': now_iso()})
+
+
+def check_one_rule(settings: dict, rule: dict, instance_state: dict = None) -> dict:
+    """Verify one rule and cache the result. The unit both callers work in."""
+    if instance_state and not instance_state.get('ok', True):
+        entry = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
+                 'ok': False, 'status': 'unmatched', 'label': 'Sonarr unavailable',
+                 'error': instance_state.get('error', ''), 'checked_at': now_iso(),
+                 'fingerprint': rule_fingerprint(rule, settings)}
+        health = load_health(settings)
+        health['rules'][rule['id']] = entry
+        write_cache(settings, 'health.json', health)
+        return entry
+    state = monitoring_for(settings, rule)
+    folder_ok, folder_note = folder_state(settings, rule)
+    state['folder_ok'] = folder_ok
+    state['folder_note'] = folder_note
+    state['checked_at'] = now_iso()
+    state['fingerprint'] = rule_fingerprint(rule, settings)
+    health = load_health(settings)
+    health['rules'][rule['id']] = state
+    write_cache(settings, 'health.json', health)
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -781,54 +847,51 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
     """Verify instances, matches, folders, and monitoring, and cache the results.
 
     Read-only against both Sonarr and the filesystem: it never deletes and never changes a
-    monitored flag. Its whole job is to notice a problem before a run does.
+    monitored flag. Progress is published rule by rule, so an interface open while this
+    runs can show each show updating instead of waiting for the whole sweep.
     """
     require_ready()
     settings = load_settings()
     started = now_iso()
     clock = time.monotonic()
     health = load_health(settings)
+    rules = [rule for rule in settings.get('rules', []) if rule.get('enabled')]
+    set_progress(settings, running=True, started=started, scheduled=scheduled,
+                 total=len(rules), done=0, current='', current_title='',
+                 phase='instances')
+    try:
+        instances = {}
+        for instance in settings.get('instances', []):
+            instances[instance['id']] = check_instance(settings, instance, force=force)
+        health['instances'] = instances
+        write_cache(settings, 'health.json', health)
 
-    instances = {}
-    for instance in settings.get('instances', []):
-        instances[instance['id']] = check_instance(settings, instance, force=force)
-    health['instances'] = instances
+        set_progress(settings, phase='matching')
+        bind_rules(settings, force=force)
+        settings = load_settings()
+        rules = [rule for rule in settings.get('rules', []) if rule.get('enabled')]
+        set_progress(settings, phase='rules', total=len(rules))
 
-    bind_rules(settings, force=force)
-    settings = load_settings()
+        problems, checked = [], 0
+        for rule in rules:
+            set_progress(settings, done=checked, current=rule['id'],
+                         current_title=rule.get('series_title') or rule['path'])
+            state = check_one_rule(settings, rule, instances.get(rule['instance_id']))
+            checked += 1
+            if not state.get('ok'):
+                problems.append(f'{state["series_title"]}: {state.get("error") or state.get("label")}')
+            elif state.get('folder_ok') is False:
+                problems.append(f'{state["series_title"]}: {state.get("folder_note")}')
 
-    problems, checked = [], 0
-    for rule in settings.get('rules', []):
-        if not rule.get('enabled'):
-            continue
-        checked += 1
-        instance_state = instances.get(rule['instance_id']) or {}
-        if not instance_state.get('ok', True):
-            entry = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
-                     'ok': False, 'status': 'unmatched', 'label': 'Sonarr unavailable',
-                     'error': instance_state.get('error', ''), 'checked_at': now_iso(),
-                     'fingerprint': rule_fingerprint(rule, settings)}
-            health['rules'][rule['id']] = entry
-            problems.append(f'{entry["series_title"]}: {entry["error"]}')
-            continue
-        state = monitoring_for(settings, rule)
-        folder_ok, folder_note = folder_state(settings, rule)
-        state['folder_ok'] = folder_ok
-        state['folder_note'] = folder_note
-        state['checked_at'] = now_iso()
-        state['fingerprint'] = rule_fingerprint(rule, settings)
-        health['rules'][rule['id']] = state
-        if not state.get('ok'):
-            problems.append(f'{state["series_title"]}: {state.get("error", state.get("label"))}')
-        elif not folder_ok:
-            problems.append(f'{state["series_title"]}: {folder_note}')
-
-    health['checked_at'] = started
-    health['duration_seconds'] = round(time.monotonic() - clock, 1)
-    health['scheduled'] = scheduled
-    health['problems'] = problems
-    health['rules_checked'] = checked
-    write_cache(settings, 'health.json', health)
+        health = load_health(settings)
+        health['checked_at'] = started
+        health['duration_seconds'] = round(time.monotonic() - clock, 1)
+        health['scheduled'] = scheduled
+        health['problems'] = problems
+        health['rules_checked'] = checked
+        write_cache(settings, 'health.json', health)
+    finally:
+        clear_progress(settings)
 
     if problems:
         notify(settings, f'TV Delete found {len(problems)} problem(s)',
@@ -891,12 +954,47 @@ def action_snapshot(settings, request):
         # read, so nothing on screen pretends to be live.
         'health': trim_health(health),
         'health_stale': health_is_stale(settings, health),
+        'stale_rules': stale_rule_ids(settings, health),
+        'progress': read_progress(settings),
     }
 
 
 def action_health(settings, request):
     """Refresh the cached health, on demand or because the page found it stale."""
     return {'health': trim_health(run_health_check(scheduled=False, force=bool(request.get('force'))))}
+
+
+def action_progress(settings, request):
+    """Cheap poll: what a running check is doing, plus the current cached results."""
+    return {'progress': read_progress(settings), 'health': trim_health(load_health(settings))}
+
+
+def action_check_rule(settings, request):
+    """Check one rule, so the interface can update show by show instead of all at once."""
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if not rule:
+        raise Rejected('That rule no longer exists.')
+    progress = read_progress(settings)
+    if progress.get('running'):
+        # A sweep is already covering this rule; asking again would only duplicate its work.
+        return {'busy': True, 'progress': progress}
+    require_ready()
+    health = load_health(settings)
+    instance_state = (health.get('instances') or {}).get(rule['instance_id'])
+    if not instance_state or age_seconds(instance_state.get('checked_at')) is None \
+            or age_seconds(instance_state.get('checked_at')) > 900:
+        instance = next((i for i in settings.get('instances', []) if i['id'] == rule['instance_id']), None)
+        if instance:
+            instance_state = check_instance(settings, instance, force=False)
+            health = load_health(settings)
+            health.setdefault('instances', {})[instance['id']] = instance_state
+            write_cache(settings, 'health.json', health)
+    bind_rules(settings)
+    settings = load_settings()
+    rule = next((r for r in settings.get('rules', []) if r['id'] == rule['id']), rule)
+    state = check_one_rule(settings, rule, instance_state)
+    summary = trim_health({'rules': {rule['id']: state}})['rules'][rule['id']]
+    return {'busy': False, 'rule_id': rule['id'], 'state': summary}
 
 
 def action_settings(settings, request):
@@ -1317,6 +1415,8 @@ def action_clear_history(settings, request):
 ACTIONS = {
     'snapshot': action_snapshot,
     'health': action_health,
+    'progress': action_progress,
+    'check-rule': action_check_rule,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'detect-mappings': action_detect_mappings,

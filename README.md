@@ -204,6 +204,20 @@ Everything the pills show is cached on disk, so opening the tab costs one small 
 rather than a conversation with Sonarr. On this server a page load carries about 3 KB and
 returns in 50 ms, against roughly 6 seconds to gather the same information live.
 
+**Nothing blocks.** The page paints from the cache immediately, then reads only the shows
+whose cached result is missing, outdated, or no longer applicable — one at a time, in the
+background. A show being read shows a *Reading Sonarr…* pill and its own buttons are held
+until it finishes; every other show stays fully usable. The first read of a session pays
+for the Sonarr series list (about 4 s here); the rest take under 100 ms each.
+
+A check does **not** run on every page load. The cache is the persistence: a result stays
+good until it ages out, or until something changes that moves the keep frame. Re-reading
+everything on each visit would undo the point of caching it.
+
+When the scheduled check is running, an open page notices and follows along rather than
+duplicating the work: a banner names the phase and counts the shows as they complete, and
+each card updates as its own result lands.
+
 A scheduled **health check** keeps that cache honest. It is read-only — it never deletes
 and never changes a monitored flag — and for every enabled rule it verifies:
 
@@ -360,7 +374,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 158 tests
+python3 -m unittest discover -s tests -v   # 170 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

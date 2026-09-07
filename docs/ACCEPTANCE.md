@@ -83,6 +83,10 @@ read-only or reversible.
 ## 8. Health check and caching
 
 - [ ] Open the tab and confirm every pill is already populated, with no manual check.
+- [ ] With a cold cache, confirm the page is usable immediately and shows fill in one by
+      one, each showing *Reading Sonarr…* with only its own buttons held.
+- [ ] Start `main.py check --scheduled` from a shell with the page open. Confirm the
+      banner names the phase and counts shows, and that cards update as it goes.
 - [ ] Confirm each pill's menu shows when it was read.
 - [ ] Widen a preset and confirm the affected pills refresh rather than showing stale numbers.
 - [ ] Stop Sonarr briefly and run `main.py check`. Confirm one summary notification, the

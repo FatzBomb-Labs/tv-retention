@@ -8,7 +8,7 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 There is no Python or PHP in the Webtop development container. Run
 `./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
 `python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 158 tests with no expected failures.
+there. The suite is 170 tests with no expected failures.
 [docs/VALIDATION.md](docs/VALIDATION.md) records the last validation.
 
 ## Project constraints
@@ -24,6 +24,8 @@ there. The suite is 158 tests with no expected failures.
 - Dry run defaults to on, and every new install starts with no retention schedule. The
   health check is read-only and defaults to on.
 - A cached reading is always shown with its age; nothing cached may be presented as live.
+- Sonarr reads happen in the background, per show. They must never raise the busy overlay,
+  and must never hold a show other than the one being read.
 - Re-monitoring on a widened rule only ever touches episodes recorded in the plugin's own
   unmonitored ledger, never an episode the operator unmonitored by hand. The monitoring
   pills are a separate, live read of Sonarr and change nothing until asked.

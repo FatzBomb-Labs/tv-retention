@@ -150,3 +150,17 @@ class Interface(unittest.TestCase):
         # The pill reads from the cache; the operator should never have to ask it to look.
         self.assertNotIn('tvd-check-monitoring', self.js)
         self.assertNotIn('tvd-check-monitoring', self.html)
+
+    def test_checks_never_block_the_page(self):
+        # Background reads pass quiet, so the busy overlay is not raised for them.
+        self.assertRegex(self.js, r"api\('check-rule'[^)]*, true\)")
+        self.assertRegex(self.js, r"api\('progress'[^)]*, true\)")
+        self.assertIn('function queueChecks', self.js)
+
+    def test_a_show_being_read_is_not_editable(self):
+        self.assertIn('isChecking(rule.id)', self.js)
+        self.assertRegex(self.js, r'button\.disabled = true')
+
+    def test_a_background_sweep_is_watched_not_duplicated(self):
+        self.assertIn('startPolling', self.js)
+        self.assertIn('data.busy', self.js)

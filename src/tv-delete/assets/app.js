@@ -33,13 +33,14 @@
 
   // A request must always settle. Without this, one stalled call leaves the busy overlay
   // covering the page with no way to dismiss it and nothing on screen explaining why.
+  // Background work passes quiet: it updates one card and must never block the page.
   const TIMEOUTS = { run: 3600000, preview: 900000, 'scan-folders': 1800000, 'remove-series': 900000,
                      series: 120000, 'test-instance': 90000, 'detect-mappings': 90000,
-                     match: 300000, 'test-tmdb': 60000 };
+                     match: 300000, 'test-tmdb': 60000, 'check-rule': 300000, progress: 30000 };
   const DEFAULT_TIMEOUT = 60000;
 
-  async function api(action, payload, label) {
-    busy(true, label);
+  async function api(action, payload, label, quiet) {
+    if (!quiet) busy(true, label);
     const controller = new AbortController();
     const limit = TIMEOUTS[action] || DEFAULT_TIMEOUT;
     const timer = setTimeout(() => controller.abort(), limit);
@@ -68,7 +69,7 @@
       return data;
     } finally {
       clearTimeout(timer);
-      busy(false);
+      if (!quiet) busy(false);
     }
   }
 
@@ -141,9 +142,13 @@
     settings = snapshot.settings;
     applyHealth(snapshot.health);
     render();
-    if (snapshot.health_stale && snapshot.array_ready) {
-      // Quietly, in the background: the page is already usable from the cache.
-      refreshHealth(false).catch((error) => notice(`Monitoring check failed: ${error.message}`, 'bad'));
+    // The page is already usable from the cache. Anything stale is read in the background,
+    // one show at a time, without holding the interface.
+    const progress = snapshot.progress || {};
+    if (progress.running) {
+      startPolling();
+    } else if (snapshot.array_ready) {
+      queueChecks(snapshot.stale_rules || []);
     }
   }
 
@@ -239,6 +244,11 @@
       editButton.addEventListener('click', () => editRule(rule));
       const removeButton = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Remove' });
       removeButton.addEventListener('click', () => removeRule(rule));
+      if (isChecking(rule.id)) {
+        // Editing a show mid-read would save against a frame the result no longer describes.
+        [previewButton, editButton, removeButton].forEach((button) => { button.disabled = true; });
+        card.classList.add('tvd-busy-row');
+      }
       actions.append(previewButton, editButton, removeButton);
       body.append(actions);
       card.append(body);
@@ -249,6 +259,109 @@
 
   $('tvd-search').addEventListener('input', renderRules);
   $('tvd-filter').addEventListener('change', renderRules);
+
+  // -- background checking ----------------------------------------------
+  // Nothing here blocks the page. Cached results are shown at once; stale shows are
+  // brought up to date one at a time, and only the show being read is held from editing.
+  const checking = new Set();
+  let checkQueue = [];
+  let checkRunning = false;
+  let pollTimer = null;
+
+  function isChecking(ruleId) {
+    return checking.has(ruleId);
+  }
+
+  function queueChecks(ruleIds) {
+    const wanted = (ruleIds || []).filter((id) => !checkQueue.includes(id) && !checking.has(id));
+    if (!wanted.length) return;
+    checkQueue = checkQueue.concat(wanted);
+    wanted.forEach((id) => checking.add(id));
+    renderRules();
+    drainChecks();
+  }
+
+  async function drainChecks() {
+    if (checkRunning) return;
+    checkRunning = true;
+    try {
+      while (checkQueue.length) {
+        const ruleId = checkQueue.shift();
+        try {
+          const data = await api('check-rule', { rule_id: ruleId }, '', true);
+          if (data.busy) {
+            // A scheduled sweep owns the work; watch it instead of duplicating it.
+            checkQueue.forEach((id) => checking.delete(id));
+            checkQueue = [];
+            checking.delete(ruleId);
+            startPolling();
+            break;
+          }
+          monitoring[data.rule_id] = data.state;
+        } catch (error) {
+          monitoring[ruleId] = Object.assign({}, monitoring[ruleId], {
+            ok: false, label: 'Check failed', error: error.message, checked_at: new Date().toISOString(),
+          });
+        } finally {
+          checking.delete(ruleId);
+          renderRules();
+        }
+      }
+    } finally {
+      checkRunning = false;
+    }
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    const tick = async () => {
+      try {
+        const data = await api('progress', {}, '', true);
+        applyHealth(data.health);
+        const progress = data.progress || {};
+        checking.clear();
+        if (progress.running && progress.current) checking.add(progress.current);
+        renderRules();
+        renderHealthBanner();
+        renderCheckBanner(progress);
+        if (!progress.running) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+          renderCheckBanner({});
+        }
+      } catch (error) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        renderCheckBanner({});
+      }
+    };
+    pollTimer = setInterval(tick, 2500);
+    tick();
+  }
+
+  const CHECK_PHASE = {
+    instances: 'verifying the Sonarr instances',
+    matching: 'matching rules to series',
+    rules: 'reading shows',
+  };
+
+  function renderCheckBanner(progress) {
+    const box = $('tvd-checking');
+    box.replaceChildren();
+    const active = progress && progress.running;
+    box.hidden = !active;
+    if (!active) return;
+    const done = progress.done || 0;
+    const total = progress.total || 0;
+    const phase = CHECK_PHASE[progress.phase] || 'checking';
+    let detail = `${progress.scheduled ? 'Scheduled check' : 'Check'} in progress — ${phase}`;
+    if (progress.phase === 'rules') {
+      detail += `, ${done} of ${total} read`;
+      if (progress.current_title) detail += `, now reading ${progress.current_title}`;
+    }
+    box.append(el('span', { className: 'tvd-spinner' }));
+    box.append(document.createTextNode(`${detail}. Shows update as they finish.`));
+  }
 
   // -- monitoring --------------------------------------------------------
   // Never fetched on demand by the operator: the snapshot carries the cached results, and
@@ -318,19 +431,24 @@
 
   function monitorPill(rule) {
     const state = monitoring[rule.id];
+    const busyNow = isChecking(rule.id);
     const holder = el('span', { className: 'tvd-pill-holder' });
-    const label = state ? pillText(state) : 'Monitoring: checking…';
+    const label = busyNow ? 'Reading Sonarr…' : (state ? pillText(state) : 'Not checked yet');
     let kind = 'unknown';
-    if (state) {
+    if (busyNow) kind = 'busy';
+    else if (state) {
       if (state.folder_ok === false || !state.ok) kind = 'bad';
       else if (PILL_ENDED.has(state.lifecycle)) kind = 'warn';
       else kind = PILL_CLASS[state.status] || 'unknown';
     }
     const pill = el('button', {
-      type: 'button', className: `tvd-pill ${kind}`, textContent: `${label} ▾`,
-      title: state ? `${state.label} — read ${ago(state.checked_at)}` : 'Waiting for the first check',
+      type: 'button', className: `tvd-pill ${kind}`, disabled: busyNow,
+      textContent: busyNow ? label : `${label} ▾`,
+      title: busyNow ? 'This show is being read from Sonarr'
+                     : (state ? `${state.label} — read ${ago(state.checked_at)}` : 'Waiting to be read'),
     });
     pill.setAttribute('aria-haspopup', 'menu');
+    if (busyNow) pill.setAttribute('aria-busy', 'true');
     pill.addEventListener('click', (event) => {
       event.stopPropagation();
       if (openMenu && holder.contains(openMenu)) { closeMenu(); return; }
@@ -345,13 +463,13 @@
   function monitorMenu(rule, state) {
     if (!state) {
       return [{ heading: 'Not checked yet' },
-              { label: 'Check now', run: () => guarded('', () => refreshHealth(true)) }];
+              { label: 'Check now', run: () => queueChecks([rule.id]) }];
     }
     const items = [{ heading: `${state.label} — read ${ago(state.checked_at)}` }];
     if (state.folder_note) items.push({ heading: state.folder_note });
     if (!state.ok) {
       items.push({ heading: state.error || '' });
-      items.push({ label: 'Check again now', run: () => guarded('', () => refreshHealth(true)) });
+      items.push({ label: 'Check again now', run: () => queueChecks([rule.id]) });
       return items;
     }
     const inside = insideCount(state);
@@ -378,15 +496,8 @@
       }
     }
     items.push({ label: `Check again now (${state.monitored}/${state.total} monitored)`,
-                 run: () => guarded('', () => refreshHealth(true)) });
+                 run: () => queueChecks([rule.id]) });
     return items;
-  }
-
-  async function refreshHealth(force) {
-    const data = await api('health', { force: !!force }, 'Checking Sonarr…');
-    applyHealth(data.health);
-    renderRules();
-    renderHealthBanner();
   }
 
   function applyHealth(health) {
