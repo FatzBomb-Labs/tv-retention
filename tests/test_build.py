@@ -213,11 +213,26 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r'alertBadge\(rule\),\s*\n\s*el\(.span., \{ className: .tvd-rule-title')
         self.assertIn('tvd-dot-badge', self.js)
 
-    def test_removing_a_series_states_that_it_ignores_preview(self):
-        # It genuinely does, by design, so the dialog has to say so before it happens.
-        self.assertIn('This ignores Preview.', self.js)
+    def test_removing_a_series_spells_out_what_it_destroys(self):
+        # There is no mode left for it to override; the typed word is the whole guard.
+        self.assertIn('This cannot be undone.', self.js)
         self.assertRegex(self.js, r'WILL be deleted from disk')
         self.assertRegex(self.js, r'WILL be removed from Sonarr')
+
+    def test_test_mode_governs_the_scheduler_only(self):
+        # A manual run is always live, so the confirmation has to say so when Test Mode is
+        # on — that is exactly when someone would assume otherwise.
+        self.assertIn('tvd-test-mode', self.js)
+        self.assertRegex(self.js, r'Test mode is active on the scheduler')
+        self.assertNotIn("$('tvd-preview')", self.js)
+
+    def test_the_run_button_hides_only_on_a_complete_answer(self):
+        # Hiding it on a stale or partial reading would be a promise the cache cannot keep.
+        self.assertRegex(self.js, r'plan\.trustworthy && !plan\.actionable')
+
+    def test_delete_moved_into_the_editor(self):
+        self.assertIn('tvd-editor-foot', self.js)
+        self.assertRegex(self.js, r'if \(existing\) \{[\s\S]{0,400}Remove this series')
 
     def test_the_icon_is_a_font_awesome_name(self):
         """A name is not enough: it has to resolve to a glyph.

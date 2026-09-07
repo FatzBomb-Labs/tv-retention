@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -64,8 +64,28 @@ def migrate(raw: dict) -> dict:
     if version >= SETTINGS_VERSION:
         return document
 
-    # Dry run became Preview: one mode that makes every action a simulation, not a flag
-    # that only gated deletion.
+    if version < 2:
+        document.update(_to_v2(document))
+    if version < 3:
+        document.update(_to_v3(document))
+    document['settings_version'] = SETTINGS_VERSION
+    return document
+
+
+def _to_v3(document: dict) -> dict:
+    """Preview became Test Mode, which governs the schedule rather than everything.
+
+    The intent survives — a fresh install still cannot delete unattended — but it now
+    means "the schedule runs without making changes" rather than "no action does
+    anything", which was the source of a button that looked live and was not.
+    """
+    schedule = dict(document.get('schedule') or {})
+    schedule['test_mode'] = bool(document.pop('preview', True))
+    return {'schedule': schedule}
+
+
+def _to_v2(document: dict) -> dict:
+    # Dry run became a mode of its own before becoming Test Mode in v3.
     document['preview'] = bool(document.pop('dry_run', True))
 
     old_schedule = document.get('schedule') or {}
@@ -126,5 +146,4 @@ def migrate(raw: dict) -> dict:
     document['logging'] = {'level': 'warning', 'max_bytes': 2 * 1024 * 1024}
     # The whole-show deletion gate is replaced by a typed confirmation in the dialog.
     document.pop('allow_series_deletion', None)
-    document['settings_version'] = SETTINGS_VERSION
     return document

@@ -278,3 +278,41 @@
 #tv-delete button.tvd-action { background: var(--tvd-action); border-color: var(--tvd-action);
   color: #fff; font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
 #tv-delete button.tvd-action:hover { filter: brightness(1.1); background: var(--tvd-action); }
+
+/* Search, sort and filter as one labelled row, with the primary action hard right. */
+.tvd-series-toolbar { align-items: flex-end; }
+.tvd-series-toolbar .tvd-field { flex: 0 1 auto; gap: 3px; }
+.tvd-series-toolbar .tvd-field > span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  opacity: .6; font-weight: 600; }
+.tvd-series-toolbar input[type=search] { min-width: 240px; }
+
+/* Retention sits with the identity, spaced from the instance. A preset is one blue pill
+   because the values live in the preset; only a custom rule spells them out. */
+.tvd-retention { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: 14px; }
+.tvd-chip.preset { border-color: var(--tvd-action); color: var(--tvd-action); }
+
+/* What the next run would do, per series and in the header. Colour names the verb. */
+.tvd-plan-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tvd-plan-quiet { font-size: 12px; opacity: .6; }
+.tvd-change-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--tvd-line); }
+.tvd-change-tag.delete { border-color: var(--tvd-bad); color: var(--tvd-bad); }
+.tvd-change-tag.unmonitor { border-color: var(--tvd-warn); color: var(--tvd-warn); }
+.tvd-change-tag.monitor { border-color: var(--tvd-good); color: var(--tvd-good); }
+.tvd-changes { display: grid; gap: 4px; }
+.tvd-change { display: grid; grid-template-columns: 150px 1fr; gap: 8px; align-items: baseline;
+  font-size: 12px; padding: 3px 0; border-top: 1px solid var(--tvd-line); }
+.tvd-change:first-child { border-top: none; }
+.tvd-change-verb { font-weight: 600; }
+.tvd-change.delete .tvd-change-verb { color: var(--tvd-bad); }
+.tvd-change.unmonitor .tvd-change-verb { color: var(--tvd-warn); }
+.tvd-change.monitor .tvd-change-verb { color: var(--tvd-good); }
+.tvd-change-why { grid-column: 2; font-size: 11px; opacity: .55; }
+
+#tv-delete button.tvd-icon-button { padding: 4px 7px; border-radius: 4px; opacity: .65; line-height: 1; }
+#tv-delete button.tvd-icon-button:hover { opacity: 1; }
+.tvd-uptodate { font-size: 12px; opacity: .7; }
+#tv-delete button.tvd-rollup { display: block; width: 100%; text-align: left; padding: 10px 12px;
+  border-radius: 6px; border: 1px solid var(--tvd-line); border-left: 3px solid var(--tvd-warn);
+  margin-bottom: 12px; }
+.tvd-editor-foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--tvd-line); }
+@media (max-width: 700px) { .tvd-change { grid-template-columns: 1fr; } .tvd-retention { margin-left: 0; } }

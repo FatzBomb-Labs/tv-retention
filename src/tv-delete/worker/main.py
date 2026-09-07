@@ -543,8 +543,10 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     """Evaluate every enabled rule, and delete unless previewing or in dry-run mode."""
     require_ready()
     settings = load_settings()
-    # Preview is a mode: with it on every action reports and changes nothing.
-    dry_run = preview or bool(settings.get('preview', True))
+    # A manual run is always live; Test Mode governs the scheduler alone, and the preview
+    # flag is the read-only plan behind "Show scheduled changes".
+    test_mode = scheduled and bool((settings.get('schedule') or {}).get('test_mode', True))
+    dry_run = preview or test_mode
     started = now_iso()
     clock = time.monotonic()
 
@@ -582,6 +584,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         'finished': now_iso(),
         'scheduled': scheduled,
         'preview': preview,
+        'test_mode': test_mode,
         'dry_run': dry_run,
         'aborted': aborted,
         'rules': results,
@@ -638,11 +641,21 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         state['last_run'] = summary
         save_state(settings, state)
         journal(settings, summary)
+        log_line(settings, 'warning',
+                 ('[TEST MODE] ' if test_mode else '')
+                 + f'run finished: {summary["planned"]} planned, {summary["deleted"]} deleted, '
+                 + f'{summary["freed_bytes"] // 1024 // 1024} MiB')
         if aborted:
             notify(settings, 'TV Delete stopped by a guard', aborted, 'warning', event='errors')
         elif summary['errors']:
             notify(settings, 'TV Delete finished with errors', '; '.join(summary['errors'])[:400],
                    'warning', event='errors')
+        elif test_mode:
+            # A test run notifies exactly as a real one would: that is how you learn the
+            # schedule fired correctly at four in the morning.
+            notify(settings, '[TEST MODE] TV Delete scheduled run',
+                   f'{summary["planned"]} file(s) would have been removed. Nothing was changed.',
+                   event='run_completed')
         elif summary['deleted']:
             gigabytes = summary['freed_bytes'] / 1024 ** 3
             notify(settings, 'TV Delete removed old episodes',
@@ -791,7 +804,7 @@ def log_line(settings: dict, level: str, message: str) -> None:
     if LOG_RANK.get(level, 3) > LOG_RANK.get(configured, 2):
         return
     stamp = dt.datetime.now(dt.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')
-    prefix = 'PREVIEW ' if settings.get('preview') else ''
+    prefix = ''
     line = f'{stamp} [{level.upper()}] {prefix}{message}\n'
     try:
         path = state_dir(settings) / 'tv-delete.log'
@@ -1120,6 +1133,41 @@ def folder_state(settings: dict, rule: dict) -> tuple:
 # RPC actions
 # ---------------------------------------------------------------------------
 
+def plan_summary(settings: dict, health: dict) -> dict:
+    """What the next run would do, totalled from the cached per-series plans.
+
+    Reported with the age of the oldest reading and with how many series have no reading
+    at all, because "nothing to do" is only as trustworthy as the checks behind it. The
+    interface must not hide the Run button on an answer it cannot vouch for.
+    """
+    totals = {'delete': 0, 'delete_bytes': 0, 'unmonitor': 0, 'monitor': 0,
+              'series': 0, 'unknown': 0, 'blocked': 0, 'oldest': None}
+    alerts_now = health.get('alerts') or []
+    blocking = {alert['rule_id'] for alert in alerts_now if alert.get('blocking') and alert.get('rule_id')}
+    for rule in settings.get('rules', []):
+        if not rule.get('enabled'):
+            continue
+        if rule['id'] in blocking:
+            totals['blocked'] += 1
+            continue
+        entry = (health.get('rules') or {}).get(rule['id']) or {}
+        plan = entry.get('plan')
+        if not plan:
+            totals['unknown'] += 1
+            continue
+        if plan['delete'] or plan['unmonitor'] or plan['monitor']:
+            totals['series'] += 1
+        for key in ('delete', 'delete_bytes', 'unmonitor', 'monitor'):
+            totals[key] += int(plan.get(key) or 0)
+        stamp = entry.get('checked_at')
+        if stamp and (totals['oldest'] is None or stamp < totals['oldest']):
+            totals['oldest'] = stamp
+    totals['actionable'] = totals['delete'] + totals['unmonitor'] + totals['monitor']
+    # Only a complete, unblocked picture may be called up to date.
+    totals['trustworthy'] = totals['unknown'] == 0
+    return totals
+
+
 def trim_health(health: dict) -> dict:
     """Health without the per-episode detail.
 
@@ -1235,6 +1283,8 @@ def action_snapshot(settings, request):
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
         'series_match_text': schedules.describe((settings.get('health') or {}).get('series_match') or {}),
         'jobs': job_state(settings),
+        'plan': plan_summary(settings, load_health(settings)),
+        'test_mode': bool((settings.get('schedule') or {}).get('test_mode', True)),
     }
 
 
@@ -1369,7 +1419,13 @@ def action_series(settings, request):
 
 
 def monitoring_for(settings: dict, rule: dict) -> dict:
-    """Live monitoring status for one rule, or an explanation of why it cannot be read."""
+    """Everything one check knows about a series: monitoring, lifecycle, and the plan.
+
+    The plan is computed here rather than on demand because this pass already has what it
+    needs. It fetches the episodes once, walks the series folder once for sizes and
+    modification times, and the retention evaluation over that is free by comparison. That
+    is what lets "Show scheduled changes" and the Run button answer instantly from cache.
+    """
     base = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'], 'ok': True}
     if rule.get('match_status') != 'matched':
         return dict(base, ok=False, error=rule.get('match_error') or 'Rule is not matched to a Sonarr series',
@@ -1380,16 +1436,47 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
         episodes = client.episodes(rule['series_id'], files_only=False)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
+
+    # One walk of the folder supplies size and modification time for every episode, rather
+    # than one stat call each: a long-running series has thousands of them.
+    on_disk = {entry['path']: entry for entry in scan_media(rule['path'])}
+    present = []
+    for episode in episodes:
+        found = on_disk.get(normalise(episode.get('path') or ''))
+        if episode.get('has_file') and found:
+            episode['mtime'] = found['mtime']
+            episode['size'] = episode.get('size') or found['size']
+            present.append(episode)
+        elif episode.get('has_file'):
+            episode['has_file'] = False
+
     state = dict(base, **classify_monitoring(episodes, active, settings))
     series = next((entry for entry in catalogue_for(settings, rule['instance_id'])
                    if entry['series_id'] == rule['series_id']), None)
     if series:
         state.update(describe_lifecycle(state, series))
-    # Media in this series' folder that Sonarr has no record of. No rule can ever remove
-    # it, so it is worth saying once rather than letting it accumulate unnoticed.
-    known = {normalise(episode['path']) for episode in episodes if episode.get('has_file')}
-    state['unknown_files'] = [entry['path'] for entry in scan_media(rule['path'])
-                              if entry['path'] not in known][:50]
+
+    known = {normalise(episode['path']) for episode in present}
+    state['unknown_files'] = [path for path in on_disk if path not in known][:50]
+
+    decision = evaluate(present, active, settings)
+    would_delete = decision['delete']
+    state['plan'] = {
+        'delete': len(would_delete),
+        'delete_bytes': sum(int(item.get('size') or 0) for item in would_delete),
+        'blocked': decision['blocked'] or '',
+        'unmonitor': len(would_delete) if (rule.get('unmonitor', True)
+                                           and (settings.get('retention') or {}).get('auto_unmonitor', True))
+                     else 0,
+        'monitor': 0,
+        'computed_at': now_iso(),
+    }
+    if (settings.get('retention') or {}).get('auto_monitor'):
+        entries = (load_ledger(settings).get(rule['id']) or [])
+        present_ids = {episode.get('episode_id') for episode in present}
+        entries = [entry for entry in entries if entry.get('episode_id') not in present_ids]
+        with contextlib.suppress(Exception):
+            state['plan']['monitor'] = len(select_remonitor(present, entries, active, settings))
     return state
 
 

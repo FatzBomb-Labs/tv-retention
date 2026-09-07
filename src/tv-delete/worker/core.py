@@ -19,11 +19,11 @@ from pathlib import Path
 import schedules
 
 VERSION = '2026.09.06'
-SETTINGS_VERSION = 2
+SETTINGS_VERSION = 3
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
-CACHE_SCHEMA = 4
+CACHE_SCHEMA = 5
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
@@ -35,10 +35,11 @@ COMBINE_MODES = ['earliest', 'latest', 'any']
 
 DEFAULTS = {
     'settings_version': SETTINGS_VERSION,
-    # Preview is a mode, not a deletion flag: with it on, every action reports what it
-    # would do and changes nothing — files, monitoring, Sonarr records, all of it.
-    'preview': True,
-    'schedule': {'enabled': False, 'frequency': 'daily', 'minute': 0, 'hour': 4,
+    'schedule': {'enabled': False,
+                 # On by default, so enabling a schedule cannot delete anything until the
+                 # operator has watched a run go through and switched this off.
+                 'test_mode': True,
+                 'frequency': 'daily', 'minute': 0, 'hour': 4,
                  'weekday': 0, 'monthly_mode': 'day', 'monthly_day': 1,
                  'monthly_weekday': '', 'cron': '0 4 * * *'},
     'health': {
@@ -480,8 +481,8 @@ def validate_settings(raw, previous=None) -> dict:
 
     settings = {
         'settings_version': SETTINGS_VERSION,
-        'preview': _flag(raw.get('preview', True)),
-        'schedule': validate_schedule(schedule_raw, 'Schedule'),
+        'schedule': dict(validate_schedule(schedule_raw, 'Schedule'),
+                         test_mode=_flag(schedule_raw.get('test_mode', True))),
         'health': {
             # Always on: a rule that no longer resolves to a Sonarr series must not be
             # allowed to act, so the check that notices is not something to switch off.

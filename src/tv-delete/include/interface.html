@@ -5,9 +5,9 @@
     <p>Keep a set number of days, episodes, or seasons per series. Every rule is bound to a Sonarr series, and deletions go through Sonarr so its database and monitoring stay correct.</p>
   </div>
   <div class="tvd-head-actions">
-    <label class="tvd-switch tvd-preview-switch" id="tvd-preview-label" title="With Preview on, every action reports what it would do and changes nothing">
-      <input type="checkbox" id="tvd-preview"><span class="tvd-slider"></span><span class="tvd-switch-text">Preview</span>
-    </label>
+    <button type="button" id="tvd-refresh-all" class="tvd-icon-button" title="Re-read every series from Sonarr"><i class="fa fa-refresh"></i></button>
+    <span id="tvd-uptodate" class="tvd-uptodate" hidden></span>
+    <button type="button" id="tvd-changes" class="tvd-secondary">Show scheduled changes</button>
     <button type="button" id="tvd-run" class="tvd-primary">Run now</button>
   </div>
 </header>
@@ -15,7 +15,7 @@
 <div id="tvd-notice" role="status" aria-live="polite" hidden></div>
 <div id="tvd-array" class="tvd-warning" hidden>The array is stopped. Start it before running TV Delete.</div>
 <div id="tvd-checking" class="tvd-banner" hidden></div>
-<div id="tvd-preview-banner" class="tvd-banner" hidden><strong>Preview is on.</strong> Every action — deletions, monitoring, removals — reports what it would do and changes nothing.</div>
+<div id="tvd-test-banner" class="tvd-banner" hidden><strong>Test mode is on.</strong> The schedule runs and reports exactly what it would do, but changes nothing. Manual runs are not affected. Turn it off in <em>Schedule</em> once you are satisfied.</div>
 
 <section class="tvd-stats" aria-label="Summary">
   <div><span>SERIES</span><strong id="tvd-stat-rules">0</strong><small id="tvd-stat-rules-sub">None yet</small></div>
@@ -37,24 +37,24 @@
 
 <!-- ------------------------------------------------------------------ -->
 <section id="tvd-panel-series" class="tvd-panel">
-  <div class="tvd-toolbar">
-    <input id="tvd-search" type="search" placeholder="Search series…" aria-label="Search series">
-    <select id="tvd-sort" aria-label="Sort series">
-      <option value="attention">Sort by: needs attention</option>
-      <option value="title">Sort by: title</option>
-      <option value="title-desc">Sort by: title, Z–A</option>
-      <option value="checked">Sort by: least recently checked</option>
-      <option value="keep">Sort by: keep window, shortest first</option>
-      <option value="preset">Sort by: preset</option>
-      <option value="instance">Sort by: Sonarr instance</option>
-    </select>
-    <select id="tvd-filter" aria-label="Filter series">
+  <div class="tvd-toolbar tvd-series-toolbar">
+    <label class="tvd-field"><span>Search</span><input id="tvd-search" type="search" placeholder="Series name or folder…"></label>
+    <label class="tvd-field"><span>Sort</span><select id="tvd-sort">
+      <option value="attention">Needs attention</option>
+      <option value="title">Title</option>
+      <option value="title-desc">Title, Z–A</option>
+      <option value="checked">Least recently checked</option>
+      <option value="keep">Keep window, shortest first</option>
+      <option value="preset">Preset</option>
+      <option value="instance">Sonarr instance</option>
+    </select></label>
+    <label class="tvd-field"><span>Filter</span><select id="tvd-filter">
       <option value="all">All series</option>
       <option value="enabled">Enabled only</option>
       <option value="disabled">Disabled only</option>
       <option value="attention">Needs attention</option>
       <option value="blocked">Blocked only</option>
-    </select>
+    </select></label>
     <span class="tvd-spacer"></span>
     <button type="button" id="tvd-add" class="tvd-primary">Add series</button>
   </div>
@@ -74,12 +74,10 @@
     <span class="tvd-spacer"></span>
     <button type="button" id="tvd-recheck-all" class="tvd-secondary">Re-check everything</button>
   </div>
+  <button type="button" id="tvd-alert-rollup" class="tvd-rollup" hidden></button>
   <h2 class="tvd-h2">System</h2>
   <div id="tvd-alerts-system" class="tvd-rules"></div>
   <p id="tvd-alerts-system-empty" class="tvd-empty">Nothing wrong with the installation.</p>
-  <h2 class="tvd-h2">Series</h2>
-  <div id="tvd-alerts-series" class="tvd-rules"></div>
-  <p id="tvd-alerts-series-empty" class="tvd-empty">No series needs attention.</p>
 </section>
 
 <!-- ------------------------------------------------------------------ -->
@@ -122,6 +120,8 @@
       <label class="tvd-field" id="tvd-field-minute"><span>Minute</span><select id="tvd-minute"></select></label>
     </div>
     <label class="tvd-field" id="tvd-field-cron"><span>Cron expression</span><input type="text" id="tvd-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
+    <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-test-mode"><span class="tvd-slider"></span><span class="tvd-switch-text">Test mode — run the schedule without making changes</span></label>
+    <small>Everything happens as it would on a real run: matching, evaluation, history, notifications. Nothing is written to disk or to Sonarr, and every line of the output is marked <span class="tvd-mono">[TEST MODE]</span>. Manual runs ignore this and always make real changes.</small>
     <p class="tvd-lede"><small>A run missed while the server was off is caught up at the next opportunity rather than skipped.</small></p>
   </div>
 

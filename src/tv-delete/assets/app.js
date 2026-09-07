@@ -414,11 +414,9 @@
   function render() {
     $('tvd-version').textContent = snapshot.version || '';
     $('tvd-array').hidden = !!snapshot.array_ready;
-    $('tvd-preview').checked = !!settings.preview;
-    $('tvd-preview-banner').hidden = !settings.preview;
-    $('tvd-preview-label').classList.toggle('on', !!settings.preview);
-    $('tvd-run').textContent = settings.preview ? 'Preview run' : 'Run now';
+    $('tvd-test-banner').hidden = !snapshot.test_mode;
     renderStats();
+    renderPlanHeader();
     renderRules();
     renderAlerts();
     renderPresets();
@@ -426,6 +424,29 @@
     renderSchedule();
     renderSettings();
     renderHistory();
+  }
+
+  // What the next run would do, from the cached per-series plans. The Run button is only
+  // hidden on a complete, current answer — never on one the cache cannot vouch for.
+  function planText(plan) {
+    const parts = [];
+    if (plan.delete) parts.push(`${plural(plan.delete, 'file')} deleted (${bytes(plan.delete_bytes)})`);
+    if (plan.unmonitor) parts.push(`${plural(plan.unmonitor, 'episode')} unmonitored`);
+    if (plan.monitor) parts.push(`${plural(plan.monitor, 'episode')} monitored`);
+    return parts.join(', ');
+  }
+
+  function renderPlanHeader() {
+    const plan = snapshot.plan || { actionable: 0, trustworthy: false, unknown: 0 };
+    const quiet = plan.trustworthy && !plan.actionable;
+    $('tvd-run').hidden = quiet;
+    $('tvd-changes').hidden = quiet;
+    const label = $('tvd-uptodate');
+    label.hidden = !quiet;
+    if (quiet) {
+      label.textContent = `Up to date, no changes scheduled${plan.oldest ? ` — checked ${ago(plan.oldest)}` : ''}`;
+    }
+    $('tvd-run').textContent = 'Run now';
   }
 
   function renderStats() {
@@ -448,30 +469,81 @@
     $('tvd-stat-schedule-sub').textContent = snapshot.schedule_text || 'Manual runs only';
   }
 
-  // -- preview mode ------------------------------------------------------
-  $('tvd-preview').addEventListener('change', () => guarded('', async () => {
-    const wanted = $('tvd-preview').checked;
-    // Turning Preview off arms every destructive action on the page, so it asks. Turning
-    // it on is always safe and never interrupts.
-    if (!wanted && !window.confirm('Turn Preview off? Runs and fixes will make real changes '
-                                   + 'to your files and to Sonarr.')) {
-      $('tvd-preview').checked = true;
-      return;
-    }
-    settings.preview = wanted;
-    await saveSettings(wanted ? 'Preview is on. Nothing will be changed.' : 'Preview is off. Actions are live.');
+  function changeList(result, title) {
+    dialog(title, (body) => {
+      const rows = result.rules.filter((rule) => rule.deleted.length || (rule.remonitored || []).length);
+      if (!rows.length) {
+        body.append(el('p', { textContent: 'Nothing would change. Every series is inside its keep window.' }));
+        return {};
+      }
+      body.append(el('p', { textContent: `${result.planned} file(s) would be removed across `
+        + `${plural(rows.length, 'series')}, reclaiming ${bytes(rows.reduce((sum, r) => sum + r.freed_bytes, 0))}.` }));
+      rows.forEach((rule) => {
+        const card = el('div', { className: 'tvd-alert-card' });
+        card.append(el('div', { className: 'tvd-alert-card-head' }, [
+          el('span', { className: 'tvd-rule-title', textContent: rule.series_title }),
+        ]));
+        const lines = el('div', { className: 'tvd-changes' });
+        rule.deleted.slice(0, 200).forEach((item) => {
+          lines.append(el('div', { className: 'tvd-change delete' }, [
+            el('span', { className: 'tvd-change-verb', textContent: 'will be deleted' }),
+            el('span', { textContent: `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')} `
+              + `— ${item.title || ''} (${bytes(item.size)})` }),
+            el('span', { className: 'tvd-change-why', textContent: item.reason || '' }),
+          ]));
+        });
+        if (rule.unmonitored || (rule.deleted.length && rule.ok)) {
+          lines.append(el('div', { className: 'tvd-change unmonitor' }, [
+            el('span', { className: 'tvd-change-verb', textContent: 'will be unmonitored' }),
+            el('span', { textContent: `${plural(rule.deleted.length, 'episode')} in Sonarr` }),
+          ]));
+        }
+        (rule.remonitored || []).forEach((item) => {
+          lines.append(el('div', { className: 'tvd-change monitor' }, [
+            el('span', { className: 'tvd-change-verb', textContent: 'will be monitored' }),
+            el('span', { textContent: `S${String(item.season).padStart(2, '0')}E${String(item.episode).padStart(2, '0')} — ${item.title || ''}` }),
+          ]));
+        });
+        if (rule.deleted.length > 200) {
+          lines.append(el('small', { textContent: `…and ${rule.deleted.length - 200} more.` }));
+        }
+        card.append(lines);
+        body.append(card);
+      });
+      return {};
+    }, null, 'Close');
+  }
+
+  $('tvd-changes').addEventListener('click', () => guarded('', async () => {
+    const data = await api('preview', {}, 'Working out what would change…');
+    changeList(data.result, 'Scheduled changes');
+  }));
+
+  $('tvd-refresh-all').addEventListener('click', () => guarded('', async () => {
+    const ids = (settings.rules || []).filter((rule) => rule.enabled).map((rule) => rule.id);
+    if (!ids.length) throw new Error('There are no enabled series to check.');
+    queueChecks(ids);
   }));
 
   $('tvd-run').addEventListener('click', () => guarded('', async () => {
     const runnable = (settings.rules || []).filter((rule) => rule.enabled && !isBlocked(rule.id));
     if (!runnable.length) throw new Error('There are no enabled series ready to run.');
-    const warning = settings.preview
-      ? `Preview ${plural(runnable.length, 'series')} now? Nothing will be changed.`
-      : `Run ${plural(runnable.length, 'series')} now? This will DELETE episode files through Sonarr.`;
+    const plan = snapshot.plan || {};
+    // The confirmation states the actual plan, because a manual run is always live and
+    // this dialog is the only thing standing in front of it.
+    let warning = `Run ${plural(runnable.length, 'series')} now?\n\n`;
+    warning += plan.actionable ? `This will ${planText(plan)}.\n\n` : 'No changes are currently expected.\n\n';
+    if (snapshot.test_mode) {
+      warning += 'Test mode is active on the scheduler, so this is NOT what the schedule would do — '
+        + 'a manual run makes real changes to your files and to Sonarr.\n\n'
+        + 'Cancel and choose "Show scheduled changes" if you wanted to look first.';
+    } else {
+      warning += 'This deletes episode files through Sonarr and cannot be undone from here.';
+    }
     if (!window.confirm(warning)) return;
-    const data = await api('run', {}, settings.preview ? 'Previewing…' : 'Running…');
+    const data = await api('run', {}, 'Running…');
     await refresh();
-    showResult(data.result, settings.preview ? 'Preview' : 'Run');
+    showResult(data.result, 'Run');
   }));
 
   // -- series ------------------------------------------------------------
@@ -607,48 +679,80 @@
       const blocked = isBlocked(rule.id);
       const card = el('div', { className: `tvd-rule ${blocked ? 'blocked' : 'ok'}${rule.enabled ? '' : ' disabled'}` });
       const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
+      const preset = presetFor(rule);
       const head = el('div', { className: 'tvd-rule-head' }, [
         alertBadge(rule),
         el('span', { className: 'tvd-rule-title', textContent: rule.series_title || '(unmatched)' }),
         el('span', { className: 'tvd-chip', textContent: instance ? instance.name : 'unknown instance' }),
       ]);
+      // Retention sits with the identity, spaced away from the instance. A preset says all
+      // of it in one pill; only a custom rule needs its numbers spelled out.
+      const retention = el('span', { className: 'tvd-retention' });
+      if (preset) {
+        retention.append(el('span', { className: 'tvd-chip preset', textContent: preset.name }));
+      } else {
+        ruleSummary(rule).forEach((label) => retention.append(el('span', { className: 'tvd-chip', textContent: label })));
+        retention.append(el('span', { className: 'tvd-chip', textContent: `combine: ${rule.combine}` }));
+      }
+      if (rule.include_specials === true) retention.append(el('span', { className: 'tvd-chip', textContent: 'specials in' }));
+      if (rule.include_specials === false) retention.append(el('span', { className: 'tvd-chip', textContent: 'specials out' }));
+      head.append(retention);
       head.append(enableToggle(rule));
       card.append(head);
       card.append(el('div', { className: 'tvd-rule-path', textContent: rule.path }));
 
       const body = el('div', { className: 'tvd-rule-body' });
-      const preset = presetFor(rule);
-      if (preset) body.append(el('span', { className: 'tvd-chip on', textContent: `preset: ${preset.name}` }));
-      ruleSummary(rule).forEach((label) => body.append(el('span', { className: 'tvd-chip on', textContent: label })));
-      body.append(el('span', { className: 'tvd-chip', textContent: `combine: ${(preset || rule).combine}` }));
-      if (rule.include_specials === true) body.append(el('span', { className: 'tvd-chip on', textContent: 'specials included' }));
-      if (rule.include_specials === false) body.append(el('span', { className: 'tvd-chip', textContent: 'specials excluded' }));
+      const state = monitoring[rule.id] || {};
+      const plan = state.plan;
+      const line = el('div', { className: 'tvd-plan-line' });
+      const refresh = el('button', { type: 'button', className: 'tvd-icon-button',
+                                     title: 'Re-read this series from Sonarr' },
+                        [el('i', { className: 'fa fa-refresh' })]);
+      refresh.addEventListener('click', () => queueChecks([rule.id]));
+      line.append(refresh);
+      if (isChecking(rule.id)) {
+        line.append(el('span', { className: 'tvd-plan-quiet', textContent: 'Reading from Sonarr…' }));
+      } else if (blocked) {
+        line.append(el('span', { className: 'tvd-plan-quiet', textContent: 'Blocked — nothing will run for this series.' }));
+      } else if (!plan) {
+        line.append(el('span', { className: 'tvd-plan-quiet', textContent: 'Not checked yet.' }));
+      } else if (plan.delete || plan.unmonitor || plan.monitor) {
+        if (plan.delete) line.append(el('span', { className: 'tvd-change-tag delete', textContent: `${plan.delete} to delete` }));
+        if (plan.unmonitor) line.append(el('span', { className: 'tvd-change-tag unmonitor', textContent: `${plan.unmonitor} to unmonitor` }));
+        if (plan.monitor) line.append(el('span', { className: 'tvd-change-tag monitor', textContent: `${plan.monitor} to monitor` }));
+        line.append(el('span', { className: 'tvd-plan-quiet', textContent: `checked ${ago(state.checked_at)}` }));
+      } else {
+        line.append(el('span', { className: 'tvd-plan-quiet',
+                                 textContent: `Up to date, no changes scheduled — checked ${ago(state.checked_at)}` }));
+      }
+      body.append(line);
 
       const actions = el('div', { className: 'tvd-rule-actions' });
-      const previewButton = el('button', { type: 'button', textContent: 'Preview' });
-      previewButton.addEventListener('click', () => guarded('', async () => {
-        const data = await api('preview', { rule_ids: [rule.id] }, 'Previewing…');
-        showResult(data.result, 'Preview');
-      }));
-      const runButton = el('button', { type: 'button', textContent: settings.preview ? 'Run (preview)' : 'Run' });
-      runButton.addEventListener('click', () => guarded('', async () => {
-        if (blocked) throw new Error('This series is blocked by an error. Open its badge to see why.');
-        const warning = settings.preview
-          ? `Preview ${rule.series_title}? Nothing will be changed.`
-          : `Run ${rule.series_title} now? This will DELETE episode files through Sonarr.`;
-        if (!window.confirm(warning)) return;
-        const data = await api('run', { rule_ids: [rule.id] }, 'Running…');
-        await refresh();
-        showResult(data.result, 'Run');
-      }));
+      const hasWork = plan && (plan.delete || plan.unmonitor || plan.monitor);
+      if (hasWork && !blocked) {
+        const changesButton = el('button', { type: 'button', textContent: 'Show scheduled changes' });
+        changesButton.addEventListener('click', () => guarded('', async () => {
+          const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
+          changeList(data.result, `${rule.series_title}: scheduled changes`);
+        }));
+        const runButton = el('button', { type: 'button', textContent: 'Run' });
+        runButton.addEventListener('click', () => guarded('', async () => {
+          let warning = `Run ${rule.series_title} now?\n\nThis will ${planText(plan)}.\n\n`;
+          warning += snapshot.test_mode
+            ? 'Test mode is active on the scheduler, but a manual run makes real changes.'
+            : 'This cannot be undone from here.';
+          if (!window.confirm(warning)) return;
+          const data = await api('run', { rule_ids: [rule.id] }, 'Running…');
+          await refresh();
+          showResult(data.result, 'Run');
+        }));
+        actions.append(changesButton, runButton);
+      }
       const editButton = el('button', { type: 'button', textContent: 'Edit' });
       editButton.addEventListener('click', () => editRule(rule));
-      const deleteButton = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Delete…' });
-      deleteButton.addEventListener('click', () => deleteSeries(rule));
-      actions.append(previewButton, runButton, editButton, deleteButton);
+      actions.append(editButton);
       if (isChecking(rule.id)) {
-        // Editing mid-read would save against a frame the incoming result no longer describes.
-        [previewButton, runButton, editButton, deleteButton].forEach((button) => { button.disabled = true; });
+        [...actions.children].forEach((button) => { button.disabled = true; });
         card.classList.add('tvd-busy-row');
       }
       body.append(actions);
@@ -816,13 +920,27 @@
     ['error', 'warning', 'notice'].forEach((severity) => {
       $(`tvd-count-${severity}`).textContent = summary[severity] || 0;
     });
-    const matches = (alert) => severityFilter === 'all' || alert.severity === severityFilter;
 
+    // Series problems live on their own cards, where the fix is. Here they are one line
+    // that says how many and takes you to them.
+    const rollup = $('tvd-alert-rollup');
+    const seriesCount = (snapshot.alerts || []).filter((alert) => alert.scope !== 'system').length;
+    rollup.hidden = seriesCount === 0;
+    if (seriesCount) {
+      const affected = new Set((snapshot.alerts || [])
+        .filter((alert) => alert.scope !== 'system').map((alert) => alert.rule_id)).size;
+      rollup.replaceChildren(
+        el('strong', { textContent: `${plural(seriesCount, 'alert')} need addressing` }),
+        el('span', { textContent: ` across ${plural(affected, 'series')} — `
+          + `${summary.error} critical, ${summary.warning} warning, ${summary.notice} notice. `
+          + 'Open the Series tab to act on them.' }));
+    }
+
+    const matches = (alert) => severityFilter === 'all' || alert.severity === severityFilter;
     const systemBox = $('tvd-alerts-system');
     systemBox.replaceChildren();
     const system = systemAlerts.filter(matches);
     $('tvd-alerts-system-empty').hidden = system.length > 0;
-    // Grouped the same way series are: one card per thing, however many problems it has.
     const byInstance = new Map();
     system.forEach((alert) => {
       const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
@@ -830,17 +948,14 @@
       byInstance.set(name, (byInstance.get(name) || []).concat([alert]));
     });
     byInstance.forEach((list, name) => systemBox.append(systemAlertCard(name, list)));
-
-    const seriesBox = $('tvd-alerts-series');
-    seriesBox.replaceChildren();
-    const grouped = (settings.rules || [])
-      .map((rule) => [rule, seriesAlerts(rule.id).filter(matches)])
-      .filter(([, list]) => list.length)
-      .sort((a, b) => ATTENTION_RANK[worstSeverity(a[1])] - ATTENTION_RANK[worstSeverity(b[1])]
-        || (a[0].series_title || '').localeCompare(b[0].series_title || ''));
-    $('tvd-alerts-series-empty').hidden = grouped.length > 0;
-    grouped.forEach(([rule, list]) => seriesBox.append(seriesAlertCard(rule, list)));
   }
+
+  $('tvd-alert-rollup').addEventListener('click', () => {
+    document.querySelector('.tvd-tabs button[data-tab="series"]').click();
+    $('tvd-filter').value = 'attention';
+    $('tvd-search').value = '';
+    renderRules();
+  });
 
   document.querySelectorAll('.tvd-seg button').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1031,6 +1146,18 @@
         field('Season 0 / specials', specials, 'Overrides the global setting for this series only.'),
         enabled.node,
       );
+      if (existing) {
+        // Bottom of the editor, away from Save: destructive, and not something to reach
+        // for while browsing the list.
+        const remove = el('button', { type: 'button', className: 'tvd-danger tvd-small',
+                                      textContent: 'Remove this series…' });
+        remove.addEventListener('click', (event) => {
+          event.preventDefault();
+          $('tvd-dialog').close('cancel');
+          deleteSeries(rule);
+        });
+        body.append(el('div', { className: 'tvd-editor-foot' }, [remove]));
+      }
       return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions,
                specials, enabled };
     }, async (context) => {
@@ -1099,10 +1226,10 @@
         const parts = [];
         if (fromDisk.input.checked) parts.push('every episode file WILL be deleted from disk');
         if (fromSonarr.input.checked) parts.push('the series WILL be removed from Sonarr');
-        warning.append(el('strong', { textContent: 'This ignores Preview.' }));
-        warning.append(el('span', { textContent: ` Even with Preview on, ${parts.join(' and ')}. `
-          + 'It is not covered by the run guards and cannot be undone from here — only Sonarr’s '
-          + 'own recycle bin, if you have one, will hold anything.' }));
+        warning.append(el('strong', { textContent: 'This cannot be undone.' }));
+        warning.append(el('span', { textContent: ` ${parts.join(' and ')}. `
+          + 'It is not covered by the run guards, and only Sonarr’s own recycle bin, if you '
+          + 'have one, will hold anything.' }));
       };
       fromSonarr.input.addEventListener('change', review);
       fromDisk.input.addEventListener('change', review);
@@ -1140,6 +1267,7 @@
   function renderSchedule() {
     const schedule = settings.schedule || {};
     $('tvd-schedule-enabled').checked = !!schedule.enabled;
+    $('tvd-test-mode').checked = schedule.test_mode !== false;
     options($('tvd-weekday'), WEEKDAYS, schedule.weekday ?? 0);
     options($('tvd-monthly-day'), range(1, 28, true), schedule.monthly_day ?? 1);
     options($('tvd-monthly-weekday'), [['', 'Day of the month']].concat(WEEKDAYS),
@@ -1179,6 +1307,7 @@
   function collectSchedule() {
     return {
       enabled: $('tvd-schedule-enabled').checked,
+      test_mode: $('tvd-test-mode').checked,
       frequency: $('tvd-freq').value,
       minute: $('tvd-minute').value,
       hour: $('tvd-hour').value,
@@ -1481,7 +1610,6 @@
     const notifications = {};
     NOTIFICATIONS.forEach(([name]) => { notifications[name] = notifyInputs[name].checked; });
     return Object.assign({}, settings, {
-      preview: $('tvd-preview').checked,
       guards,
       retention: {
         include_specials: $('tvd-include-specials').checked,

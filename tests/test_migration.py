@@ -65,9 +65,11 @@ class Upgrade(unittest.TestCase):
     def test_the_version_advances(self):
         self.assertEqual(self.new['settings_version'], SETTINGS_VERSION)
 
-    def test_dry_run_becomes_preview(self):
-        self.assertFalse(self.new['preview'])
+    def test_dry_run_becomes_schedule_test_mode(self):
+        # v1 dry_run -> v2 preview -> v3 schedule.test_mode, in one hop.
+        self.assertFalse(self.new['schedule']['test_mode'])
         self.assertNotIn('dry_run', self.new)
+        self.assertNotIn('preview', self.new)
 
     def test_the_schedule_becomes_structured(self):
         self.assertEqual(self.new['schedule']['frequency'], 'daily')

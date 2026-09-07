@@ -30,11 +30,14 @@ class Cron(unittest.TestCase):
 
 class Settings(unittest.TestCase):
     def test_defaults_are_valid(self):
-        self.assertEqual(validate_settings(DEFAULTS)['preview'], True)
+        self.assertEqual(validate_settings(DEFAULTS)['schedule']['test_mode'], True)
 
-    def test_preview_defaults_on(self):
-        # A fresh install must never be able to delete before anyone has looked at it.
-        self.assertTrue(validate_settings({})['preview'])
+    def test_test_mode_defaults_on_and_the_schedule_defaults_off(self):
+        # A fresh install cannot delete unattended: no schedule, and Test Mode on if one
+        # is enabled before anybody has watched a run go through.
+        settings = validate_settings({})
+        self.assertTrue(settings['schedule']['test_mode'])
+        self.assertFalse(settings['schedule']['enabled'])
 
     def test_rule_requires_a_condition(self):
         document = base()

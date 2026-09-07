@@ -14,10 +14,11 @@ there. The suite is 196 tests with no expected failures.
 ## Project constraints
 
 - A rule that does not resolve to exactly one Sonarr series must never be processed.
-- Preview means no file is ever removed and nothing in Sonarr is changed, with one stated
-  exception: removing a whole series from disk or Sonarr overrides it by design, because
-  tidying up is normally done with Preview on. The dialog says so and demands a typed
-  confirmation.
+- Test Mode governs the scheduler only: a scheduled run does everything except write. A
+  manual run is always live, so its confirmation must state the actual plan, and removing
+  a series is guarded by a typed confirmation rather than by a mode.
+- The Run button may only be hidden on a complete, current plan. A stale or partial
+  reading must never be presented as "nothing to do".
 - Media files Sonarr does not know about are reported, never deleted.
 - Deletion goes through the Sonarr API so its database and monitoring stay correct;
   the filesystem is touched directly only for sidecars, empty folders, and the
