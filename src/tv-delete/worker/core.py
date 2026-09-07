@@ -55,6 +55,8 @@ DEFAULTS = {
     'delete_empty_dirs': True,
     'recycle': {'mode': 'sonarr', 'path': '', 'retention_days': 14},
     'notify': True,
+    # Deleting an entire show is off until the operator turns it on.
+    'allow_series_deletion': False,
     # Run journals and the TMDB cache live on the array, not on the flash device.
     'state_dir': '/mnt/user/appdata/tv-delete',
     'log_retention_runs': 50,
@@ -425,6 +427,7 @@ def validate_settings(raw, previous=None) -> dict:
             'retention_days': _whole(recycle_raw.get('retention_days', 14), 'Recycle retention', 1, 3650, allow_none=False),
         },
         'notify': _flag(raw.get('notify', True)),
+        'allow_series_deletion': _flag(raw.get('allow_series_deletion', False)),
         'state_dir': validate_library_path(raw.get('state_dir') or DEFAULTS['state_dir'], 'State folder'),
         'log_retention_runs': _whole(raw.get('log_retention_runs', 50), 'History size', 1, 500, allow_none=False),
     }
@@ -780,6 +783,8 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
     out_frame = decision['delete']
     in_frame = decision['keep'] + decision['protected'] + unaired
 
+    files_in_frame = [e for e in in_frame if e.get('has_file')]
+    files_total = [e for e in episodes if e.get('has_file')]
     in_frame_unmonitored = [e for e in in_frame if not e.get('monitored')]
     out_frame_monitored = [e for e in out_frame if e.get('monitored')]
     monitored = [e for e in episodes if e.get('monitored')]
@@ -811,6 +816,8 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
         'in_frame': len(in_frame),
         'out_frame': len(out_frame),
         'unaired': len(unaired),
+        'files_in_frame': len(files_in_frame),
+        'files_total': len(files_total),
         'in_frame_unmonitored': summarise(in_frame_unmonitored),
         'out_frame_monitored': summarise(out_frame_monitored),
     }
@@ -819,26 +826,73 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
 def describe_selectability(entry, exists: bool, in_use: bool) -> dict:
     """Whether a Sonarr series can be given a rule, and why not when it cannot.
 
-    A rule exists to delete files from a folder, so a series with no folder on this server
-    has nothing to act on and must not be selectable. The three ways that happens are very
-    different problems, and the reason has to say which: Sonarr holding no folder at all,
-    Sonarr never having imported anything, or a folder that should be here and is not —
-    the last being a path-mapping fault worth fixing before anything else.
-
-    This only governs choosing a series. An existing rule whose folder disappears later is
-    never blocked by it; a run reports that case and carries on.
+    A rule binds to a Sonarr series id, not to a folder, so a series that has simply not
+    aired yet is a legitimate choice: Sonarr creates the folder on its first import and
+    the rule picks it up then. What is not legitimate is a series Sonarr says holds files
+    whose folder is absent here, which is a path-mapping fault and must be fixed rather
+    than ruled over.
     """
     if not entry.get('path'):
-        return {'selectable': False, 'reason': 'no folder configured in Sonarr'}
+        return {'selectable': False, 'awaiting': False, 'reason': 'no folder configured in Sonarr'}
     if in_use:
-        return {'selectable': False, 'reason': 'already used by another rule'}
+        return {'selectable': False, 'awaiting': False, 'reason': 'already used by another rule'}
     if exists:
-        return {'selectable': True, 'reason': ''}
+        return {'selectable': True, 'awaiting': False, 'reason': ''}
     if entry.get('episode_file_count'):
-        return {'selectable': False,
+        return {'selectable': False, 'awaiting': False,
                 'reason': f'Sonarr reports {entry["episode_file_count"]} file(s) but the folder is '
                           'not on this server — check the path mapping'}
-    return {'selectable': False, 'reason': 'no episodes imported yet, so Sonarr has not created its folder'}
+    return {'selectable': True, 'awaiting': True, 'reason': 'awaiting first episode'}
+
+
+TVDB_IN_NAME = re.compile(r'\{tvdb-(\d+)\}')
+
+
+def normalise_title(value: str) -> str:
+    """Fold a title or folder name for comparison: no ids, punctuation, case or articles."""
+    text = TVDB_IN_NAME.sub('', str(value or ''))
+    text = re.sub(r'\((?:19|20)\d\d\)', '', text)
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r'[^a-z0-9]+', ' ', text.lower()).strip()
+    for article in ('the ', 'a ', 'an '):
+        if text.startswith(article):
+            text = text[len(article):]
+    # After punctuation folding, "Daily Show, The" is "daily show the", so the trailing
+    # form has to be stripped here rather than before.
+    for article in (' the', ' a', ' an'):
+        if text.endswith(article):
+            text = text[:-len(article)]
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def classify_orphan(folder_name: str, folder_path: str, by_tvdb: dict, by_title: dict) -> dict:
+    """Explain why a folder on disk has no Sonarr series pointing at it.
+
+    Folder names carry a TVDB id in this library's naming scheme, which makes the answer
+    exact rather than a guess: the same id at a different path is a move, and an id Sonarr
+    no longer knows is a series that was removed or whose id changed. Only when there is
+    no id at all does this fall back to comparing titles, and it says so.
+    """
+    found = TVDB_IN_NAME.search(folder_name)
+    if found:
+        tvdb_id = int(found.group(1))
+        series = by_tvdb.get(tvdb_id)
+        if series:
+            return {'kind': 'moved', 'tvdb_id': tvdb_id, 'series_title': series['title'],
+                    'series_path': series['path'],
+                    'detail': f'Sonarr has this series at a different path: {series["path"]}'}
+        return {'kind': 'unknown_id', 'tvdb_id': tvdb_id, 'series_title': '', 'series_path': '',
+                'detail': f'No Sonarr series has TVDB id {tvdb_id}. It was removed from Sonarr, '
+                          'or its id changed.'}
+    key = normalise_title(folder_name)
+    series = by_title.get(key)
+    if series:
+        return {'kind': 'title_match', 'tvdb_id': series.get('tvdb_id'), 'series_title': series['title'],
+                'series_path': series['path'],
+                'detail': f'No TVDB id in the folder name. The title matches "{series["title"]}" '
+                          f'at {series["path"]}.'}
+    return {'kind': 'unmanaged', 'tvdb_id': None, 'series_title': '', 'series_path': '',
+            'detail': 'No TVDB id in the folder name and no Sonarr series with a matching title.'}
 
 
 def rule_fingerprint(rule: dict, settings: dict) -> str:
@@ -865,3 +919,20 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'min_file_age_hours': guards.get('min_file_age_hours'),
     }
     return hashlib.sha256(canonical_json(material).encode('utf-8')).hexdigest()[:16]
+
+
+def describe_lifecycle(state: dict, series: dict) -> dict:
+    """Whether a show has finished and its retention has run out.
+
+    A series Sonarr marks as ended, with nothing left inside the keep frame, will never
+    gain another episode and is no longer being kept for anything. That is worth saying
+    plainly, because the rule will otherwise sit there for ever doing nothing.
+    """
+    ended = bool(series.get('ended')) or series.get('status') == 'ended'
+    if not ended:
+        return {'ended': False, 'retention_expired': False, 'lifecycle': ''}
+    if state.get('files_total', 0) == 0:
+        return {'ended': True, 'retention_expired': True, 'lifecycle': 'ended_empty'}
+    if state.get('files_in_frame', 0) == 0:
+        return {'ended': True, 'retention_expired': True, 'lifecycle': 'ended_expired'}
+    return {'ended': True, 'retention_expired': False, 'lifecycle': 'ended'}

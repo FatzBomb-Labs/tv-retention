@@ -8,12 +8,13 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 There is no Python or PHP in the Webtop development container. Run
 `./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
 `python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 140 tests with no expected failures.
+there. The suite is 158 tests with no expected failures.
 [docs/VALIDATION.md](docs/VALIDATION.md) records the last validation.
 
 ## Project constraints
 
 - A rule that does not resolve to exactly one Sonarr series must never be processed.
+- Dry run means no file is ever removed, including by the whole-show deletion action.
 - Media files Sonarr does not know about are reported, never deleted.
 - Deletion goes through the Sonarr API so its database and monitoring stay correct;
   the filesystem is touched directly only for sidecars, empty folders, and the

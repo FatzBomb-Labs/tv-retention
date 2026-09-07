@@ -27,7 +27,8 @@ sys.path.insert(0, str(HERE))
 from core import (DEFAULTS, VERSION, Rejected, atomic_json, canonical_json, derive_mappings,
                   effective_rule, empty_directories, evaluate, new_id, normalise, redact,
                   scan_media, select_remonitor, sidecars_for, validate_cron, validate_settings,
-                  classify_monitoring, describe_selectability, rule_fingerprint)
+                  classify_monitoring, classify_orphan, describe_lifecycle, describe_selectability,
+                  is_media, normalise_title, rule_fingerprint)
 from sonarr import Sonarr, SonarrError, match_rule
 from tmdb import TMDB, TMDBError, fill_air_dates
 
@@ -1035,7 +1036,12 @@ def monitoring_for(settings: dict, rule: dict) -> dict:
         episodes = client.episodes(rule['series_id'], files_only=False)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
-    return dict(base, **classify_monitoring(episodes, active, settings))
+    state = dict(base, **classify_monitoring(episodes, active, settings))
+    series = next((entry for entry in catalogue_for(settings, rule['instance_id'])
+                   if entry['series_id'] == rule['series_id']), None)
+    if series:
+        state.update(describe_lifecycle(state, series))
+    return state
 
 
 def action_monitoring(settings, request):
@@ -1095,6 +1101,161 @@ def action_monitor_apply(settings, request):
     verb = 'monitored' if mode == 'monitor-in-frame' else 'unmonitored'
     return {'changed': len(ids), 'monitoring': monitoring_for(settings, rule),
             'ok_message': f'{len(ids)} episode(s) {verb} in Sonarr.'}
+
+
+def folder_size(path: Path, limit: int = 20000) -> tuple:
+    """Total bytes and media-file count below a folder, bounded so a huge tree cannot stall."""
+    total, files = 0, 0
+    for base, directories, names in os.walk(path, onerror=lambda error: None):
+        for name in names:
+            if not is_media(Path(name)):
+                continue
+            files += 1
+            with contextlib.suppress(OSError):
+                total += (Path(base) / name).stat().st_size
+            if files >= limit:
+                return total, files
+    return total, files
+
+
+def holds_media(path: Path) -> bool:
+    for base, directories, names in os.walk(path, onerror=lambda error: None):
+        if any(is_media(Path(name)) for name in names):
+            return True
+    return False
+
+
+def looks_like_show(path: Path) -> bool:
+    """Whether a folder is a show rather than a category holding shows.
+
+    A show folder either holds episodes directly or holds season folders that do. A
+    category folder holds show folders, so its media is two levels down. Without this a
+    category whose every show is unclaimed would be reported as one row instead of naming
+    the shows inside it.
+    """
+    try:
+        entries = list(path.iterdir())
+    except OSError:
+        return False
+    if any(entry.is_file() and is_media(entry) for entry in entries):
+        return True
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        try:
+            if any(child.is_file() and is_media(child) for child in entry.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def scan_library(root: Path, series_paths, max_depth: int = 3) -> list:
+    """Folders under a root that no Sonarr series claims.
+
+    Descends through category folders and reports show folders whole, rather than once per
+    season and never as a whole category.
+    """
+    claimed = {normalise(path) for path in series_paths if path}
+    orphans = []
+
+    def descend(directory: Path, depth: int) -> None:
+        try:
+            children = sorted(entry for entry in directory.iterdir() if entry.is_dir())
+        except OSError:
+            return
+        for child in children:
+            if child.name.startswith('.'):
+                continue
+            here = normalise(child)
+            if here in claimed:
+                continue
+            if looks_like_show(child):
+                orphans.append(child)
+                continue
+            if depth < max_depth:
+                descend(child, depth + 1)
+
+    descend(Path(root), 1)
+    return orphans
+
+
+def action_scan_folders(settings, request):
+    """Compare the library on disk against what Sonarr claims."""
+    from core import validate_library_path
+    root = validate_library_path(request.get('root') or '', 'Library folder')
+    if not Path(root).is_dir():
+        raise Rejected(f'{root} is not a folder on this server.')
+    catalogue = []
+    for instance in settings.get('instances', []):
+        if instance.get('enabled', True):
+            with contextlib.suppress(Rejected, SonarrError):
+                catalogue.extend(catalogue_for(settings, instance['id']))
+    by_tvdb = {entry['tvdb_id']: entry for entry in catalogue if entry.get('tvdb_id')}
+    by_title = {}
+    for entry in catalogue:
+        by_title.setdefault(normalise_title(entry['title']), entry)
+    ruled = {normalise(rule['path']) for rule in settings.get('rules', [])}
+
+    found = []
+    for folder in scan_library(Path(root), [entry['path'] for entry in catalogue]):
+        size, files = folder_size(folder)
+        found.append(dict(classify_orphan(folder.name, str(folder), by_tvdb, by_title),
+                          path=str(folder), name=folder.name, size=size, files=files,
+                          ruled=normalise(folder) in ruled))
+    found.sort(key=lambda item: -item['size'])
+    return {
+        'root': root,
+        'series_known': len(catalogue),
+        'orphans': found[:500],
+        'orphan_count': len(found),
+        'orphan_bytes': sum(item['size'] for item in found),
+    }
+
+
+def action_remove_series(settings, request):
+    """Delete a finished show from Sonarr and from disk, on explicit confirmation.
+
+    The only action in this plugin that removes a whole series at once. It is refused
+    while dry run is on, refused unless the operator has enabled it, and refused unless
+    the show's title is typed back exactly.
+    """
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if not rule:
+        raise Rejected('That rule no longer exists.')
+    if settings.get('dry_run', True):
+        raise Rejected('Dry run is on, so nothing is removed. Turn dry run off first if you '
+                       'really mean to delete this show.')
+    if not settings.get('allow_series_deletion'):
+        raise Rejected('Deleting a whole show is switched off. Enable it in Schedule & safety '
+                       'if you want this action.')
+    if rule.get('match_status') != 'matched':
+        raise Rejected('This rule is not matched to a Sonarr series.')
+    typed = str(request.get('confirm_title') or '').strip()
+    if typed.casefold() != str(rule.get('series_title') or '').strip().casefold():
+        raise Rejected('The typed title did not match. Nothing was removed.')
+
+    client = client_for(settings, rule['instance_id'])
+    before = folder_size(Path(rule['path'])) if Path(rule['path']).is_dir() else (0, 0)
+    client.delete_series(rule['series_id'], delete_files=True)
+    settings['rules'] = [r for r in settings.get('rules', []) if r['id'] != rule['id']]
+    save_settings(settings)
+
+    health = load_health(settings)
+    health['rules'].pop(rule['id'], None)
+    write_cache(settings, 'health.json', health)
+    ledger = load_ledger(settings)
+    ledger.pop(rule['id'], None)
+    save_ledger(settings, ledger)
+    invalidate_catalogue(settings, rule['instance_id'])
+
+    record = {'action': 'remove-series', 'at': now_iso(), 'series_title': rule.get('series_title'),
+              'path': rule['path'], 'series_id': rule['series_id'], 'files': before[1], 'bytes': before[0]}
+    journal(settings, record)
+    notify(settings, 'TV Delete removed a show',
+           f'{rule.get("series_title")} was deleted from Sonarr and disk '
+           f'({before[1]} file(s), {before[0] / 1024 ** 3:.1f} GiB).', 'warning')
+    return {'removed': record, 'settings': redact(load_settings())}
 
 
 def action_browse(settings, request):
@@ -1161,6 +1322,8 @@ ACTIONS = {
     'detect-mappings': action_detect_mappings,
     'series': action_series,
     'monitoring': action_monitoring,
+    'scan-folders': action_scan_folders,
+    'remove-series': action_remove_series,
     'monitor-apply': action_monitor_apply,
     'browse': action_browse,
     'match': action_match,

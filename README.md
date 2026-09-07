@@ -18,6 +18,8 @@ justified by real episode metadata rather than a file timestamp.
 - [First run](#first-run)
 - [Rules](#rules)
 - [Retention presets](#retention-presets)
+- [Library scan](#library-scan)
+- [Finished shows](#finished-shows)
 - [Monitoring status](#monitoring-status)
 - [The health check and caching](#the-health-check-and-caching)
 - [Re-monitoring when a rule is widened](#re-monitoring-when-a-rule-is-widened)
@@ -101,20 +103,57 @@ such an episode; *any* deletes it on the strength of the other conditions.
 Example: `keep_days = 180`, `keep_episodes = 20`, combine `earliest` keeps everything
 from the last 180 days **and** the 20 newest episodes, whichever is more generous.
 
-### Which series can be given a rule
+### Choosing a show
 
-A rule exists to delete files from a folder, so the picker only allows series that have
-one on this server. The rest are listed with the reason, greyed out:
+Shows are added by picking a Sonarr series, and only that way. A rule binds to a series
+id, and the folder follows from Sonarr — so there is nothing a folder-based rule could
+express that this does not. Use the [library scan](#library-scan) to find folders Sonarr
+does not know about.
 
-| Reason | Meaning |
+The picker is a search box, because a plain dropdown is unusable at three thousand series.
+Type a few letters; matches on the start of the title sort first. Each row shows either
+its folder or the reason it cannot be chosen:
+
+| Row shows | Meaning |
 |---|---|
-| *no episodes imported yet, so Sonarr has not created its folder* | Normal. Sonarr creates a series folder on first import. |
-| *Sonarr reports N file(s) but the folder is not on this server* | A path-mapping fault. Fix the mapping first. |
-| *already used by another rule* | One rule per folder. |
-| *no folder configured in Sonarr* | Sonarr itself has no path for the series. |
+| its folder path | Ready to use |
+| *awaiting first episode — no folder yet* | Selectable. Sonarr creates the folder on first import and the rule picks it up then. |
+| *Sonarr reports N file(s) but the folder is not on this server* | Not selectable — a path-mapping fault. Fix the mapping first. |
+| *already used by another rule* | Not selectable. One rule per folder. |
+| *no folder configured in Sonarr* | Not selectable. Sonarr has no path for the series. |
 
-This governs choosing a series only. An existing rule whose folder later disappears is
-never blocked: the run reports it and carries on.
+An existing rule whose folder later disappears is never blocked: the run reports it and
+carries on.
+
+## Library scan
+
+**Library scan** compares a folder on disk against every enabled Sonarr instance and lists
+what no series claims. It reads only — nothing is renamed, moved or deleted.
+
+Because this library names folders with a TVDB id, the finding is exact rather than a
+guess:
+
+| Finding | Meaning |
+|---|---|
+| **Moved or renamed** | The same TVDB id exists in Sonarr at a different path |
+| **Not in Sonarr** | No series has that TVDB id — removed from Sonarr, or its id changed |
+| **No TVDB id in the name** | Matched to a series by title instead, which is a guess and says so |
+| **Unmanaged** | No id and no matching title |
+
+Run it with *every* instance configured. A show managed by a second Sonarr looks exactly
+like an orphan to an instance that does not own it.
+
+## Finished shows
+
+When Sonarr reports a series as ended and nothing remains inside its keep frame, the pill
+says so — the rule will otherwise sit there for ever doing nothing. Its menu then offers:
+
+- **Remove this rule** — keeps every file. 
+- **Delete the show from disk and Sonarr** — only when enabled in *Schedule & safety*.
+
+The second is the only action here that destroys a whole show. It is refused while dry run
+is on, it is not covered by the deletion guards, and it requires the show’s name typed
+back before it will run. It is journalled and notified like any other deletion.
 
 ## Retention presets
 
@@ -321,7 +360,7 @@ tested directly against fixtures. Execution lives in `main.py`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 140 tests
+python3 -m unittest discover -s tests -v   # 158 tests
 python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

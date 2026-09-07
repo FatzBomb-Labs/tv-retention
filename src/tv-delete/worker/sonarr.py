@@ -171,6 +171,16 @@ class Sonarr:
         payload = self._request('GET', 'rootfolder')
         return [entry.get('path') for entry in payload or [] if entry.get('path')]
 
+    def delete_series(self, series_id: int, delete_files: bool = True) -> None:
+        """Remove a series from Sonarr, optionally with every file it owns.
+
+        The most destructive call this client makes. Nothing reaches it without an
+        explicit, typed confirmation from the operator, and never while dry run is on.
+        """
+        self._request('DELETE', f'series/{int(series_id)}',
+                      query={'deleteFiles': 'true' if delete_files else 'false',
+                             'addImportListExclusion': 'false'})
+
     def rescan(self, series_id: int) -> None:
         self._request('POST', 'command', body={'name': 'RescanSeries', 'seriesId': int(series_id)})
 

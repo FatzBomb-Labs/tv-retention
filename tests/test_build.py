@@ -124,8 +124,6 @@ class Interface(unittest.TestCase):
         self.assertIn('!entry.selectable', self.js)
         self.assertIn('cannot be given a rule', self.js)
 
-    def test_a_typed_folder_is_checked_before_saving(self):
-        self.assertRegex(self.js, r"await api\('browse'.*Checking the folder")
 
     def test_the_monitoring_pill_sits_with_the_title(self):
         self.assertRegex(self.js, r'head\.append\(monitorPill\(rule\)\)')

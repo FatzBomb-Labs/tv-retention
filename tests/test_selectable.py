@@ -14,10 +14,13 @@ class Selectability(unittest.TestCase):
         self.assertTrue(outcome['selectable'])
         self.assertEqual(outcome['reason'], '')
 
-    def test_a_series_never_imported_is_not_selectable(self):
+    def test_a_series_never_imported_is_selectable_and_tagged(self):
+        # A rule binds to a series id, so a show that has not aired yet is a valid choice:
+        # Sonarr creates the folder on its first import and the rule picks it up then.
         outcome = describe_selectability(series(files=0), exists=False, in_use=False)
-        self.assertFalse(outcome['selectable'])
-        self.assertIn('no episodes imported yet', outcome['reason'])
+        self.assertTrue(outcome['selectable'])
+        self.assertTrue(outcome['awaiting'])
+        self.assertEqual(outcome['reason'], 'awaiting first episode')
 
     def test_a_missing_folder_with_files_names_the_mapping(self):
         outcome = describe_selectability(series(files=12), exists=False, in_use=False)

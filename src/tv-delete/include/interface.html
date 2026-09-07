@@ -25,6 +25,7 @@
 <nav class="tvd-tabs" aria-label="TV Delete views">
   <button type="button" class="active" data-tab="shows">Shows &amp; rules</button>
   <button type="button" data-tab="presets">Retention presets</button>
+  <button type="button" data-tab="library">Library scan</button>
   <button type="button" data-tab="sonarr">Sonarr instances</button>
   <button type="button" data-tab="settings">Schedule &amp; safety</button>
   <button type="button" data-tab="history">Runs &amp; history</button>
@@ -55,6 +56,22 @@
   <div id="tvd-presets" class="tvd-rules"></div>
   <p id="tvd-presets-empty" class="tvd-empty">No presets yet. Shows can still carry their own values, but a preset saves repeating them.</p>
   <div class="tvd-actions"><button type="button" id="tvd-add-preset" class="tvd-primary">Add preset</button></div>
+</section>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-library" class="tvd-panel" hidden>
+  <p class="tvd-lede">Compare a library folder against what Sonarr knows. Folders no Sonarr series claims are listed with the most likely reason — moved, removed from Sonarr, a changed TVDB id, or never managed at all. This reads only; nothing is renamed or deleted.</p>
+  <div class="tvd-toolbar">
+    <label class="tvd-field"><span>Library folder</span><input type="text" id="tvd-scan-root" spellcheck="false" placeholder="/mnt/user/media/TV"></label>
+    <button type="button" id="tvd-scan-browse">Browse…</button>
+    <button type="button" id="tvd-scan" class="tvd-primary">Compare with Sonarr</button>
+  </div>
+  <div id="tvd-scan-summary"></div>
+  <div class="tvd-scroll"><table class="tvd-table" id="tvd-scan-table" hidden>
+    <thead><tr><th>Folder</th><th>Size</th><th>Files</th><th>Finding</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p id="tvd-scan-empty" class="tvd-empty">Choose a folder and compare. On this server that is usually <span class="tvd-mono">/mnt/user/media/TV</span>.</p>
 </section>
 
 <!-- ------------------------------------------------------------------ -->
@@ -133,6 +150,7 @@
     <label class="tvd-check"><input type="checkbox" id="tvd-sidecars"> Also remove matching sidecar files (subtitles, artwork, .nfo)</label>
     <label class="tvd-field"><span>Sidecar extensions</span><input type="text" id="tvd-sidecar-ext" spellcheck="false"><small>Comma separated. Only files sharing the episode's exact name are touched.</small></label>
     <label class="tvd-check"><input type="checkbox" id="tvd-empty-dirs"> Remove season folders left empty (never the show folder)</label>
+    <label class="tvd-check"><input type="checkbox" id="tvd-allow-series-deletion"> Allow deleting an entire show from disk and Sonarr<small>Adds a guarded action to finished shows whose retention has expired. It is refused while dry run is on, is not covered by the deletion guards, and requires the show’s name typed back.</small></label>
   </div>
 
   <h2 class="tvd-h2">Housekeeping</h2>

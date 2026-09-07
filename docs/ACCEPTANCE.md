@@ -42,7 +42,14 @@ read-only or reversible.
       out with the reason, and that a show already covered by a rule cannot be picked again.
 - [ ] Recreate the rules the old shell script had, with the same day counts.
 
-## 4. Preview
+## 4. Library scan
+
+- [ ] Configure **every** Sonarr instance first — a show owned by another Sonarr looks
+      like an orphan to an instance that does not own it.
+- [ ] Run the scan over `/mnt/user/media/TV` and confirm the findings are plausible.
+- [ ] Confirm a *Moved or renamed* row really does exist in Sonarr at the stated path.
+
+## 5. Preview
 
 - [ ] **Preview all**. For each rule, confirm: the episode list looks right, air dates
       come from `sonarr` rather than `mtime`, and no file appears that you want to keep.
@@ -51,7 +58,7 @@ read-only or reversible.
 - [ ] Deliberately set a rule that would delete most of a show, and confirm the per-rule
       guard blocks it with an explanation.
 
-## 5. First live deletion
+## 6. First live deletion
 
 - [ ] Pick one show with a small, obviously-correct plan. Disable every other rule.
 - [ ] Turn **Dry run** off. Press **Run now** and confirm the warning names deletion.
@@ -62,7 +69,7 @@ read-only or reversible.
       folder has a matching record.
 - [ ] Re-enable the other rules.
 
-## 6. Re-monitoring a widened rule
+## 7. Re-monitoring a widened rule
 
 - [ ] With re-monitoring off, let one live run delete and unmonitor at least one episode.
       Confirm `unmonitored.json` in the state folder lists it.
@@ -73,7 +80,7 @@ read-only or reversible.
       left the ledger.
 - [ ] Confirm an episode you unmonitored by hand in Sonarr is not affected.
 
-## 7. Health check and caching
+## 8. Health check and caching
 
 - [ ] Open the tab and confirm every pill is already populated, with no manual check.
 - [ ] Confirm each pill's menu shows when it was read.
@@ -83,7 +90,7 @@ read-only or reversible.
 - [ ] Confirm `schedule.cron` holds both entries when the retention run and the health
       check are enabled, and only the health entry when the run is off.
 
-## 8. Schedule
+## 9. Schedule
 
 - [ ] Enable a daily schedule. Confirm `/boot/config/plugins/tv-delete/schedule.cron`
       exists and `crontab -l` contains the entry.
@@ -91,12 +98,20 @@ read-only or reversible.
       appears in history marked *schedule*, and that an Unraid notification arrived.
 - [ ] Disable the schedule and confirm the cron file is removed.
 
-## 9. Restart
+## 10. Restart
 
 - [ ] Reboot, or stop and start the array. Confirm settings and rules survive, and that
       the cron entry is republished.
 
-## 10. Uninstall
+## 11. Deleting a whole show
+
+- [ ] With dry run ON, confirm the action is refused and says so.
+- [ ] With the setting off, confirm the action is not offered at all.
+- [ ] Enable it, turn dry run off, and confirm a wrong title is refused.
+- [ ] On a show you genuinely want gone, confirm it is removed from Sonarr and disk, the
+      rule disappears, and the journal and notification record it.
+
+## 12. Uninstall
 
 - [ ] Remove the plugin. Confirm the cron entry is gone, and that `settings.json` and
       the journal remain.

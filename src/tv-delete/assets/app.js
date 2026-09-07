@@ -33,8 +33,9 @@
 
   // A request must always settle. Without this, one stalled call leaves the busy overlay
   // covering the page with no way to dismiss it and nothing on screen explaining why.
-  const TIMEOUTS = { run: 3600000, preview: 900000, series: 120000, 'test-instance': 90000,
-                     'detect-mappings': 90000, match: 300000, 'test-tmdb': 60000 };
+  const TIMEOUTS = { run: 3600000, preview: 900000, 'scan-folders': 1800000, 'remove-series': 900000,
+                     series: 120000, 'test-instance': 90000, 'detect-mappings': 90000,
+                     match: 300000, 'test-tmdb': 60000 };
   const DEFAULT_TIMEOUT = 60000;
 
   async function api(action, payload, label) {
@@ -98,7 +99,7 @@
   document.querySelectorAll('.tvd-tabs button').forEach((button) => {
     button.addEventListener('click', () => {
       document.querySelectorAll('.tvd-tabs button').forEach((other) => other.classList.toggle('active', other === button));
-      ['shows', 'presets', 'sonarr', 'settings', 'history', 'help'].forEach((name) => {
+      ['shows', 'presets', 'library', 'sonarr', 'settings', 'history', 'help'].forEach((name) => {
         $(`tvd-panel-${name}`).hidden = name !== button.dataset.tab;
       });
     });
@@ -237,11 +238,7 @@
       const editButton = el('button', { type: 'button', textContent: 'Edit' });
       editButton.addEventListener('click', () => editRule(rule));
       const removeButton = el('button', { type: 'button', className: 'tvd-danger', textContent: 'Remove' });
-      removeButton.addEventListener('click', () => guarded('', async () => {
-        if (!window.confirm(`Remove the rule for ${rule.series_title || rule.path}? No files are deleted.`)) return;
-        settings.rules = settings.rules.filter((other) => other.id !== rule.id);
-        await saveSettings('Rule removed.');
-      }));
+      removeButton.addEventListener('click', () => removeRule(rule));
       actions.append(previewButton, editButton, removeButton);
       body.append(actions);
       card.append(body);
@@ -284,6 +281,8 @@
     const inside = insideCount(state);
     if (!state.ok) return state.label || 'Sonarr problem';
     if (state.folder_ok === false) return 'Folder missing';
+    if (state.lifecycle === 'ended_expired') return 'Ended · retention expired';
+    if (state.lifecycle === 'ended_empty') return 'Ended · no files left';
     if (state.status === 'aligned') return 'Monitoring aligned';
     if (state.status === 'empty') return 'No episodes';
     if (state.status === 'all_monitored') return `All ${state.total} monitored`;
@@ -322,7 +321,11 @@
     const holder = el('span', { className: 'tvd-pill-holder' });
     const label = state ? pillText(state) : 'Monitoring: checking…';
     let kind = 'unknown';
-    if (state) kind = (state.folder_ok === false || !state.ok) ? 'bad' : (PILL_CLASS[state.status] || 'unknown');
+    if (state) {
+      if (state.folder_ok === false || !state.ok) kind = 'bad';
+      else if (PILL_ENDED.has(state.lifecycle)) kind = 'warn';
+      else kind = PILL_CLASS[state.status] || 'unknown';
+    }
     const pill = el('button', {
       type: 'button', className: `tvd-pill ${kind}`, textContent: `${label} ▾`,
       title: state ? `${state.label} — read ${ago(state.checked_at)}` : 'Waiting for the first check',
@@ -363,6 +366,16 @@
     }
     if (inside || outside) {
       items.push({ label: "Show the episodes…", run: () => guarded("", () => showMonitoring(rule)) });
+    }
+    if (PILL_ENDED.has(state.lifecycle)) {
+      items.push({ heading: state.lifecycle === 'ended_empty'
+        ? 'Sonarr says this show has ended and no files remain.'
+        : 'Sonarr says this show has ended and nothing is left inside the keep frame.' });
+      items.push({ label: 'Remove this rule (keeps every file)', run: () => removeRule(rule) });
+      if (settings.allow_series_deletion) {
+        items.push({ label: 'Delete the show from disk and Sonarr…', danger: true,
+                     run: () => confirmRemoveSeries(rule, state) });
+      }
     }
     items.push({ label: `Check again now (${state.monitored}/${state.total} monitored)`,
                  run: () => guarded('', () => refreshHealth(true)) });
@@ -527,6 +540,83 @@
 
   $('tvd-add-preset').addEventListener('click', () => editPreset(null));
 
+  // -- searchable picker -------------------------------------------------
+  // A plain select is unusable at two thousand entries: it cannot be typed into beyond
+  // the first letters and gives no reason why an option is unavailable.
+  function comboBox(items, options) {
+    const config = Object.assign({ placeholder: 'Type to search…', limit: 40 }, options || {});
+    const input = el('input', { type: 'text', placeholder: config.placeholder, autocomplete: 'off',
+                                spellcheck: false, role: 'combobox' });
+    const list = el('div', { className: 'tvd-combo-list', role: 'listbox', hidden: true });
+    const holder = el('div', { className: 'tvd-combo' }, [input, list]);
+    let chosen = null;
+
+    const matches = (term) => {
+      const needle = term.trim().toLowerCase();
+      const scored = [];
+      for (const item of items) {
+        const label = config.label(item).toLowerCase();
+        if (!needle) { scored.push([2, item]); }
+        else if (label.startsWith(needle)) { scored.push([0, item]); }
+        else if (label.includes(needle)) { scored.push([1, item]); }
+        if (scored.length > 600) break;
+      }
+      scored.sort((a, b) => a[0] - b[0]);
+      return scored.slice(0, config.limit).map((pair) => pair[1]);
+    };
+
+    const render = () => {
+      const rows = matches(input.value);
+      list.replaceChildren();
+      if (!rows.length) {
+        list.append(el('div', { className: 'tvd-combo-empty', textContent: 'No matching series.' }));
+      }
+      rows.forEach((item) => {
+        const usable = config.usable ? config.usable(item) : true;
+        const row = el('button', { type: 'button', role: 'option', disabled: !usable });
+        row.append(el('span', { textContent: config.label(item) }));
+        const note = config.note ? config.note(item) : '';
+        if (note) row.append(el('small', { className: usable ? 'tvd-combo-note' : 'tvd-combo-blocked', textContent: note }));
+        row.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          chosen = item;
+          input.value = config.label(item);
+          list.hidden = true;
+          if (config.onPick) config.onPick(item);
+        });
+        list.append(row);
+      });
+      list.hidden = false;
+    };
+
+    input.addEventListener('input', () => { chosen = null; render(); });
+    input.addEventListener('focus', render);
+    input.addEventListener('click', (event) => { event.stopPropagation(); render(); });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { list.hidden = true; return; }
+      if (event.key === 'ArrowDown') {
+        const first = list.querySelector('button:not([disabled])');
+        if (first) { event.preventDefault(); first.focus(); }
+      }
+    });
+    list.addEventListener('keydown', (event) => {
+      const buttons = [...list.querySelectorAll('button:not([disabled])')];
+      const index = buttons.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown' && index < buttons.length - 1) { event.preventDefault(); buttons[index + 1].focus(); }
+      if (event.key === 'ArrowUp') { event.preventDefault(); (index > 0 ? buttons[index - 1] : input).focus(); }
+      if (event.key === 'Escape') { list.hidden = true; input.focus(); }
+    });
+    document.addEventListener('click', () => { list.hidden = true; });
+
+    return {
+      node: holder,
+      get value() { return chosen; },
+      set(item) { chosen = item; input.value = item ? config.label(item) : ''; },
+      focus() { input.focus(); },
+    };
+  }
+
   // -- rule editor -------------------------------------------------------
   async function seriesFor(instanceId, exceptRule) {
     // Keyed by the rule being edited too: a rule's own folder must not count as "in use".
@@ -587,52 +677,33 @@
       settings.instances.forEach((instance) => instanceSelect.append(el('option', { value: instance.id, textContent: instance.name })));
       instanceSelect.value = rule.instance_id;
 
-      const modeSelect = el('select');
-      modeSelect.append(el('option', { value: 'series', textContent: 'Pick the series from Sonarr' }));
-      modeSelect.append(el('option', { value: 'folder', textContent: 'Pick a folder, then match it to Sonarr' }));
-
-      const seriesSelect = el('select');
-      const seriesHint = el('small', { textContent: '' });
-      const seriesField = field('Sonarr series', seriesSelect, 'Only series this Sonarr instance manages.');
-      seriesField.append(seriesHint);
-      const pathInput = el('input', { type: 'text', value: rule.path, spellcheck: false, placeholder: '/mnt/user/media/TV/…' });
-      const browseButton = el('button', { type: 'button', textContent: 'Browse…' });
-      browseButton.addEventListener('click', (event) => {
-        event.preventDefault();
-        browseFolder(pathInput.value || '/mnt/user', (picked) => { pathInput.value = picked; });
-      });
-      const pathRow = el('div', { className: 'tvd-row' }, [field('Series folder', pathInput), browseButton]);
-      const pathField = el('div', {}, [pathRow, el('small', { textContent: 'The folder must belong to a Sonarr series on the selected instance, or the rule is saved unmatched and skipped.' })]);
+      const seriesHint = el('small', { textContent: 'Loading series from Sonarr…' });
+      let picker = null;
+      const pickerHolder = el('div', {});
+      const seriesField = el('label', { className: 'tvd-field' }, [
+        el('span', { textContent: 'Series' }), pickerHolder, seriesHint,
+      ]);
 
       const loadSeries = () => guarded('', async () => {
         const catalogue = await seriesFor(instanceSelect.value, rule.id);
-        seriesSelect.replaceChildren(el('option', { value: '', textContent: '— choose a series —' }));
-        let blocked = 0;
-        catalogue.forEach((entry) => {
-          // A series with no folder here has nothing for a rule to act on, so it is shown
-          // with the reason and cannot be picked.
-          if (!entry.selectable) blocked += 1;
-          seriesSelect.append(el('option', {
-            value: String(entry.series_id),
-            disabled: !entry.selectable,
-            textContent: `${entry.title}${entry.year ? ` (${entry.year})` : ''}`
-                         + (entry.selectable ? '' : ` — ${entry.reason}`),
-          }));
+        picker = comboBox(catalogue, {
+          placeholder: 'Type a few letters of the show’s name…',
+          label: (entry) => `${entry.title}${entry.year ? ` (${entry.year})` : ''}`,
+          usable: (entry) => entry.selectable,
+          note: (entry) => (entry.selectable
+            ? (entry.awaiting ? 'awaiting first episode — no folder yet' : entry.path)
+            : entry.reason),
         });
-        if (rule.series_id) seriesSelect.value = String(rule.series_id);
+        pickerHolder.replaceChildren(picker.node);
+        const current = catalogue.find((entry) => String(entry.series_id) === String(rule.series_id));
+        if (current) picker.set(current);
+        const blocked = catalogue.filter((entry) => !entry.selectable).length;
         seriesHint.textContent = blocked
-          ? `${catalogue.length - blocked} of ${catalogue.length} series can be given a rule; the rest are shown with the reason they cannot.`
+          ? `${catalogue.length - blocked} of ${catalogue.length} series can be given a rule; the rest show why they cannot.`
           : `${catalogue.length} series available.`;
       });
-
-      const applyMode = () => {
-        const mode = modeSelect.value;
-        seriesField.hidden = mode !== 'series';
-        pathField.hidden = mode !== 'folder';
-        if (mode === 'series') loadSeries();
-      };
-      modeSelect.addEventListener('change', applyMode);
-      instanceSelect.addEventListener('change', () => { seriesCache = {}; applyMode(); });
+      instanceSelect.addEventListener('change', () => { seriesCache = {}; loadSeries(); });
+      loadSeries();
 
       const presetSelect = el('select');
       (settings.profiles || []).forEach((preset) => {
@@ -654,9 +725,8 @@
       const unmonitor = checkbox('Unmonitor these episodes in Sonarr after deleting', rule.unmonitor);
 
       body.append(
-        field('Sonarr instance', instanceSelect),
-        field('How to identify the show', modeSelect),
-        seriesField, pathField,
+        field("Sonarr instance", instanceSelect),
+        seriesField,
         field('Retention', presetSelect, (settings.profiles || []).length
           ? 'Presets are managed on the Retention presets tab.'
           : 'No presets yet — create one there to reuse the same values across shows.'),
@@ -665,10 +735,8 @@
               'Per show. The global setting in Schedule & safety applies unless this overrides it.'),
         enabled.node, unmonitor.node,
       );
-      modeSelect.value = existing && existing.series_id ? 'series' : (existing ? 'folder' : 'series');
-      applyMode();
 
-      return { instanceSelect, modeSelect, seriesSelect, pathInput, presetSelect, conditions, specials, enabled, unmonitor };
+      return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions, specials, enabled, unmonitor };
     }, async (context) => {
       const draft = {
         id: rule.id || undefined,
@@ -682,19 +750,11 @@
         unmonitor: context.unmonitor.input.checked,
         include_specials: context.specials.value,
       };
-      if (context.modeSelect.value === 'series') {
-        const catalogue = await seriesFor(context.instanceSelect.value, rule.id);
-        const chosen = catalogue.find((entry) => String(entry.series_id) === context.seriesSelect.value);
-        if (!chosen) throw new Error('Choose a series from the list.');
-        if (!chosen.selectable) throw new Error(`${chosen.title} cannot be given a rule: ${chosen.reason}.`);
-        Object.assign(draft, { series_id: chosen.series_id, series_title: chosen.title, tvdb_id: chosen.tvdb_id, path: chosen.path });
-      } else {
-        const typed = context.pathInput.value.trim();
-        if (!typed) throw new Error('Choose a folder.');
-        // Browsing can only reach real folders, but the box can also be typed into.
-        await api('browse', { path: typed }, 'Checking the folder…');
-        Object.assign(draft, { series_id: null, series_title: '', tvdb_id: null, path: typed });
-      }
+      const chosen = context.getSeries();
+      if (!chosen) throw new Error('Choose a series from the list.');
+      if (!chosen.selectable) throw new Error(`${chosen.title} cannot be given a rule: ${chosen.reason}.`);
+      Object.assign(draft, { series_id: chosen.series_id, series_title: chosen.title,
+                             tvdb_id: chosen.tvdb_id, path: chosen.path });
       settings.rules = (settings.rules || []).filter((other) => other.id !== rule.id).concat([draft]);
       await saveSettings(null);
       const matchReport = await api('match', {}, 'Matching against Sonarr…');
@@ -715,6 +775,89 @@
     render();
     const failed = data.report.filter((entry) => !entry.ok).length;
     notice(failed ? `${failed} rule(s) could not be matched; they will be skipped.` : 'All rules matched.', failed ? 'bad' : 'ok');
+  }));
+
+  function removeRule(rule) {
+    return guarded('', async () => {
+      if (!window.confirm(`Remove the rule for ${rule.series_title || rule.path}? No files are deleted.`)) return;
+      settings.rules = settings.rules.filter((other) => other.id !== rule.id);
+      await saveSettings('Rule removed.');
+    });
+  }
+
+  // The only action that destroys a whole show. It is gated in settings, refused while dry
+  // run is on, and requires the title typed back — a click alone must never be enough.
+  function confirmRemoveSeries(rule, state) {
+    dialog(`Delete ${rule.series_title} completely?`, (body) => {
+      body.append(el('div', { className: 'tvd-warning', textContent:
+        'This deletes the series from Sonarr and every file it owns from disk. It is not a '
+        + 'dry run, it is not covered by the deletion guards, and it cannot be undone from '
+        + 'here — only Sonarr’s own recycle bin, if you have one, will hold anything.' }));
+      body.append(el('p', { textContent:
+        `${state.files_total || 0} file(s) belong to this series. Sonarr reports it as ended, `
+        + 'and nothing remains inside the keep frame.' }));
+      body.append(el('div', { className: 'tvd-mono', textContent: rule.path }));
+      const confirm = el('input', { type: 'text', autocomplete: 'off', spellcheck: false });
+      body.append(field(`Type the show’s name to confirm: ${rule.series_title}`, confirm));
+      return { confirm };
+    }, async (context) => {
+      const data = await api('remove-series',
+                             { rule_id: rule.id, confirm_title: context.confirm.value },
+                             'Removing the show…');
+      settings = data.settings;
+      snapshot.settings = settings;
+      delete monitoring[rule.id];
+      render();
+      notice(`${data.removed.series_title} was removed from Sonarr and disk `
+             + `(${data.removed.files} file(s), ${bytes(data.removed.bytes)}).`, 'ok');
+    }, 'Delete permanently');
+  }
+
+  // -- library scan ------------------------------------------------------
+  const SCAN_LABEL = {
+    moved: 'Moved or renamed',
+    unknown_id: 'Not in Sonarr',
+    title_match: 'No TVDB id in the name',
+    unmanaged: 'Unmanaged',
+  };
+
+  $('tvd-scan-browse').addEventListener('click', () => {
+    browseFolder($('tvd-scan-root').value || '/mnt/user/media', (picked) => { $('tvd-scan-root').value = picked; });
+  });
+
+  $('tvd-scan').addEventListener('click', () => guarded('', async () => {
+    const root = $('tvd-scan-root').value.trim();
+    if (!root) throw new Error('Choose a library folder first.');
+    const data = await api('scan-folders', { root }, 'Comparing the library with Sonarr…');
+    const summary = $('tvd-scan-summary');
+    summary.replaceChildren();
+    $('tvd-scan-empty').hidden = true;
+    const table = $('tvd-scan-table');
+    table.hidden = false;
+    summary.append(el('p', {
+      textContent: data.orphan_count
+        ? `${plural(data.orphan_count, 'folder')} under ${data.root} are not claimed by any of the `
+          + `${data.series_known} series Sonarr knows, holding ${bytes(data.orphan_bytes)}.`
+        : `Every folder under ${data.root} is claimed by one of the ${data.series_known} series Sonarr knows.`,
+    }));
+    const tbody = table.querySelector('tbody');
+    tbody.replaceChildren();
+    data.orphans.forEach((row) => {
+      const tr = el('tr');
+      tr.append(el('td', {}, [el('div', { textContent: row.name }),
+                              el('div', { className: 'tvd-mono', textContent: row.path })]));
+      tr.append(el('td', { textContent: bytes(row.size) }));
+      tr.append(el('td', { textContent: String(row.files) }));
+      tr.append(el('td', {}, [
+        el('span', { className: `tvd-badge ${row.kind === 'unmanaged' ? 'off' : 'bad'}`,
+                     textContent: SCAN_LABEL[row.kind] || row.kind }),
+        el('div', { textContent: row.detail }),
+      ]));
+      tbody.append(tr);
+    });
+    if (data.orphan_count > data.orphans.length) {
+      summary.append(el('small', { textContent: `Showing the ${data.orphans.length} largest of ${data.orphan_count}.` }));
+    }
   }));
 
   // -- instances ---------------------------------------------------------
@@ -916,6 +1059,7 @@
     $('tvd-sidecars').checked = !!sidecars.enabled;
     $('tvd-sidecar-ext').value = (sidecars.extensions || []).join(', ');
     $('tvd-empty-dirs').checked = !!settings.delete_empty_dirs;
+    $('tvd-allow-series-deletion').checked = !!settings.allow_series_deletion;
     $('tvd-state-dir').value = settings.state_dir || '';
     $('tvd-history-size').value = settings.log_retention_runs;
     $('tvd-notify').checked = !!settings.notify;
@@ -966,6 +1110,7 @@
       recycle: { mode: $('tvd-recycle-mode').value, path: $('tvd-recycle-path').value.trim(), retention_days: $('tvd-recycle-days').value },
       sidecars: { enabled: $('tvd-sidecars').checked, extensions: $('tvd-sidecar-ext').value.split(',').map((value) => value.trim()).filter(Boolean) },
       delete_empty_dirs: $('tvd-empty-dirs').checked,
+      allow_series_deletion: $('tvd-allow-series-deletion').checked,
       state_dir: $('tvd-state-dir').value.trim(),
       log_retention_runs: $('tvd-history-size').value,
       notify: $('tvd-notify').checked,
