@@ -755,8 +755,27 @@ class Interface(unittest.TestCase):
         self.assertIn('unmonitor_outside: true', self.js)
         self.assertIn('will be unmonitored so Sonarr stops fetching them', self.js)
 
-    def test_monitoring_newly_covered_episodes_remains_a_choice(self):
-        # The other half is a real decision: nothing else will ever do it under Unmonitor
-        # only, and saying yes can mean hundreds of gigabytes.
-        self.assertIn('monitorNew', self.js)
-        self.assertIn('monitor_new: context.monitorNew.input.checked', self.js)
+    def test_monitoring_inside_the_window_is_chosen_episode_by_episode(self):
+        """All or nothing was the wrong question for what is inside the window.
+
+        Which episodes Sonarr should chase is a per-episode answer, so the toggle opens a
+        tree of the window's own seasons and episodes, checked where Sonarr monitors them
+        now, and only what differs is sent.
+        """
+        self.assertIn('function monitorTree', self.js)
+        self.assertIn("api('episodes'", self.js)
+        self.assertIn("api('set-monitored'", self.js)
+        # Three states where "some of this" is a real answer, two where it is not.
+        self.assertIn('box.indeterminate = on > 0 && off > 0', self.js)
+        self.assertIn('if (wanted === !!episode.monitored) return;', self.js)
+
+    def test_removal_offers_to_set_monitoring_before_the_series_goes(self):
+        """After it leaves, the plugin stops having an opinion about this series.
+
+        So leaving is the moment to put Sonarr's flags where you want them, across every
+        season rather than the keep window's — the window is about to stop mattering.
+        """
+        block = self.js.split('function deleteSeries')[1].split('// -- schedule')[0]
+        self.assertIn('Set monitoring in Sonarr before it goes', block)
+        self.assertIn('monitorTree(data.seasons, {})', block)
+        self.assertIn("api('set-monitored'", block)

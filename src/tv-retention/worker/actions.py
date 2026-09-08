@@ -22,7 +22,7 @@ from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   describe_selectability, effective_rule, new_id, normalise, redact,
                   validate_settings)
 from sonarr import Sonarr, SonarrError
-from store import (CRON, age_seconds, forget_episodes, invalidate_catalogue, job_state,
+from store import (CRON, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
                    read_journal, read_log, read_progress, save_settings, save_state,
                    trim_health, write_cache)
@@ -200,6 +200,90 @@ def action_acknowledge(settings, request):
              f'{"un-" if request.get("undo") else ""}acknowledged: {found.get("title")}')
     return {'alerts': visible_alerts(settings, health),
             'summary': alerts.summarise(visible_alerts(settings, health))}
+
+
+def series_episodes(settings, request):
+    """The episodes behind a panel, with whatever the reading says Sonarr monitors.
+
+    From the stored reading where there is one. A series being added has none yet, so its
+    episodes are read on their own — the only time this reaches Sonarr.
+    """
+    draft = request.get('draft') or {}
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if rule:
+        episodes, _, _, _ = main.episodes_for(settings, rule, offline=True)
+    else:
+        instance_id = str(request.get('instance_id') or '')
+        series_id = int(request.get('series_id') or 0)
+        if not instance_id or not series_id:
+            raise Rejected('No series to read.')
+        rule = {'id': '', 'instance_id': instance_id, 'series_id': series_id}
+        episodes = main.client_for(settings, instance_id).episodes(series_id, files_only=False)
+        main.interpolate_air_dates(episodes)
+    overrides = {key: draft[key] for key in ('profile_id', 'keep_days', 'keep_episodes',
+                                             'keep_seasons', 'combine', 'include_specials')
+                 if key in draft}
+    active = effective_rule(dict(rule, **overrides), settings.get('profiles'))
+    return rule, episodes, main.keep_frame(episodes, active, settings)
+
+
+def action_episodes(settings, request):
+    """Seasons and episodes, grouped, for the monitoring tree.
+
+    Every episode is returned and each says whether it falls inside the keep window, so
+    one call serves both the tree that offers the window and the one that offers the lot.
+    """
+    _, episodes, frame = series_episodes(settings, request)
+    inside = {episode.get('episode_id') for episode in frame['in_frame']}
+    seasons = {}
+    for episode in sorted(episodes, key=lambda item: (item.get('season') or 0, item.get('episode') or 0)):
+        seasons.setdefault(episode.get('season') or 0, []).append({
+            'episode_id': episode.get('episode_id'),
+            'season': episode.get('season'),
+            'episode': episode.get('episode'),
+            'title': episode.get('title'),
+            'air_date': episode.get('air_date'),
+            'has_file': bool(episode.get('has_file')),
+            'monitored': bool(episode.get('monitored')),
+            'in_scope': episode.get('episode_id') in inside,
+        })
+    return {'seasons': [{'season': number, 'episodes': rows} for number, rows in sorted(seasons.items())]}
+
+
+def action_set_monitored(settings, request):
+    """Set exactly the monitored flags the tree was left showing.
+
+    Only the difference is sent to Sonarr, and the stored reading is corrected to match, so
+    the plan and the counts agree with what was just done rather than waiting for a sync to
+    find out.
+    """
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if not rule:
+        raise Rejected('That series is no longer here.')
+    monitor = [int(value) for value in (request.get('monitor') or [])]
+    unmonitor = [int(value) for value in (request.get('unmonitor') or [])]
+    if not monitor and not unmonitor:
+        return {'monitored': 0, 'unmonitored': 0}
+    client = main.client_for(settings, rule['instance_id'])
+    if monitor:
+        client.set_monitored(monitor, True)
+    if unmonitor:
+        client.set_monitored(unmonitor, False)
+
+    episodes, series, _ = store_episode_cache(settings, rule)
+    if episodes is not None:
+        wanted = {episode_id: True for episode_id in monitor}
+        wanted.update({episode_id: False for episode_id in unmonitor})
+        for episode in episodes:
+            if episode.get('episode_id') in wanted:
+                episode['monitored'] = wanted[episode['episode_id']]
+        main.store_episodes(settings, rule, episodes, series)
+    with contextlib.suppress(Rejected, SonarrError):
+        main.check_one_rule(settings, rule)
+    log_line(settings, 'info',
+             f'{rule.get("series_title") or rule["path"]}: monitored {len(monitor)}, '
+             f'unmonitored {len(unmonitor)} by hand')
+    return {'monitored': len(monitor), 'unmonitored': len(unmonitor)}
 
 
 def action_scope_counts(settings, request):
@@ -569,6 +653,8 @@ ACTIONS = {
     'stats': action_stats,
     'acknowledge': action_acknowledge,
     'scope-counts': action_scope_counts,
+    'episodes': action_episodes,
+    'set-monitored': action_set_monitored,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

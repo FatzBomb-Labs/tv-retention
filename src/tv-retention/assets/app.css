@@ -665,3 +665,24 @@
    warning: it is information, not a caution. */
 .tvr-once-count { color: var(--tvr-action); font-size: 11.5px; margin: 0 0 6px 42px; }
 .tvr-once-count:empty { display: none; }
+
+/* Seasons and episodes with a box each. Three states where "some of this" is a real
+   answer, two where it is not: an episode is monitored or it is not. */
+.tvr-tree-box { margin: 6px 0 0 42px; }
+.tvr-tree { border: 1px solid var(--tvr-line); border-radius: 6px; max-height: 320px;
+  overflow-y: auto; overscroll-behavior: contain; }
+.tvr-tree-row { display: flex; align-items: center; gap: 8px; padding: 3px 8px; cursor: pointer;
+  font-size: 12px; }
+.tvr-tree-row:hover { background: var(--tvr-soft); }
+.tvr-tree-series { font-weight: 600; border-bottom: 1px solid var(--tvr-line); }
+.tvr-tree-head { display: flex; align-items: center; }
+.tvr-tree-head .tvr-tree-row { flex: 1; }
+#tv-retention button.tvr-tree-caret { border: none; background: none; padding: 0 2px 0 6px;
+  width: 18px; opacity: .6; border-radius: 0; }
+#tv-retention button.tvr-tree-caret:hover { background: none; opacity: 1; }
+.tvr-tree-season { font-weight: 600; }
+.tvr-tree-episode { padding-left: 34px; font-weight: normal; }
+.tvr-tree-count { margin-left: auto; font-size: 11px; opacity: .55; font-weight: normal; }
+.tvr-tree-note { font-size: 10px; opacity: .5; }
+.tvr-tree-season-wrap { border-top: 1px solid var(--tvr-line); }
+.tvr-tree-season-wrap:first-of-type { border-top: none; }

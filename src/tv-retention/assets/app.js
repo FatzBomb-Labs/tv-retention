@@ -1486,6 +1486,115 @@
 
   $('tvr-add-preset').addEventListener('click', () => editPreset(null));
 
+  // -- monitoring tree ---------------------------------------------------
+  // Seasons and episodes with a checkbox each, checked where Sonarr monitors them now.
+  // The series and season boxes are three-state, because "some of this" is a real answer
+  // and a box that can only say yes or no would have to lie about it.
+  function monitorTree(seasons, options) {
+    const only = (options || {}).only;                // a filter over which episodes show
+    const state = new Map();                          // episode id -> wanted, as displayed
+    const episodeBoxes = new Map();
+    const seasonBoxes = [];
+    const node = el('div', { className: 'tvr-tree' });
+
+    const seriesBox = el('input', { type: 'checkbox', className: 'tvr-pick' });
+    const seriesRow = el('label', { className: 'tvr-tree-row tvr-tree-series' }, [
+      seriesBox, el('span', { textContent: 'All of it' }),
+      el('span', { className: 'tvr-tree-count' }),
+    ]);
+    node.append(seriesRow);
+
+    const setThree = (box, on, off) => {
+      box.checked = on > 0 && off === 0;
+      box.indeterminate = on > 0 && off > 0;
+    };
+    const refresh = () => {
+      let allOn = 0, allOff = 0;
+      seasonBoxes.forEach((entry) => {
+        let on = 0, off = 0;
+        entry.ids.forEach((id) => { if (state.get(id)) on += 1; else off += 1; });
+        setThree(entry.box, on, off);
+        entry.count.textContent = `${on}/${entry.ids.length} monitored`;
+        allOn += on; allOff += off;
+      });
+      setThree(seriesBox, allOn, allOff);
+      seriesRow.querySelector('.tvr-tree-count').textContent = `${allOn}/${allOn + allOff} monitored`;
+      if (options && options.onChange) options.onChange();
+    };
+
+    (seasons || []).forEach((season) => {
+      const rows = (season.episodes || []).filter((episode) => !only || only(episode));
+      if (!rows.length) return;
+      const ids = rows.map((episode) => episode.episode_id);
+      ids.forEach((id, index) => state.set(id, !!rows[index].monitored));
+
+      const box = el('input', { type: 'checkbox', className: 'tvr-pick' });
+      const count = el('span', { className: 'tvr-tree-count' });
+      const caret = el('button', { type: 'button', className: 'tvr-tree-caret' },
+                       [el('i', { className: 'fa fa-caret-right' })]);
+      const list = el('div', { className: 'tvr-tree-episodes', hidden: true });
+      const header = el('label', { className: 'tvr-tree-row tvr-tree-season' }, [
+        box, el('span', { textContent: season.season === 0 ? 'Specials' : `Season ${season.season}` }), count,
+      ]);
+      caret.addEventListener('click', (event) => {
+        event.preventDefault();
+        list.hidden = !list.hidden;
+        caret.firstChild.className = `fa fa-caret-${list.hidden ? 'right' : 'down'}`;
+      });
+      const wrap = el('div', { className: 'tvr-tree-season-wrap' },
+                      [el('div', { className: 'tvr-tree-head' }, [caret, header]), list]);
+
+      rows.forEach((episode) => {
+        const tick = el('input', { type: 'checkbox', className: 'tvr-pick',
+                                   checked: !!episode.monitored });
+        tick.addEventListener('change', () => { state.set(episode.episode_id, tick.checked); refresh(); });
+        episodeBoxes.set(episode.episode_id, tick);
+        list.append(el('label', { className: 'tvr-tree-row tvr-tree-episode' }, [
+          tick,
+          el('span', { textContent: `E${String(episode.episode).padStart(2, '0')} · ${episode.title || ''}` }),
+          el('span', { className: 'tvr-tree-note',
+                       textContent: episode.has_file ? '' : 'no file' }),
+        ]));
+      });
+
+      box.addEventListener('change', () => {
+        ids.forEach((id) => {
+          state.set(id, box.checked);
+          episodeBoxes.get(id).checked = box.checked;
+        });
+        refresh();
+      });
+      seasonBoxes.push({ box, ids, count });
+      node.append(wrap);
+    });
+
+    seriesBox.addEventListener('change', () => {
+      state.forEach((value, id) => {
+        state.set(id, seriesBox.checked);
+        episodeBoxes.get(id).checked = seriesBox.checked;
+      });
+      refresh();
+    });
+    refresh();
+
+    return {
+      node,
+      empty: state.size === 0,
+      // Only what differs from what Sonarr already has: pressing save without touching a
+      // box should ask Sonarr for nothing.
+      changes: () => {
+        const monitor = [], unmonitor = [];
+        (seasons || []).forEach((season) => (season.episodes || []).forEach((episode) => {
+          if (!state.has(episode.episode_id)) return;
+          const wanted = state.get(episode.episode_id);
+          if (wanted === !!episode.monitored) return;
+          (wanted ? monitor : unmonitor).push(episode.episode_id);
+        }));
+        return { monitor, unmonitor };
+      },
+    };
+  }
+
   // -- adding and editing a series ---------------------------------------
   async function seriesFor(instanceId, exceptRule, force) {
     const key = instanceId + ':' + (exceptRule || '');
@@ -1580,25 +1689,44 @@
       // Two one-time actions, not settings. They happen when you save and never again,
       // which is why each says so and says what it will ask Sonarr to do.
       const before = existing ? scopeOf(rule) : null;
-      const monitorNew = toggle('Once, on save: monitor the episodes this newly covers',
+      const monitorNew = toggle('Change monitor status for episodes within scope',
                                 false, null, { className: 'tvr-row-switch' });
       // What each action would actually touch, against the window as it stands in the
       // form. Without it the two toggles are a decision made blind.
       const monitorCount = el('div', { className: 'tvr-once-count' });
       const unmonitorCount = el('div', { className: 'tvr-once-count' });
+      const empty = el('div', { className: 'tvr-plan-quiet', hidden: true,
+                                textContent: 'Nothing to monitor — the keep window holds no episodes.' });
+      // Turning it on opens the window's own seasons and episodes, checked where Sonarr
+      // monitors them now, so the choice is which ones rather than all or nothing.
+      const treeBox = el('div', { className: 'tvr-tree-box', hidden: true });
+      let tree = null;
       const scopeRow = el('div', { className: 'tvr-once' }, [
-        el('div', { className: 'tvr-once-title', textContent: 'One-time actions' }),
+        el('div', { className: 'tvr-once-title', textContent: 'Monitoring in Sonarr' }),
         monitorNew.node,
-        el('small', { textContent: 'Asks Sonarr to download any of them it does not have. '
-                                   + 'Leave this off and nothing is fetched — the window simply '
-                                   + 'covers them from now on.' }),
         monitorCount,
+        treeBox,
+        empty,
       ]);
+      const loadTree = () => guarded('', async () => {
+        const data = await api('episodes', {
+          rule_id: rule.id || '', instance_id: series.instance_id, series_id: series.series_id,
+          draft: Object.assign({}, draftScope(), { include_specials: specials.value }),
+        }, 'Reading episodes…', true);
+        tree = monitorTree(data.seasons, { only: (episode) => episode.in_scope });
+        treeBox.replaceChildren(tree.node);
+      });
+      monitorNew.input.addEventListener('change', () => {
+        treeBox.hidden = !monitorNew.input.checked;
+        if (monitorNew.input.checked) loadTree(); else { tree = null; treeBox.replaceChildren(); }
+      });
       // Not a toggle. A run unmonitors everything outside the window whatever anyone
       // chooses, so offering the choice here only decided whether it happened now or
       // within a day — and off by default meant Sonarr spent that day fetching episodes
       // the next run would delete. It is stated instead, because it still happens.
-      const unmonitorNote = el('div', { className: 'tvr-once' }, [
+      // Shown only when there is something to say. "Nothing outside the scope is
+      // monitored" is a heading and a sentence to report that nothing will happen.
+      const unmonitorNote = el('div', { className: 'tvr-once', hidden: true }, [
         el('div', { className: 'tvr-once-title', textContent: 'On save' }),
         unmonitorCount,
       ]);
@@ -1620,19 +1748,23 @@
             monitorCount.textContent = unmonitorCount.textContent = '';
             return;
           }
-          monitorCount.textContent = counts.would_monitor
-            ? `${counts.would_monitor}/${counts.in_scope} episodes in ${title}'s keep scope are currently not monitored`
-            : `Nothing to monitor — every episode in ${title}'s keep scope is already monitored`;
-          // A widened rule only offers the part the widening added; the rest were
-          // unmonitored by hand, and this pass leaves those alone.
-          const byHand = counts.in_scope_unmonitored - counts.would_monitor;
-          if (byHand > 0) {
-            monitorCount.textContent += ` (${byHand} more were unmonitored by hand and are left alone)`;
+          const monitored = counts.in_scope - counts.in_scope_unmonitored;
+          monitorCount.textContent =
+            `${monitored} of ${counts.in_scope} episodes in ${title}'s keep scope are monitored`;
+          // Nothing in the window means nothing to decide, so the toggle goes and says why.
+          scopeRow.hidden = false;
+          monitorNew.node.hidden = counts.in_scope === 0;
+          monitorCount.hidden = counts.in_scope === 0;
+          empty.hidden = counts.in_scope > 0;
+          if (counts.in_scope === 0) {
+            monitorNew.input.checked = false;
+            treeBox.hidden = true;
           }
+          unmonitorNote.hidden = !counts.out_scope_monitored;
           unmonitorCount.textContent = counts.out_scope_monitored
-            ? `${counts.out_scope_monitored}/${counts.out_scope} episodes out of ${title}'s keep scope are still `
+            ? `${counts.out_scope_monitored} of ${counts.out_scope} episodes outside ${title}'s keep scope are `
               + 'monitored, and will be unmonitored so Sonarr stops fetching them'
-            : `Nothing outside ${title}'s keep scope is monitored`;
+            : '';
         }), 250);
       };
       const draftScope = () => ({
@@ -1642,14 +1774,9 @@
         keep_seasons: presetSelect.value ? null : (conditions.seasons.value || null),
         combine: conditions.combine.value,
       });
-      const updateScopeRow = () => {
-        const mode = monitoring.value || (settings.retention || {}).monitoring || 'unmonitor-only';
-        const widens = !existing || widensScope(before, draftScope());
-        // Full sync monitors the window continuously, so a one-time pass over it is a
-        // thing already happening; and a window that has not grown has covered nothing new.
-        scopeRow.hidden = mode === 'full-sync' || !widens;
-        if (scopeRow.hidden) monitorNew.input.checked = false;
-      };
+      // The window's own contents are always worth showing; whether they are worth
+      // changing is the operator's business, not a rule about widening.
+      const updateScopeRow = () => { if (monitorNew.input.checked && tree) loadTree(); };
       [monitoring, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
        conditions.combine, specials].forEach((input) => {
         input.addEventListener('change', () => { updateScopeRow(); refreshCounts(); });
@@ -1689,7 +1816,7 @@
         field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
         scopeRow, unmonitorNote);
       return { presetSelect, conditions, specials, monitoring, monitorNew,
-               before, enabled,
+               before, enabled, tree: () => (monitorNew.input.checked ? tree : null),
                // A rule needs somewhere to keep from: a preset, or at least one value.
                valid: () => !!(presetSelect.value || conditions.days.value
                                || conditions.episodes.value || conditions.seasons.value),
@@ -1734,18 +1861,24 @@
       // Applied now, against the saved rule, because the unmonitor half exists to stop
       // downloads that would otherwise happen before the next run.
       if (saved) {
+        // Outside the window is not a choice: a run unmonitors it regardless, so waiting
+        // only gives Sonarr a day to fetch what that run would delete.
         const pass = await api('scope-pass', {
-          rule_id: saved.id,
-          monitor_new: context.monitorNew.input.checked,
-          // Always: a run does this regardless, so leaving it until then only gives Sonarr
-          // a day to fetch episodes that run would delete.
-          unmonitor_outside: true,
-          previous_scope: context.before,
+          rule_id: saved.id, monitor_new: false, unmonitor_outside: true,
         }, 'Setting monitoring in Sonarr…');
         const parts = [];
-        if (pass.monitored) parts.push(`${plural(pass.monitored, 'episode')} monitored`);
         if (pass.unmonitored) parts.push(`${plural(pass.unmonitored, 'episode')} unmonitored`);
-        done = parts.length ? ` ${parts.join(', ')} in Sonarr.` : ' Nothing needed changing in Sonarr.';
+        // Inside the window is entirely the operator's: exactly what the tree was left
+        // showing, and only where it differs from what Sonarr already has.
+        const wanted = context.tree && context.tree();
+        const changes = wanted ? wanted.changes() : { monitor: [], unmonitor: [] };
+        if (changes.monitor.length || changes.unmonitor.length) {
+          const applied = await api('set-monitored', Object.assign({ rule_id: saved.id }, changes),
+                                    'Setting monitoring in Sonarr…');
+          if (applied.monitored) parts.push(`${plural(applied.monitored, 'episode')} monitored`);
+          if (applied.unmonitored) parts.push(`${plural(applied.unmonitored, 'episode')} unmonitored`);
+        }
+        done = parts.length ? ` ${parts.join(', ')} in Sonarr.` : '';
       }
       if (saved) queueChecks([saved.id]);
       notice(`Series saved.${done}`, 'ok');
@@ -2000,17 +2133,46 @@
       confirm.addEventListener('input', review);
       body.append(field('Sonarr action', action,
                         'What Sonarr should do as the series leaves TV Retention.'), warning, confirmField);
+
+      // Leaving is the moment to put monitoring back the way you want it, because after
+      // this the plugin stops having an opinion about this series at all. Every season,
+      // not only the window's — the window is about to stop mattering.
+      const restore = toggle('Set monitoring in Sonarr before it goes', false, null,
+                             { className: 'tvr-row-switch' });
+      const treeBox = el('div', { className: 'tvr-tree-box', hidden: true });
+      let tree = null;
+      restore.input.addEventListener('change', () => guarded('', async () => {
+        treeBox.hidden = !restore.input.checked;
+        if (!restore.input.checked) { tree = null; treeBox.replaceChildren(); return; }
+        const data = await api('episodes', { rule_id: rule.id }, 'Reading episodes…', true);
+        tree = monitorTree(data.seasons, {});
+        treeBox.replaceChildren(tree.node);
+      }));
+      body.append(restore.node, treeBox);
       review();
-      return { action, confirm };
+      return { action, confirm, tree: () => (restore.input.checked ? tree : null) };
     }, async (context) => {
       const word = REMOVAL_CONFIRM[context.action.value];
       if (word && context.confirm.value.trim() !== word) {
         throw new Error(`Type ${word} to confirm. Nothing was queued.`);
       }
+      // Monitoring is set now rather than queued: it is reversible in a click, and the
+      // point of it is that Sonarr behaves as you want between now and the run.
+      const wanted = context.tree && context.tree();
+      const changes = wanted ? wanted.changes() : { monitor: [], unmonitor: [] };
+      let done = '';
+      if (changes.monitor.length || changes.unmonitor.length) {
+        const applied = await api('set-monitored', Object.assign({ rule_id: rule.id }, changes),
+                                  'Setting monitoring in Sonarr…');
+        const parts = [];
+        if (applied.monitored) parts.push(`${plural(applied.monitored, 'episode')} monitored`);
+        if (applied.unmonitored) parts.push(`${plural(applied.unmonitored, 'episode')} unmonitored`);
+        done = parts.length ? ` ${parts.join(', ')} in Sonarr.` : '';
+      }
       const target = (settings.rules || []).find((other) => other.id === rule.id);
       target.queue = Object.assign({}, target.queue,
                                    { removal: { action: context.action.value, created_at: new Date().toISOString() } });
-      await saveSettings('Queued. It will be applied at the next run, and can be undone until then.');
+      await saveSettings('Queued. It will be applied at the next run, and can be undone until then.' + done);
     }, 'Queue removal');
   }
 
