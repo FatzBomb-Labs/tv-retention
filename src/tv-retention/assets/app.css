@@ -660,3 +660,8 @@
   .tvr-series-list { height: auto; overflow: visible; }
   .tvr-series-shell.open .tvr-details { height: auto; }
 }
+
+/* What a one-time action would actually touch, said in the colour of a fact rather than a
+   warning: it is information, not a caution. */
+.tvr-once-count { color: var(--tvr-action); font-size: 11.5px; margin: 0 0 6px 42px; }
+.tvr-once-count:empty { display: none; }

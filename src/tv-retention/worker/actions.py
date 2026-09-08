@@ -202,6 +202,56 @@ def action_acknowledge(settings, request):
             'summary': alerts.summarise(visible_alerts(settings, health))}
 
 
+def action_scope_counts(settings, request):
+    """What the one-time passes would touch, without touching anything.
+
+    Answered against the draft in the editor rather than the saved rule, so the numbers
+    move as the keep window does. From the stored reading for a series that has one; a
+    series being added has no reading yet, so its episodes are read on their own — about
+    thirty milliseconds, and only because a panel was opened.
+    """
+    draft = request.get('draft') or {}
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if rule:
+        try:
+            episodes, _, _, _ = main.episodes_for(settings, rule, offline=True)
+        except Rejected:
+            return {'known': False}
+    else:
+        instance_id = str(request.get('instance_id') or '')
+        series_id = int(request.get('series_id') or 0)
+        if not instance_id or not series_id:
+            raise Rejected('No series to count against.')
+        rule = {'id': '', 'instance_id': instance_id, 'series_id': series_id}
+        try:
+            episodes = main.client_for(settings, instance_id).episodes(series_id, files_only=False)
+        except Rejected as error:
+            return {'known': False, 'error': str(error)}
+        main.interpolate_air_dates(episodes)
+
+    # Only what the draft actually carries: a key it leaves out keeps the rule's own value
+    # rather than being overridden with nothing, which would count against no window at all.
+    overrides = {key: draft[key] for key in ('profile_id', 'keep_days', 'keep_episodes',
+                                             'keep_seasons', 'combine', 'include_specials')
+                 if key in draft}
+    active = effective_rule(dict(rule, **overrides), settings.get('profiles'))
+    frame = main.keep_frame(episodes, active, settings)
+    inside, outside = frame['in_frame'], frame['out_frame']
+    unmonitored_inside = [episode for episode in inside if not episode.get('monitored')]
+    monitored_outside = [episode for episode in outside if episode.get('monitored')]
+    previous = draft.get('previous_scope') or None
+    newly = main.newly_scoped_rows(settings, dict(rule, **active), episodes, previous) \
+        if previous else unmonitored_inside
+    return {
+        'known': True,
+        'in_scope': len(inside),
+        'in_scope_unmonitored': len(unmonitored_inside),
+        'would_monitor': len(newly),
+        'out_scope': len(outside),
+        'out_scope_monitored': len(monitored_outside),
+    }
+
+
 def action_stats(settings, request):
     """Totals, from what is already kept.
 
@@ -518,6 +568,7 @@ ACTIONS = {
     'scope-pass': action_scope_pass,
     'stats': action_stats,
     'acknowledge': action_acknowledge,
+    'scope-counts': action_scope_counts,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

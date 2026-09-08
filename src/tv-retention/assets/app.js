@@ -1584,17 +1584,55 @@
                                 false, null, { className: 'tvr-row-switch' });
       const unmonitorOut = toggle('Once, on save: unmonitor everything outside the keep window',
                                   false, null, { className: 'tvr-row-switch' });
+      // What each action would actually touch, against the window as it stands in the
+      // form. Without it the two toggles are a decision made blind.
+      const monitorCount = el('div', { className: 'tvr-once-count' });
+      const unmonitorCount = el('div', { className: 'tvr-once-count' });
       const scopeRow = el('div', { className: 'tvr-once' }, [
         el('div', { className: 'tvr-once-title', textContent: 'One-time actions' }),
         monitorNew.node,
         el('small', { textContent: 'Asks Sonarr to download any of them it does not have. '
                                    + 'Leave this off and nothing is fetched — the window simply '
                                    + 'covers them from now on.' }),
+        monitorCount,
         unmonitorOut.node,
         el('small', { textContent: 'Stops Sonarr fetching episodes the next run would delete. '
                                    + 'A run does this too, so this only closes the gap between '
                                    + 'saving and the next run.' }),
+        unmonitorCount,
       ]);
+
+      // Counted by the worker from the episodes it already holds, and re-counted when the
+      // window moves. Debounced because typing a keep value changes it on every keystroke.
+      const title = series.title || rule.series_title || 'this series';
+      let countTimer = null;
+      const refreshCounts = () => {
+        clearTimeout(countTimer);
+        countTimer = setTimeout(() => guarded('', async () => {
+          const scope = draftScope();
+          const counts = await api('scope-counts', {
+            rule_id: rule.id || '', instance_id: series.instance_id, series_id: series.series_id,
+            draft: Object.assign({}, scope, { include_specials: specials.value,
+                                              previous_scope: existing ? before : null }),
+          }, '', true);
+          if (!counts.known) {
+            monitorCount.textContent = unmonitorCount.textContent = '';
+            return;
+          }
+          monitorCount.textContent = counts.would_monitor
+            ? `${counts.would_monitor}/${counts.in_scope} episodes in ${title}'s keep scope are currently not monitored`
+            : `Nothing to monitor — every episode in ${title}'s keep scope is already monitored`;
+          // A widened rule only offers the part the widening added; the rest were
+          // unmonitored by hand, and this pass leaves those alone.
+          const byHand = counts.in_scope_unmonitored - counts.would_monitor;
+          if (byHand > 0) {
+            monitorCount.textContent += ` (${byHand} more were unmonitored by hand and are left alone)`;
+          }
+          unmonitorCount.textContent = counts.out_scope_monitored
+            ? `${counts.out_scope_monitored}/${counts.out_scope} episodes out of ${title}'s keep scope are still monitored`
+            : `Nothing to unmonitor — nothing outside ${title}'s keep scope is monitored`;
+        }), 250);
+      };
       const draftScope = () => ({
         profile_id: presetSelect.value || '',
         keep_days: presetSelect.value ? null : (conditions.days.value || null),
@@ -1616,8 +1654,11 @@
         });
       };
       [monitoring, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
-       conditions.combine].forEach((input) => input.addEventListener('change', updateScopeRow));
-      setTimeout(updateScopeRow, 0);
+       conditions.combine, specials].forEach((input) => {
+        input.addEventListener('change', () => { updateScopeRow(); refreshCounts(); });
+        input.addEventListener('input', refreshCounts);
+      });
+      setTimeout(() => { updateScopeRow(); refreshCounts(); }, 0);
 
       body.append(identity);
       // What the next run would do to this series, above the settings that decide it.

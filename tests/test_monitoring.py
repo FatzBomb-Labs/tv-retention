@@ -306,3 +306,59 @@ class ScopePassApplies(unittest.TestCase):
         # One write, no reads: the episodes are already in hand from the last sync.
         self.main.scope_pass(self.settings, self.rule, monitor_new=True, unmonitor_outside=True)
         self.assertTrue(all(kind in ('set', 'search') for kind, _, _ in self.calls))
+
+
+class ScopeCounts(unittest.TestCase):
+    """What the one-time actions say they would touch, before anything is touched."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        import actions, main, store
+        from core import validate_settings
+        self.actions, self.main = actions, main
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = validate_settings({
+            'instances': [{'id': 'i1', 'name': 'S', 'url': 'http://s:8989', 'api_key': 'a' * 32}],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                       'series_title': 'A', 'keep_days': 30}],
+        })
+        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
+        self.rule = self.settings['rules'][0]
+        self.rule['match_status'] = 'matched'
+        episodes = [
+            {'episode_id': n, 'season': 1, 'episode': n, 'title': f'E{n}', 'has_file': True,
+             'monitored': monitored, 'size': 1, 'path': f'/tv/S01E{n:02d}.mkv',
+             'air_date': (dt.date.today() - dt.timedelta(days=days)).isoformat(),
+             'air_source': 'sonarr', 'date_added': ''}
+            for n, days, monitored in ((1, 5, False), (2, 40, False), (3, 300, True))
+        ]
+        store.store_episodes(self.settings, self.rule, episodes, {'series_id': 1, 'title': 'A'})
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_it_counts_against_the_window_in_the_form_not_the_saved_one(self):
+        narrow = self.actions.action_scope_counts(self.settings, {'rule_id': 'r1', 'draft': {'keep_days': 10}})
+        wide = self.actions.action_scope_counts(self.settings, {'rule_id': 'r1', 'draft': {'keep_days': 500}})
+        self.assertEqual(narrow['in_scope'], 1)
+        self.assertEqual(wide['in_scope'], 3)
+        self.assertGreater(wide['out_scope'], 0 - 1)
+
+    def test_an_absent_draft_value_keeps_the_rule_s_own(self):
+        """Overriding with nothing counted against no window at all — everything in scope."""
+        counts = self.actions.action_scope_counts(self.settings, {'rule_id': 'r1', 'draft': {}})
+        self.assertEqual(counts['in_scope'], 1, 'the saved 30 day window should still apply')
+
+    def test_it_counts_both_directions(self):
+        counts = self.actions.action_scope_counts(self.settings, {'rule_id': 'r1', 'draft': {'keep_days': 10}})
+        self.assertEqual(counts['in_scope_unmonitored'], 1)     # episode 1, inside, unmonitored
+        self.assertEqual(counts['out_scope_monitored'], 1)      # episode 3, outside, monitored
+
+    def test_a_series_never_read_says_so_rather_than_guessing(self):
+        self.settings['rules'].append({'id': 'r2', 'instance_id': 'i1', 'series_id': 2,
+                                       'path': '/tv/B', 'enabled': True, 'keep_days': 30,
+                                       'match_status': 'matched'})
+        self.assertEqual(self.actions.action_scope_counts(self.settings,
+                                                          {'rule_id': 'r2', 'draft': {}}),
+                         {'known': False})
