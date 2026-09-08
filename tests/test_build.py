@@ -469,3 +469,22 @@ class Interface(unittest.TestCase):
         # squashed oval rather than a badge.
         self.assertRegex(self.css, r'\.tvr-tab-badge \{[^}]*height: 18px')
         self.assertRegex(self.css, r'\.tvr-tab-badge \{[^}]*min-width: 18px')
+
+    def test_the_manifest_does_not_advertise_what_was_removed(self):
+        """The first thing a new install prints has to be true.
+
+        The changelog on the Plugins page still described path mapping, deletion guards,
+        re-monitoring and dry run — four features removed across three versions — and the
+        install message named a mode the plugin had stopped having.
+        """
+        import xml.etree.ElementTree as ElementTree
+        root = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot()
+        # The changelog and the install message only — never the embedded package, or a
+        # failure here would print a megabyte of base64 at whoever ran the tests.
+        spoken = (root.findtext('CHANGES') or '')
+        for node in root.iter('FILE'):
+            if node.get('Method') == 'install':
+                spoken += node.findtext('INLINE') or ''
+        for gone in ('path mapping', 'deletion guards', 're-monitoring', 'Dry run is ON'):
+            self.assertNotIn(gone, spoken, f'the manifest still advertises {gone}')
+        self.assertIn('Test Mode', spoken)

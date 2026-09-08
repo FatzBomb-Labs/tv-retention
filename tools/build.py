@@ -29,10 +29,13 @@ DIST = ROOT / 'dist'
 INSTALL = ROOT / 'install'
 BOOT = f'/boot/config/plugins/{NAME}'
 CHANGES = (f'{VERSION}: First release. Per-show retention by days, episodes, or seasons, '
-           'set directly or through named presets; mandatory Sonarr matching across '
-           'multiple instances with auto-detected root path mapping; optional re-monitoring '
-           'when a rule is widened; scheduled runs; dry run; deletion guards; optional TMDB '
-           'air dates; run journal and history.')
+           'set directly or through named presets, applied through Sonarr so its database '
+           'and monitoring stay correct. Mandatory Sonarr matching across multiple '
+           'instances; two monitoring modes, defaulting to the one that never starts a '
+           'download; changes queue on a series card and are undoable until a run applies '
+           'them; one daily sync with Sonarr, which everything else reads from; Test Mode '
+           'on a new install, so a schedule reports without changing anything; optional '
+           'TMDB air dates; run journal and history.')
 
 
 def build_package() -> str:
@@ -97,7 +100,8 @@ chmod 755 /usr/local/emhttp/plugins/{NAME}/event/*
 # Republish the schedule from the saved settings; a fresh install has none, and an
 # upgrade keeps whatever the operator had configured.
 /usr/bin/python3 /usr/local/emhttp/plugins/{NAME}/worker/main.py resume || true
-echo 'TV Retention installed. Open Tools > TV Retention. Dry run is ON and no schedule is set.'
+echo 'TV Retention installed. Open Tools > TV Retention. Test Mode is on and no schedule is'
+echo 'set, so nothing is deleted until you choose a time and turn Test Mode off.'
 '''
 
     remove = ET.SubElement(plugin, 'FILE', Run='/bin/bash', Method='remove')
