@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 6
+SETTINGS_VERSION = 7
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -74,8 +74,24 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v5(document))
     if version < 6:
         document.update(_to_v6(document))
+    if version < 7:
+        document.update(_to_v7(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v7(document: dict) -> dict:
+    """Two schedules described work the plugin now does on its own.
+
+    The series-match check verified that every rule still resolved to one Sonarr series —
+    which every check already does — and it was born comparing this server's mount paths
+    against Sonarr's, back when the plugin had mount paths. The connectivity interval
+    described a question the tick asks anyway, and asks again before anything that needs
+    the answer. Both were controls for work that happens regardless, which is two ways to
+    configure something into being wrong. Only the reading lifetime survives.
+    """
+    health = {'ttl_hours': int((document.get('health') or {}).get('ttl_hours', 24) or 24)}
+    return {'health': health}
 
 
 def _to_v6(document: dict) -> dict:

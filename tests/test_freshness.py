@@ -557,3 +557,57 @@ class NewSeries(unittest.TestCase):
             {'id': 4, 'title': 'X', 'sortTitle': 'x', 'added': '2026-09-01T00:00:00Z',
              'path': '/tv/X', 'statistics': {}}]
         self.assertEqual(client.series()[0]['added'], '2026-09-01T00:00:00Z')
+
+
+class Backstop(unittest.TestCase):
+    """The full read, spread across the ticks instead of scheduled at an hour."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = validate_settings({
+            'instances': [INSTANCE],
+            'rules': [{'id': f'r{n}', 'instance_id': 'i1', 'series_id': n, 'path': f'/tv/{n}',
+                       'keep_days': 30} for n in range(1, 5)],
+        })
+        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
+        self.checked = []
+        self.original = main.check_one_rule
+        main.check_one_rule = lambda settings, rule, *a, **k: self.checked.append((rule['id'], k.get('force')))
+
+    def tearDown(self):
+        main.check_one_rule = self.original
+        self.temp.cleanup()
+
+    def store(self, ages):
+        old = lambda hours: (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)).isoformat()
+        main.write_cache(self.settings, 'health.json',
+                         {'rules': {rule_id: {'read_at': old(hours)} for rule_id, hours in ages.items()}})
+
+    def test_a_fresh_library_is_left_alone(self):
+        self.store({'r1': 1, 'r2': 2, 'r3': 3, 'r4': 4})
+        self.assertEqual(main.sweep_stale(self.settings), 0)
+        self.assertEqual(self.checked, [])
+
+    def test_only_readings_past_the_ttl_are_re_read(self):
+        self.store({'r1': 1, 'r2': 30, 'r3': 3, 'r4': 40})
+        self.assertEqual(main.sweep_stale(self.settings), 2)
+        self.assertEqual(sorted(rule for rule, _ in self.checked), ['r2', 'r4'])
+        self.assertTrue(all(force for _, force in self.checked), 'the backstop must actually read')
+
+    def test_the_oldest_go_first_and_only_a_few_per_tick(self):
+        # Spread, not a spike: a library where everything aged out at once is covered over
+        # several minutes rather than in one five-in-the-morning sweep.
+        self.store({'r1': 30, 'r2': 90, 'r3': 60, 'r4': 40})
+        self.assertEqual(main.sweep_stale(self.settings, limit=2), 2)
+        self.assertEqual([rule for rule, _ in self.checked], ['r2', 'r3'])
+
+    def test_a_series_never_read_is_the_most_overdue_there_is(self):
+        self.store({'r1': 30})
+        main.sweep_stale(self.settings, limit=1)
+        self.assertEqual([rule for rule, _ in self.checked], ['r2'])
+
+    def test_a_disabled_rule_is_never_swept(self):
+        self.settings['rules'][1]['enabled'] = False
+        self.store({'r1': 30, 'r2': 90, 'r3': 1, 'r4': 1})
+        main.sweep_stale(self.settings)
+        self.assertEqual([rule for rule, _ in self.checked], ['r1'])

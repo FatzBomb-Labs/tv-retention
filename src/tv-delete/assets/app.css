@@ -11,6 +11,11 @@
 #tv-delete h1 { font-size: 22px; margin: 0 0 2px; }
 #tv-delete .tvd-h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em;
   margin: 22px 0 8px; opacity: .75; }
+/* The heading owns the left edge and what belongs to it sits inside — so a settings page
+   reads as sections rather than as one column of equal cards. */
+.tvd-panel .tvd-h2 + .tvd-card, .tvd-panel .tvd-h2 + .tvd-instances,
+.tvd-panel .tvd-h2 + .tvd-card + .tvd-actions, .tvd-panel .tvd-instances + .tvd-actions,
+.tvd-panel .tvd-h2 + .tvd-card + .tvd-card { margin-left: 14px; }
 #tv-delete .tvd-card-title { font-size: 13px; margin: 10px 0 2px; }
 #tv-delete p { margin: 4px 0; }
 

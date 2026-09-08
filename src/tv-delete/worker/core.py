@@ -19,7 +19,7 @@ from pathlib import Path
 import schedules
 
 VERSION = '2026.09.06'
-SETTINGS_VERSION = 6
+SETTINGS_VERSION = 7
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -49,15 +49,11 @@ DEFAULTS = {
                  'frequency': 'daily', 'minute': 0, 'hour': 4,
                  'weekday': 0, 'monthly_mode': 'day', 'monthly_day': 1,
                  'monthly_weekday': '', 'cron': '0 4 * * *'},
-    'health': {
-        # Verifies every rule still resolves to one Sonarr series at the expected path.
-        'series_match': {'enabled': True, 'frequency': 'daily', 'minute': 0, 'hour': 5,
-                         'weekday': 0, 'monthly_mode': 'day', 'monthly_day': 1,
-                         'monthly_weekday': '', 'cron': '0 5 * * *'},
-        # How often to confirm Sonarr is reachable. Also checked before any job that needs it.
-        'connectivity_seconds': 300,
-        'ttl_hours': 24,
-    },
+    # How old a reading may get before it is read again. The only knob here: the sweep
+    # that honours it is spread across the ticks, and confirming Sonarr answers happens on
+    # its own fixed interval and before anything that needs it — neither was ever a
+    # decision anyone could make better than the plugin can.
+    'health': {'ttl_hours': 24},
     'catalogue_ttl_minutes': 60,
     'instances': [],
     # Named retention presets. A rule either points at one, or carries its own values.
@@ -500,15 +496,7 @@ def validate_settings(raw, previous=None) -> dict:
         'schedule': dict(validate_schedule(schedule_raw, 'Schedule'),
                          test_mode=_flag(schedule_raw.get('test_mode', True))),
         'health': {
-            # Always on: a rule that no longer resolves to a Sonarr series must not be
-            # allowed to act, so the check that notices is not something to switch off.
-            # Only its cadence is configurable, and it runs before any job regardless.
-            'series_match': dict(validate_schedule(health_raw.get('series_match') or
-                                                   DEFAULTS['health']['series_match'],
-                                                   'Series match schedule'), enabled=True),
-            'connectivity_seconds': _whole(health_raw.get('connectivity_seconds', 300),
-                                           'Connectivity check', 30, 86400, allow_none=False),
-            'ttl_hours': _whole(health_raw.get('ttl_hours', 24), 'Health cache lifetime', 1, 720, allow_none=False),
+            'ttl_hours': _whole(health_raw.get('ttl_hours', 24), 'Reading lifetime', 1, 720, allow_none=False),
         },
         'catalogue_ttl_minutes': _whole(raw.get('catalogue_ttl_minutes', 60), 'Series list cache', 1, 10080, allow_none=False),
         'instances': instances,

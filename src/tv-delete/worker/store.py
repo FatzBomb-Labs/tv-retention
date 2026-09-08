@@ -346,7 +346,6 @@ def job_state(settings: dict) -> dict:
     """When each scheduled job last ran, and anything waiting to run."""
     stored = read_cache(settings, 'jobs.json')
     stored.setdefault('last_run', None)
-    stored.setdefault('last_series_match', None)
     stored.setdefault('last_connectivity', None)
     stored.setdefault('pending_run', None)
     return stored

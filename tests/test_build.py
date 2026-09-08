@@ -458,7 +458,7 @@ class Interface(unittest.TestCase):
         wired = set(re.findall(r"'(tvd-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
                                r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
                                r"match-hour|match-minute|connectivity))'", self.js))
-        panel = self.html.split('id="tvd-panel-schedule"')[1].split('</section>')[0]
+        panel = self.html.split('<h2 class="tvd-h2">Schedule</h2>')[1].split('<h2')[0]
         for identifier in re.findall(r'id="(tvd-[a-z-]+)"', panel):
             if identifier in ('tvd-schedule-summary', 'tvd-match-summary') or 'field' in identifier:
                 continue

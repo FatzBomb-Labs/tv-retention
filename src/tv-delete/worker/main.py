@@ -43,6 +43,9 @@ from tmdb import TMDB, TMDBError, fill_air_dates
 MAX_BROWSE_ENTRIES = 500
 # Every minute: the tick is cheap, and a finer resolution means an hourly schedule set to
 # :07 actually fires at :07 rather than at the next multiple of five.
+# Sonarr is confirmed reachable this often, and before anything that needs it.
+CONNECTIVITY_SECONDS = 300
+
 TICK_CRON = '* * * * *'
 
 
@@ -787,6 +790,33 @@ def log_settings_change(settings: dict, previous: dict, updated: dict) -> None:
             log_line(settings, 'info', f'{key} settings saved')
 
 
+def sweep_stale(settings: dict, limit: int = 5) -> int:
+    """Re-read the readings that have gone longest without one, a few per tick.
+
+    This is the only thing that catches an episode monitored or unmonitored by hand in
+    Sonarr: it is not a history event, and no cheap endpoint reveals it. It used to be a
+    scheduled full sweep with its own frequency, hour and minute in the interface — three
+    controls for "do not let a reading get too old", which is what the TTL already says.
+    """
+    health = load_health(settings)
+    ttl = int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
+    overdue = []
+    for rule in settings.get('rules', []):
+        if not rule.get('enabled'):
+            continue
+        entry = (health.get('rules') or {}).get(rule['id']) or {}
+        age = age_seconds(entry.get('read_at') or entry.get('checked_at'))
+        if age is None or age > ttl:
+            overdue.append((age if age is not None else float('inf'), rule))
+    if not overdue:
+        return 0
+    overdue.sort(key=lambda pair: -pair[0])
+    for _, rule in overdue[:limit]:
+        with contextlib.suppress(Rejected, SonarrError):
+            check_one_rule(settings, rule, force=True)
+    return len(overdue[:limit])
+
+
 def watch_and_recheck(settings: dict, min_interval: int = 30, limit: int = 25) -> int:
     """Ask what changed, re-read only that, and say so if it needs saying.
 
@@ -1216,7 +1246,7 @@ def tick() -> int:
     state = job_state(settings)
     actions = []
 
-    connectivity = int((settings.get('health') or {}).get('connectivity_seconds', 300))
+    connectivity = CONNECTIVITY_SECONDS
     if age_seconds(state.get('last_connectivity')) is None or \
             age_seconds(state.get('last_connectivity')) >= connectivity:
         reachable = check_connectivity(settings)
@@ -1251,14 +1281,14 @@ def tick() -> int:
         if added:
             actions.append(f'sonarr added {len(added)} series')
 
-    match_schedule = (settings.get('health') or {}).get('series_match') or {}
-    if schedules.is_due(match_schedule, now, state.get('last_series_match')):
-        actions.append('series match check')
-        state['last_series_match'] = now_iso()
-        save_job_state(settings, state)
-        with contextlib.suppress(Rejected):
-            with run_lock():
-                run_health_check(scheduled=True)
+    # The backstop, spread rather than scheduled. Sonarr's history cannot report monitoring
+    # toggled by hand in its own UI, so a series has to be read outright now and then; this
+    # re-reads whatever has gone longest without one, a few at a time, so every series is
+    # covered within its TTL without a five-in-the-morning spike or a setting to get wrong.
+    with contextlib.suppress(Rejected, SonarrError):
+        swept = sweep_stale(settings)
+        if swept:
+            actions.append(f'read {swept} series that had gone stale')
 
     if schedules.is_due(settings.get('schedule') or {}, now, state.get('last_run')):
         if not sonarr_reachable(settings):

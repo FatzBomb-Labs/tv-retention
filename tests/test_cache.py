@@ -116,17 +116,20 @@ class SpecialsSettings(unittest.TestCase):
         with self.assertRaises(Rejected):
             validate_settings(document)
 
-    def test_the_series_match_schedule_is_validated(self):
-        with self.assertRaises(Rejected):
-            validate_settings({'health': {'series_match': {'enabled': True, 'frequency': 'never'}}})
+    def test_the_only_health_setting_left_is_how_old_a_reading_may_get(self):
+        """The two schedules that went described work the plugin does regardless.
 
-    def test_the_series_match_check_cannot_be_switched_off(self):
-        # A rule that no longer resolves to a series must not act, so the check that
-        # notices is not optional. Only its cadence is.
-        self.assertTrue(validate_settings({})['health']['series_match']['enabled'])
-        off = validate_settings({'health': {'series_match': {'enabled': False, 'frequency': 'weekly'}}})
-        self.assertTrue(off['health']['series_match']['enabled'])
-        self.assertEqual(off['health']['series_match']['frequency'], 'weekly')
+        Verifying a rule still resolves to one series is what every check does; confirming
+        Sonarr answers is what the tick does, and again before anything that needs it.
+        Controls for work that happens anyway are two more ways to be wrong.
+        """
+        health = validate_settings({})['health']
+        self.assertEqual(sorted(health), ['ttl_hours'])
+
+    def test_a_stored_schedule_from_before_is_dropped_rather_than_kept(self):
+        health = validate_settings({'health': {'series_match': {'frequency': 'weekly'},
+                                               'connectivity_seconds': 900, 'ttl_hours': 12}})['health']
+        self.assertEqual(health, {'ttl_hours': 12}, 'the lifetime survives, the schedules do not')
 
 
 if __name__ == '__main__':

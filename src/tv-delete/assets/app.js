@@ -1590,12 +1590,6 @@
     $('tvd-cron').value = schedule.cron || '0 4 * * *';
     $('tvd-schedule-summary').textContent = snapshot.schedule_text || 'Off';
 
-    const match = (settings.health || {}).series_match || {};
-    $('tvd-match-freq').value = ['hourly', 'daily', 'weekly'].includes(match.frequency) ? match.frequency : 'daily';
-    options($('tvd-match-hour'), range(0, 23, true), match.hour ?? 5);
-    options($('tvd-match-minute'), range(0, 59, true), match.minute ?? 0);
-    $('tvd-match-summary').textContent = snapshot.series_match_text || '';
-    $('tvd-connectivity').value = String((settings.health || {}).connectivity_seconds || 300);
     applyScheduleVisibility();
   }
 
@@ -1636,22 +1630,12 @@
   // Programmatic assignment does not fire `change`, so rendering never triggers a save.
   async function saveScheduleNow() {
     settings.schedule = collectSchedule();
-    settings.health = Object.assign({}, settings.health, {
-      series_match: Object.assign({}, (settings.health || {}).series_match, {
-        enabled: true,
-        frequency: $('tvd-match-freq').value,
-        hour: $('tvd-match-hour').value,
-        minute: $('tvd-match-minute').value,
-      }),
-      connectivity_seconds: $('tvd-connectivity').value,
-    });
     await saveSettings(null, true);
     $('tvd-schedule-summary').textContent = snapshot.schedule_text || 'Off';
   }
 
   ['tvd-schedule-enabled', 'tvd-test-mode', 'tvd-freq', 'tvd-minute', 'tvd-hour', 'tvd-weekday',
-   'tvd-monthly-mode', 'tvd-monthly-day', 'tvd-monthly-weekday', 'tvd-cron',
-   'tvd-match-freq', 'tvd-match-hour', 'tvd-match-minute', 'tvd-connectivity'
+   'tvd-monthly-mode', 'tvd-monthly-day', 'tvd-monthly-weekday', 'tvd-cron'
   ].forEach((id) => $(id).addEventListener('change', () => guarded('', saveScheduleNow)));
 
   // -- Sonarr instances --------------------------------------------------
@@ -1842,7 +1826,6 @@
     settings = data.settings;
     snapshot.settings = settings;
     snapshot.schedule_text = data.schedule_text || snapshot.schedule_text;
-    snapshot.series_match_text = data.series_match_text || snapshot.series_match_text;
     render();
     if (message) notice(message, 'ok');
   }

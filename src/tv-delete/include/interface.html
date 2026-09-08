@@ -30,7 +30,6 @@
   <button type="button" class="active" data-tab="series">Series <span class="tvd-tab-badge" id="tvd-series-badge" hidden></span></button>
   <button type="button" data-tab="alerts">Alerts <span class="tvd-tab-badge" id="tvd-tab-badge" hidden></span></button>
   <button type="button" data-tab="presets">Presets</button>
-  <button type="button" data-tab="schedule">Schedule</button>
   <button type="button" data-tab="settings">Settings</button>
   <button type="button" data-tab="history">Job History</button>
   <button type="button" data-tab="log">Live Log</button>
@@ -93,7 +92,10 @@
 </section>
 
 <!-- ------------------------------------------------------------------ -->
-<section id="tvd-panel-schedule" class="tvd-panel" hidden>
+
+<!-- ------------------------------------------------------------------ -->
+<section id="tvd-panel-settings" class="tvd-panel" hidden>
+  <h2 class="tvd-h2">Schedule</h2>
   <div class="tvd-card">
     <div class="tvd-card-head">
       <h2 class="tvd-card-title">Scheduled run</h2>
@@ -129,43 +131,6 @@
     <p class="tvd-lede"><small>A run missed while the server was off is caught up at the next opportunity rather than skipped.</small></p>
   </div>
 
-  <div class="tvd-card">
-    <div class="tvd-card-head">
-      <h2 class="tvd-card-title">Series match check</h2>
-      <span class="tvd-chip on">Always on</span>
-    </div>
-    <p class="tvd-lede">Verifies every series still resolves to one Sonarr series at the expected path. A series that fails is flagged and excluded from runs until it is fixed. This also runs automatically before any job.</p>
-    <div class="tvd-row">
-      <label class="tvd-field"><span>How often</span>
-        <select id="tvd-match-freq">
-          <option value="hourly">Hourly</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-        </select>
-      </label>
-      <label class="tvd-field"><span>Hour</span><select id="tvd-match-hour"></select></label>
-      <label class="tvd-field"><span>Minute</span><select id="tvd-match-minute"></select></label>
-    </div>
-    <p class="tvd-lede" id="tvd-match-summary"></p>
-  </div>
-
-  <div class="tvd-card">
-    <h2 class="tvd-card-title">Sonarr connection</h2>
-    <p class="tvd-lede">Polls each enabled instance so an outage is noticed rather than discovered mid-run. A scheduled run that cannot reach Sonarr is held and released automatically when it answers.</p>
-    <label class="tvd-field"><span>Check every</span>
-      <select id="tvd-connectivity">
-        <option value="60">Minute</option>
-        <option value="300">5 minutes</option>
-        <option value="900">15 minutes</option>
-        <option value="3600">Hour</option>
-      </select>
-    </label>
-  </div>
-  <p class="tvd-lede"><small>Changes here save as you make them.</small></p>
-</section>
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvd-panel-settings" class="tvd-panel" hidden>
   <h2 class="tvd-h2">Sonarr instances</h2>
   <div id="tvd-instances" class="tvd-instances"></div>
   <div class="tvd-actions"><button type="button" id="tvd-add-instance" class="tvd-secondary">Add Sonarr instance</button></div>

@@ -109,7 +109,6 @@ def action_snapshot(settings, request):
         'alerts': (load_health(settings).get('alerts') or []),
         'alert_summary': alerts.summarise(load_health(settings).get('alerts')),
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
-        'series_match_text': schedules.describe((settings.get('health') or {}).get('series_match') or {}),
         'jobs': job_state(settings),
         'plan': plan_summary(settings, load_health(settings)),
         'test_mode': bool((settings.get('schedule') or {}).get('test_mode', True)),
@@ -201,7 +200,7 @@ def action_settings(settings, request):
         forget_episodes(updated, gone)
     return {'settings': redact(updated), 'schedule_active': CRON.exists(),
             'schedule_text': schedules.describe(updated.get('schedule') or {}),
-            'series_match_text': schedules.describe((updated.get('health') or {}).get('series_match') or {})}
+            }
 
 
 
