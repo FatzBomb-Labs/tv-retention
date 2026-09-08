@@ -630,20 +630,22 @@
 /* The panel takes precedence: it is what you are working on, and it was the thing being
    squeezed. The list gives way; the panel does not get cut off. */
 .tvr-series-shell.open { grid-template-columns: minmax(0, 1fr) minmax(400px, 460px); }
-.tvr-identity { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px;
-  align-items: start; padding-bottom: 8px; border-bottom: 1px solid var(--tvr-line); }
+.tvr-identity { position: relative; display: grid; grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px; align-items: start; padding-bottom: 8px; border-bottom: 1px solid var(--tvr-line); }
 .tvr-poster-panel { width: 92px; height: 138px; }
 .tvr-identity-body { display: grid; gap: 4px; align-content: start; min-width: 0; }
-.tvr-identity-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.tvr-identity-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px;
+  padding-right: 44px; }
 .tvr-identity-name { min-width: 0; }
-.tvr-identity-switch { margin-left: auto; flex: none; gap: 0; }
+.tvr-identity-controls { position: absolute; top: 0; right: 0; display: grid; gap: 2px;
+  justify-items: center; z-index: 1; }
+.tvr-identity-switch { flex: none; gap: 0; }
+#tv-retention button.tvr-identity-refresh { padding: 2px 6px; font-size: 12px; }
+#tv-retention button.tvr-identity-refresh:disabled { opacity: .35; cursor: progress; }
 .tvr-identity-line { font-size: 12px; opacity: .8; line-height: 1.35; }
 .tvr-identity-next { opacity: .95; }
 .tvr-identity-plan { margin-top: 2px; }
-.tvr-identity-read { display: flex; align-items: baseline; gap: 8px; font-size: 11px; opacity: .55; }
-#tv-retention button.tvr-linky { border: none; background: none; padding: 0; font-size: 11px;
-  color: var(--tvr-action); text-decoration: underline; }
-#tv-retention button.tvr-linky:hover { background: none; filter: brightness(1.2); }
+.tvr-identity-read { font-size: 11px; opacity: .55; }
 @media (max-width: 1250px) { .tvr-series-shell.open { grid-template-columns: 1fr; } }
 
 /* Three columns that scroll independently, under a header that does not scroll at all.

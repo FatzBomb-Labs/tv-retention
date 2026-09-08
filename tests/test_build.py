@@ -317,7 +317,7 @@ class Interface(unittest.TestCase):
         self.assertIn('Click to disable it.', block)
         self.assertIn('Click to enable it.', block)
         self.assertIn("aria-label", block)
-        self.assertIn('.tvr-identity-switch { margin-left: auto', self.css)
+        self.assertIn('.tvr-identity-controls { position: absolute; top: 0; right: 0;', self.css)
 
     def test_the_editor_does_not_repeat_what_the_panel_already_says(self):
         """An ended series with no episodes said the same four facts four times.
@@ -869,6 +869,23 @@ class Interface(unittest.TestCase):
         self.assertIn('tvr-form-banner', top)
         self.assertIn("existing ? 'Edit series' : 'Add series'", top)
 
+    def test_re_reading_a_series_is_an_icon_with_the_other_things_it_can_be_told(self):
+        """Beside the switch, not on a line of prose under the facts.
+
+        Offered while adding too: there is no rule to check, but the counts behind the
+        panel come straight from Sonarr, and a series being added is the one most likely
+        to have moved since the catalogue was read.
+        """
+        self.assertIn("className: 'tvr-icon-button tvr-identity-refresh'", self.js)
+        self.assertIn("[enabled.node, refresh]", self.js)
+        block = self.js.split('const refresh = el(')[1].split('const controls =')[0]
+        self.assertIn('if (existing) {', block)          # a rule is re-checked
+        self.assertIn('refreshCounts();', block)         # everything else is re-counted
+        self.assertNotIn('tvr-linky', self.js)           # the text link it replaced
+        self.assertNotIn('tvr-linky', self.css)
+        # Out of flow, so stacking two controls costs the title no height.
+        self.assertIn('.tvr-identity-controls { position: absolute', self.css)
+
     def test_the_form_does_not_shadow_the_map_of_readings(self):
         """`monitoring` is the module's readings by rule id, and was also the control.
 
@@ -880,7 +897,7 @@ class Interface(unittest.TestCase):
         form = self.js.split('function ruleForm')[1].split('\n  // -- the details pane')[0]
         self.assertNotIn('const monitoring =', form)
         self.assertIn('const monitorMode = options(', form)
-        self.assertIn('const reading = monitoring[rule.id] || {};', form)
+        self.assertIn('const reading = existing ? (monitoring[rule.id] || {}) : {};', form)
 
     def test_only_the_settings_scroll(self):
         """The series and its plan are what the settings are being changed *about*.

@@ -1760,18 +1760,50 @@
                           textContent: plan ? 'Nothing scheduled for the next run'
                                             : 'Not read from Sonarr yet' }));
       };
-      if (existing) {
-        const reading = monitoring[rule.id] || {};
-        sayPlan(reading.plan);
-        const reread = el('button', { type: 'button', className: 'tvr-linky',
-                                      textContent: 'Re-read from Sonarr' });
-        reread.addEventListener('click', () => queueChecks([rule.id], true));
-        readLine.hidden = false;
-        readLine.append(el('span', { textContent: reading.read_at || reading.checked_at
-                                       ? `Sonarr read ${ago(reading.read_at || reading.checked_at)}` : '' }),
-                        reread);
-      }
+      // The age of the reading, and nothing else on the line: the button that renews it
+      // sits with the other thing this series can be told to do.
+      const readText = el('span');
+      const sayRead = () => {
+        const reading = existing ? (monitoring[rule.id] || {}) : {};
+        const stamp = reading.read_at || reading.checked_at;
+        readText.textContent = stamp ? `Sonarr read ${ago(stamp)}` : '';
+        readLine.hidden = !readText.textContent;
+      };
+      readLine.append(readText);
+      sayRead();
+      if (existing) sayPlan((monitoring[rule.id] || {}).plan);
+
+      // Offered while adding too. There it has no rule to check, but the counts and the
+      // episode list behind them come straight from Sonarr, so it is the same question
+      // asked of the same series — and the one being added is the one most likely to have
+      // changed since the catalogue was read.
+      const refresh = el('button', { type: 'button', className: 'tvr-icon-button tvr-identity-refresh',
+                                     title: 'Re-read this series from Sonarr' },
+                         [el('i', { className: 'fa fa-refresh' })]);
+      refresh.addEventListener('click', (event) => {
+        event.stopPropagation();
+        guarded('', async () => {
+          refresh.disabled = true;
+          try {
+            if (existing) {
+              const data = await api('check-rule', { rule_id: rule.id, force: true },
+                                     'Reading from Sonarr…', true);
+              if (data.busy) throw new Error('A run is in progress. Try again when it finishes.');
+              if (data.state) monitoring[data.rule_id] = data.state;
+              applyAlerts(data.alerts);
+              renderRules();
+              sayRead();
+              sayPlan((monitoring[rule.id] || {}).plan);
+            }
+            refreshCounts();
+          } finally {
+            refresh.disabled = false;
+          }
+        });
+      });
+      const controls = el('div', { className: 'tvr-identity-controls' }, [enabled.node, refresh]);
       const identity = el('div', { className: 'tvr-identity' }, [
+        controls,
         posterNode(series, 'tvr-poster tvr-poster-panel'),
         el('div', { className: 'tvr-identity-body' }, [
           el('div', { className: 'tvr-identity-title' }, [
@@ -1782,7 +1814,6 @@
             // anyone was going.
             sonarrLink(Object.assign({}, rule, { slug: series.slug || rule.slug,
                                                  instance_id: series.instance_id })) || text(''),
-            enabled.node,
           ]),
           // The path is Sonarr's business. Nothing here is decided by it, nothing here
           // reads it, and it was the one line long enough to wrap the panel.
