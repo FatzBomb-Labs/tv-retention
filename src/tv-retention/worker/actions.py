@@ -22,7 +22,7 @@ from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   describe_selectability, effective_rule, new_id, next_episode, normalise,
                   redact, validate_settings)
 from sonarr import Sonarr, SonarrError
-from store import (CRON, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
+from store import (CRON, SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
                    read_journal, read_log, read_progress, save_settings, save_state,
                    trim_health, write_cache)
@@ -225,6 +225,32 @@ def series_episodes(settings, request):
                  if key in draft}
     active = effective_rule(dict(rule, **overrides), settings.get('profiles'))
     return rule, episodes, main.keep_frame(episodes, active, settings)
+
+
+def action_refresh_series(settings, request):
+    """Re-read one series from Sonarr, and correct the stored catalogue with it.
+
+    Everything the panel says about a series that has no rule comes from the catalogue,
+    which only the daily sync refreshes as a whole. So this is what refresh does there:
+    one series, eleven kilobytes against the catalogue's twelve megabytes, written back
+    into the stored list so the page is not left fresher than the cache behind it.
+    """
+    instance_id = str(request.get('instance_id') or '')
+    series_id = int(request.get('series_id') or 0)
+    if not instance_id or not series_id:
+        raise Rejected('No series to read.')
+    series = main.client_for(settings, instance_id).series_one(series_id)
+    cache = read_cache(settings, 'catalogue.json')
+    entry = cache.get(instance_id) or {}
+    # Only into a list this mapping produced. Writing one new-shaped series into an old
+    # entry would leave the cache half in each shape, which is the failure SCHEMA exists
+    # to prevent.
+    if entry.get('schema') == SCHEMA and isinstance(entry.get('series'), list):
+        entry['series'] = [series if other.get('series_id') == series_id else other
+                           for other in entry['series']]
+        cache[instance_id] = entry
+        write_cache(settings, 'catalogue.json', cache)
+    return {'series': series, 'read_at': now_iso()}
 
 
 def action_episodes(settings, request):
@@ -676,6 +702,7 @@ ACTIONS = {
     'stats': action_stats,
     'acknowledge': action_acknowledge,
     'scope-counts': action_scope_counts,
+    'refresh-series': action_refresh_series,
     'episodes': action_episodes,
     'set-monitored': action_set_monitored,
     'settings': action_settings,

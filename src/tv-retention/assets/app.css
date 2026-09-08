@@ -547,8 +547,9 @@
 .tvr-details-body { padding: 10px; display: grid; gap: 8px; }
 /* Thin, and the pane's own: it names what the pane holds rather than what the form does,
    so it does not change under you when the same pane switches from adding to editing. */
-.tvr-details-head { padding: 5px 6px 5px 10px; font-size: 11px; letter-spacing: .06em;
+.tvr-details-head { padding: 3px 5px 3px 10px; font-size: 11px; letter-spacing: .06em;
   text-transform: uppercase; opacity: .75; }
+#tv-retention .tvr-details-head button.tvr-icon-button { padding: 3px 6px; font-size: 12px; }
 .tvr-details-head h3 { font-size: 11px; font-weight: 600; letter-spacing: inherit;
   text-transform: inherit; line-height: 1.1; }
 .tvr-details-head-main { display: grid; gap: 0; min-width: 0; }
@@ -559,7 +560,9 @@
 /* The form's own heading, under the series it is about. */
 .tvr-form-banner { font-size: 12px; font-weight: 600; letter-spacing: .04em;
   text-transform: uppercase; opacity: .7; margin-top: 2px; }
-.tvr-details .tvr-actions { padding: 10px; border-top: 1px solid var(--tvr-line); margin: 0; }
+.tvr-details .tvr-actions { padding: 7px 10px; border-top: 1px solid var(--tvr-line); margin: 0;
+  gap: 8px; }
+#tv-retention .tvr-details .tvr-actions button { padding: 5px 12px; }
 .tvr-details-facts { font-size: 12px; opacity: .8; }
 .tvr-details-overview { font-size: 12px; opacity: .7; margin: 0; }
 #tv-retention .tvr-details .tvr-h3 { margin: 6px 0 2px; }
@@ -637,7 +640,7 @@
    squeezed. The list gives way; the panel does not get cut off. */
 .tvr-series-shell.open { grid-template-columns: minmax(0, 1fr) minmax(400px, 460px); }
 .tvr-identity { position: relative; display: grid; grid-template-columns: 92px minmax(0, 1fr);
-  gap: 10px; align-items: start; padding-bottom: 8px; border-bottom: 1px solid var(--tvr-line); }
+  gap: 10px; align-items: start; padding-bottom: 6px; border-bottom: 1px solid var(--tvr-line); }
 .tvr-poster-panel { width: 92px; height: 138px; }
 .tvr-identity-body { display: grid; gap: 4px; align-content: start; min-width: 0; }
 .tvr-identity-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px;
@@ -652,6 +655,7 @@
 .tvr-monitor-count.some { color: var(--tvr-warn); }
 .tvr-monitor-count.none { color: var(--tvr-bad); }
 .tvr-identity-next { opacity: .95; }
+.tvr-identity-plan { margin-top: 3px; }
 .tvr-identity-plan .tvr-plan-list.compact { gap: 0; }
 .tvr-identity-plan .tvr-plan,
 #tv-retention .tvr-identity-plan button.tvr-plan,
@@ -691,7 +695,7 @@
    this that scrolls the whole pane anyway. */
 .tvr-series-shell.open .tvr-details { position: static; height: 100%; max-height: none;
   display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
-.tvr-details-top { padding: 8px 10px 0; display: grid; gap: 8px; }
+.tvr-details-top { padding: 7px 10px 0; display: grid; gap: 5px; }
 .tvr-series-shell.open .tvr-details-body { overflow-y: auto; overscroll-behavior: contain;
   min-height: 0; }
 @media (max-width: 1250px) {

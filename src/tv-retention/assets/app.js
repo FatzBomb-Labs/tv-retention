@@ -497,7 +497,7 @@
     const rows = changeSummary(plan);
     const list = el('div', { className: `tvr-plan-list${compact ? ' compact' : ''}` });
     // The total only earns its line when more than one kind of thing is happening.
-    if (rows.length > 1 && onOpen) {
+    if (rows.length > 1 && onOpen && !compact) {
       const total = el('button', { type: 'button', className: 'tvr-plan-total',
                                    textContent: plural(plan.actionable, 'scheduled change') });
       total.addEventListener('click', () => onOpen('all'));
@@ -1803,10 +1803,13 @@
       // the age is the reason anyone presses it. A series being added has no reading of
       // its own, so it is dated by the catalogue reading it was drawn from.
       const readText = el('span');
+      // A series with no rule is dated by the catalogue reading it was drawn from, until
+      // someone refreshes it on its own — after which it is dated by that.
+      let readAt = null;
       const sayRead = () => {
         const reading = existing ? (monitoring[rule.id] || {}) : {};
         const stamp = existing ? (reading.read_at || reading.checked_at)
-                               : (snapshot.sync || {}).synced_at;
+                               : (readAt || (snapshot.sync || {}).synced_at);
         readText.textContent = `Last refreshed: ${stamp ? ago(stamp) : 'never'}`;
       };
       readLine.append(readText);
@@ -1830,6 +1833,22 @@
             renderRules();
             sayRead();
             sayPlan((monitoring[rule.id] || {}).plan);
+          } else {
+            // No rule to check, so the catalogue entry itself is what goes stale: the
+            // title, the season count, the next airing and the artwork all come from it.
+            const data = await api('refresh-series', { instance_id: series.instance_id,
+                                                       series_id: series.series_id },
+                                   'Reading from Sonarr…', true);
+            if (data.series) {
+              Object.assign(series, data.series);
+              const row = (library || []).find(
+                (entry) => entry.series_id === series.series_id
+                           && entry.instance_id === series.instance_id);
+              if (row) Object.assign(row, data.series);
+              renderLibrary();
+            }
+            readAt = data.read_at || new Date().toISOString();
+            sayRead();
           }
           refreshCounts();
         } finally {

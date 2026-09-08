@@ -683,6 +683,24 @@ class Interface(unittest.TestCase):
         self.assertIn('font-size: 9.5px', block)
         self.assertIn('text-transform: none', block)
 
+    def test_refreshing_a_series_with_no_rule_reads_the_series(self):
+        """There is no rule to check, so the catalogue entry is what goes stale.
+
+        Re-running the counts alone left the title, the season count and the next airing
+        exactly as they were, and the age line dated by a catalogue sync that had not
+        happened — so pressing it appeared to do nothing at all.
+        """
+        block = self.js.split('const reread = (button) =>')[1].split('const controls =')[0]
+        self.assertIn("api('refresh-series'", block)
+        self.assertIn('Object.assign(series, data.series)', block)
+        self.assertIn('readAt = data.read_at', block)          # dated by its own reading
+        actions = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        self.assertIn("'refresh-series': action_refresh_series,", actions)
+
+    def test_the_panel_plan_does_not_total_three_lines_it_can_see(self):
+        # A fourth line saying the sum of the three under it.
+        self.assertIn('if (rows.length > 1 && onOpen && !compact) {', self.js)
+
     def test_a_series_with_no_rule_reports_no_monitoring(self):
         # Monitoring against a keep window is a thing a rule does, and there is no rule.
         block = self.js.split('const sayCounts = (counts) =>')[1].split('const stamp =')[0]
