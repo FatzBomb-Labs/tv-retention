@@ -488,3 +488,29 @@ class Interface(unittest.TestCase):
         for gone in ('path mapping', 'deletion guards', 're-monitoring', 'Dry run is ON'):
             self.assertNotIn(gone, spoken, f'the manifest still advertises {gone}')
         self.assertIn('Test Mode', spoken)
+
+    def test_the_tab_list_is_not_a_second_copy_of_the_markup(self):
+        """Removing a tab left a stale name in a hand-kept list.
+
+        `$('tvr-panel-schedule')` was null, setting `.hidden` on it threw, and the loop
+        that shows one panel and hides the rest died at that point — so Settings, Job
+        History, Live Log and Help, all listed after it, simply stopped appearing.
+        """
+        self.assertRegex(self.js, r"const TABS = \[\.\.\.document\.querySelectorAll\('\.tvr-tabs button'\)\]")
+
+    def test_every_tab_has_a_panel_and_every_panel_has_a_tab(self):
+        import re
+        tabs = set(re.findall(r'data-tab="([a-z]+)"', self.html))
+        panels = set(re.findall(r'<section id="tvr-panel-([a-z]+)"', self.html))
+        self.assertEqual(tabs, panels, 'a tab without a panel, or a panel nothing reaches')
+
+    def test_the_version_constant_matches_the_version_file(self):
+        """They are read from different places and must not drift.
+
+        The file drives the package name and the manifest; the constant is what the
+        interface shows and what a run records. Unraid also skips an install when the
+        manifest version matches what is registered, so a stale version means a rebuilt
+        package silently does not install.
+        """
+        import core
+        self.assertEqual(core.VERSION, (ROOT / 'VERSION').read_text().strip())

@@ -247,7 +247,12 @@
   }
 
   // -- tabs --------------------------------------------------------------
-  const TABS = ['series', 'alerts', 'presets', 'schedule', 'settings', 'history', 'log', 'help'];
+  // Read from the markup rather than listed here. A hand-kept copy disagreed with the page
+  // the moment a tab was removed: the lookup for the departed panel returned null, setting
+  // hidden on null threw, and the loop that shows one panel and hides the rest died at
+  // that point — so every tab listed after the missing one stopped appearing at all. The
+  // list the markup already carries is the one to trust.
+  const TABS = [...document.querySelectorAll('.tvr-tabs button')].map((button) => button.dataset.tab);
   document.querySelectorAll('.tvr-tabs button').forEach((button) => {
     button.addEventListener('click', () => {
       document.querySelectorAll('.tvr-tabs button').forEach((other) => other.classList.toggle('active', other === button));
