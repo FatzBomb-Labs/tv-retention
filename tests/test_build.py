@@ -671,6 +671,24 @@ class Interface(unittest.TestCase):
         self.assertIn('button.disabled = !valid || (editing.existing && now === context.saved)', self.js)
         self.assertIn("button.title = !valid ? 'Set a preset, or at least one keep value'", self.js)
 
+    def test_the_age_sits_under_the_label_without_growing_the_bar(self):
+        """It dates the whole pane, so it belongs to the pane's bar.
+
+        Set small and quiet, and neither uppercase nor tracked: two lines fit in the
+        height the icons beside them already take.
+        """
+        self.assertIn('headMain.append(context.readLine);', self.js)
+        self.assertIn('.tvr-details-head-main { display: grid', self.css)
+        block = self.css.split('.tvr-details-head .tvr-identity-read {')[1].split('}')[0]
+        self.assertIn('font-size: 9.5px', block)
+        self.assertIn('text-transform: none', block)
+
+    def test_a_series_with_no_rule_reports_no_monitoring(self):
+        # Monitoring against a keep window is a thing a rule does, and there is no rule.
+        block = self.js.split('const sayCounts = (counts) =>')[1].split('const stamp =')[0]
+        self.assertIn('if (!existing) {', block)
+        self.assertIn("textContent: plural(total, 'episode')", block)
+
     def test_adding_and_switching_on_are_two_buttons(self):
         """Two decisions, so two buttons rather than a switch that has to be found first.
 

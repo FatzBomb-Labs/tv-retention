@@ -550,7 +550,12 @@
 .tvr-details-head { padding: 5px 6px 5px 10px; font-size: 11px; letter-spacing: .06em;
   text-transform: uppercase; opacity: .75; }
 .tvr-details-head h3 { font-size: 11px; font-weight: 600; letter-spacing: inherit;
-  text-transform: inherit; }
+  text-transform: inherit; line-height: 1.1; }
+.tvr-details-head-main { display: grid; gap: 0; min-width: 0; }
+/* Small and quiet, and neither uppercase nor tracked: it is a timestamp under a label,
+   not a second label. */
+.tvr-details-head .tvr-identity-read { font-size: 9.5px; line-height: 1.15; opacity: .55;
+  text-transform: none; letter-spacing: 0; }
 /* The form's own heading, under the series it is about. */
 .tvr-form-banner { font-size: 12px; font-weight: 600; letter-spacing: .04em;
   text-transform: uppercase; opacity: .7; margin-top: 2px; }
@@ -652,9 +657,7 @@
 #tv-retention .tvr-identity-plan button.tvr-plan,
 #tv-retention .tvr-identity-plan button.tvr-plan-total,
 .tvr-identity-plan .tvr-plan-quiet { font-size: 12px; line-height: 1.35; }
-.tvr-identity-read { grid-column: 1 / -1; display: flex; align-items: center;
-  justify-content: flex-end; gap: 4px; font-size: 11px; opacity: .55; }
-.tvr-identity-read:hover { opacity: .85; }
+.tvr-identity-read { font-size: 11px; opacity: .55; white-space: nowrap; }
 @media (max-width: 1250px) { .tvr-series-shell.open { grid-template-columns: 1fr; } }
 
 /* Three columns that scroll independently, under a header that does not scroll at all.

@@ -1681,6 +1681,16 @@
         countLine.hidden = !total && !parts.length;
         if (parts.length) countLine.append(text(`${parts.join(' · ')}${total ? ' · ' : ''}`));
         if (!total) return;
+        const held = counts && counts.episodes_on_disk != null
+          ? counts.episodes_on_disk : series.episode_file_count;
+        const disk = [`${held} of ${total} episodes are on disk`];
+        if (series.size_on_disk) disk.push(`${bytes(series.size_on_disk)} on disk`);
+        if (!existing) {
+          const plain = el('span', { textContent: plural(total, 'episode'),
+                                     title: disk.join('\n') });
+          countLine.append(plain);
+          return;
+        }
         countLine.append(text(`${plural(total, 'episode')} (`), monitorCountText, text(')'));
         const monitored = counts && counts.episodes_monitored != null
           ? counts.episodes_monitored : null;
@@ -1693,10 +1703,7 @@
           + (inScopeMonitored == null || !scope ? ''
              : (counts.in_scope_unmonitored === 0 ? ' all'
                 : (inScopeMonitored > 0 ? ' some' : ' none')));
-        const held = counts && counts.episodes_on_disk != null
-          ? counts.episodes_on_disk : series.episode_file_count;
-        const lines = [`${held} of ${total} episodes are on disk`];
-        if (series.size_on_disk) lines.push(`${bytes(series.size_on_disk)} on disk`);
+        const lines = disk.slice();
         if (scope != null) {
           lines.push(`${inScopeMonitored} of ${scope} episodes inside the keep window are monitored`);
           lines.push(counts.out_scope_monitored
@@ -1847,7 +1854,6 @@
           // reads it, and it was the one line long enough to wrap the panel.
           originLine, countLine, nextLine, planLines,
         ]),
-        readLine,
       ]);
 
       // Custom first, and what a new series starts on. A preset is a decision to share
@@ -2023,7 +2029,7 @@
         }
       }
       return { presetSelect, conditions, specials, monitoring: monitorMode, monitorNew,
-               before, enabled, draftKey, saved, reread,
+               before, enabled, draftKey, saved, reread, readLine,
                tree: () => (monitorNew.input.checked ? tree : null),
                // A rule needs somewhere to keep from: a preset, or at least one value.
                valid: () => !!(presetSelect.value || conditions.days.value
@@ -2137,8 +2143,11 @@
       const refresh = el('button', { type: 'button', className: 'tvr-icon-button',
                                      title: 'Re-read this series from Sonarr' },
                          [el('i', { className: 'fa fa-refresh' })]);
-      head.append(el('h3', { textContent: 'Series details' }),
-                  el('span', { className: 'tvr-spacer' }), refresh, close);
+      // Two lines in the space the buttons already take: the second is set small enough
+      // that the bar is still as tall as the icons beside it and no taller.
+      const headMain = el('div', { className: 'tvr-details-head-main' },
+                          [el('h3', { textContent: 'Series details' })]);
+      head.append(headMain, el('span', { className: 'tvr-spacer' }), refresh, close);
       pane.append(head);
       // Fixed: the series, and what the next run would do to it. Only the settings below
       // scroll, so neither can be scrolled out from under the other.
@@ -2148,6 +2157,7 @@
       const context = editing.build(body, top);
       editing.context = context;
       refresh.addEventListener('click', () => context.reread(refresh));
+      headMain.append(context.readLine);
       const actions = el('div', { className: 'tvr-actions' });
       const commit = (startEnabled) => guarded('', async () => {
         await editing.save(context, startEnabled);
