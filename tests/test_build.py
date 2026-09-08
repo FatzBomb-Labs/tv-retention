@@ -714,3 +714,21 @@ class Interface(unittest.TestCase):
         dropped = re.findall(r'(?<!let )\blibrary = null\b', self.js)
         self.assertEqual(len(dropped), 1, 'library is dropped somewhere other than forgetLibrary')
         self.assertIn('function forgetLibrary() {\n    library = null;', self.js)
+
+    def test_the_layout_choice_is_remembered(self):
+        # A preference about looking, not a setting about behaviour: it belongs to the
+        # browser rather than to the plugin's settings document.
+        self.assertIn("let layout = remembered('layout', 'list')", self.js)
+        self.assertIn("remember('layout', mode)", self.js)
+        self.assertIn('catch (error)', self.js.split('const remember =')[1].split('\n')[0]
+                      + self.js.split('const remembered =')[1].split('};')[0])
+
+    def test_selecting_a_series_redraws_the_card_that_was_selected(self):
+        # Opening the editor without redrawing left the card looking unselected, which
+        # shows most in poster view where the whole border carries the state.
+        block = self.js.split('selected = new Set([rule.id]);')[1].split('}')[0]
+        self.assertIn('renderLibrary()', block)
+
+    def test_the_list_scrolls_rather_than_the_column_around_it(self):
+        self.assertRegex(self.css, r'\.tvr-series-list \{ height: 100%; overflow-y: auto')
+        self.assertRegex(self.css, r'#tvr-view-series-all \{ height: 100%; display: flex')

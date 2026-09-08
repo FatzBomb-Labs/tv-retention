@@ -928,7 +928,13 @@
         + `${bySeverity.warning} warning, ${bySeverity.notice} notice. Open this to show only those series.` }));
   }
 
-  let layout = 'list';
+  // Remembered per browser, because it is a preference about looking rather than a
+  // setting about behaviour — it belongs to the person at the screen, not to the plugin.
+  const remember = (name, value) => { try { localStorage.setItem(`tvr.${name}`, value); } catch (error) { /* private window */ } };
+  const remembered = (name, fallback) => {
+    try { return localStorage.getItem(`tvr.${name}`) || fallback; } catch (error) { return fallback; }
+  };
+  let layout = remembered('layout', 'list');
   let library = null;          // every series Sonarr holds, from the stored reading
   let libraryLoading = false;
   const LIBRARY_LIMIT = 150;
@@ -1074,6 +1080,7 @@
         } else {
           selected = new Set([rule.id]);
           openEditor(rule);
+          renderLibrary();      // the card has to show that it is the one being edited
           return;
         }
       } else {
@@ -1143,13 +1150,18 @@
     return card;
   }
 
+  const applyLayout = () => {
+    ['list', 'grid'].forEach((other) => $(`tvr-layout-${other}`).classList.toggle('active', other === layout));
+  };
   ['list', 'grid'].forEach((mode) => {
     $(`tvr-layout-${mode}`).addEventListener('click', () => {
       layout = mode;
-      ['list', 'grid'].forEach((other) => $(`tvr-layout-${other}`).classList.toggle('active', other === mode));
+      remember('layout', mode);
+      applyLayout();
       renderLibrary();
     });
   });
+  applyLayout();
   ['tvr-hide-ended', 'tvr-only-alerts', 'tvr-search', 'tvr-sort'].forEach((id) => {
     $(id).addEventListener('input', renderLibrary);
     $(id).addEventListener('change', renderLibrary);
