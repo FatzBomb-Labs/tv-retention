@@ -1029,10 +1029,6 @@
     container.className = layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules';
     container.replaceChildren();
     $('tvr-only-alerts-wrap').hidden = seriesAlertList().length === 0;
-    selected = new Set([...selected].filter((id) => (settings.rules || []).some((r) => r.id === id)));
-    $('tvr-selected-count').hidden = selected.size === 0;
-    $('tvr-selected-count').textContent = `${plural(selected.size, 'series')} selected`;
-    $('tvr-select-none').hidden = selected.size === 0;
     if (library === null) {
       $('tvr-rules-empty').hidden = true;
       container.append(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
@@ -1064,33 +1060,14 @@
     const blocked = rule ? isBlocked(rule.id) : false;
     const card = el('div', { className: `tvr-rule ${rule ? (blocked ? 'blocked' : 'ok') : 'loose'}`
                                         + (rule && !rule.enabled ? ' disabled' : '')
-                                        + (rule && selected.has(rule.id) ? ' selected' : '') });
+                                        + (isOpen(rule) ? ' selected' : '') });
+    // Clicking opens it; clicking the one already open closes it. Opening a series *is*
+    // opening its settings, whether it has a rule yet or not.
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
-      if (rule && (event.shiftKey || event.ctrlKey || event.metaKey)) {
-        // Building a selection: no editor, because the next click may make it a mass edit.
-        editing = null;
-        if (selected.has(rule.id)) selected.delete(rule.id); else selected.add(rule.id);
-      } else if (rule) {
-        // One series, one panel: opening it *is* opening its settings. A read-only card
-        // with an Edit button was a step that only ever had one answer.
-        if (selected.has(rule.id) && selected.size === 1 && editing) {
-          selected = new Set();
-          editing = null;
-        } else {
-          selected = new Set([rule.id]);
-          openEditor(rule);
-          renderLibrary();      // the card has to show that it is the one being edited
-          return;
-        }
-      } else {
-        // Nothing to select on a series without a rule: opening it *is* adding it.
-        selected = new Set();
-        openEditor(null, series);
-        return;
-      }
-      renderLibrary();
-      renderDetails();
+      if (isOpen(rule)) { editing = null; renderLibrary(); renderDetails(); return; }
+      openEditor(rule, rule ? undefined : series);
+      renderLibrary();          // the card has to show that it is the one being edited
     });
 
     card.append(posterNode(series, 'tvr-poster tvr-poster-row'));
@@ -1098,14 +1075,7 @@
 
     const head = el('div', { className: 'tvr-rule-head' });
     if (rule) {
-      const tick = el('input', { type: 'checkbox', className: 'tvr-pick', checked: selected.has(rule.id) });
-      tick.addEventListener('change', () => {
-        if (tick.checked) selected.add(rule.id); else selected.delete(rule.id);
-        editing = null;
-        renderLibrary();
-        renderDetails();
-      });
-      head.append(tick, alertBadge(rule));
+      head.append(alertBadge(rule));
     }
     head.append(el('span', { className: `tvr-connected ${rule ? 'yes' : 'no'}`,
                              title: rule ? 'Has a retention rule' : 'No rule yet' },
@@ -1165,18 +1135,6 @@
   ['tvr-hide-ended', 'tvr-only-alerts', 'tvr-search', 'tvr-sort'].forEach((id) => {
     $(id).addEventListener('input', renderLibrary);
     $(id).addEventListener('change', renderLibrary);
-  });
-  $('tvr-select-shown').addEventListener('click', () => {
-    visibleLibrary().forEach((row) => { if (row.rule) selected.add(row.rule.id); });
-    editing = null;
-    renderLibrary();
-    renderDetails();
-  });
-  $('tvr-select-none').addEventListener('click', () => {
-    selected = new Set();
-    editing = null;
-    renderLibrary();
-    renderDetails();
   });
 
   // -- alerts ------------------------------------------------------------
@@ -1882,7 +1840,6 @@
       }
       if (saved) queueChecks([saved.id]);
       notice(`Series saved.${done}`, 'ok');
-      selected = saved ? new Set([saved.id]) : new Set();
       renderDetails();
     },
     };
@@ -1891,14 +1848,19 @@
   // -- the details pane --------------------------------------------------
   // Editing happens here rather than in a dialog: the list stays visible beside it, so
   // what you are changing is never the only thing on screen.
-  let selected = new Set();
+  // One series at a time, and only ever the one being edited. There is no selection to
+  // build: the bulk mechanisms are a preset, which moves every series pointing at it, and
+  // a default, which moves every series inheriting it — each one edit with a blast radius
+  // you can name. Thirty ticked boxes and a forgotten one is not a third, and this app
+  // deletes things.
   let editing = null;          // the form currently open in the pane, if any
+  const isOpen = (rule) => !!(editing && rule && editing.rule && editing.rule.id === rule.id);
 
   function openEditor(existing, preselect) {
     const form = ruleForm(existing, preselect);
     if (!form) return;
     editing = form;
-    if (currentView !== 'series-list') showView('series-list');
+    if (!LIBRARY[currentView]) showView('series-all');
     renderDetails();
     $('tvr-details').scrollIntoView({ block: 'nearest' });
   }
@@ -1906,20 +1868,17 @@
   function renderDetails() {
     const pane = $('tvr-details');
     const shell = $('tvr-series-shell');
-    const chosen = [...selected].map((id) => (settings.rules || []).find((rule) => rule.id === id))
-      .filter(Boolean);
-    const open = !!editing || chosen.length > 0;
-    shell.classList.toggle('open', open);
-    pane.hidden = !open;
-    if (!open) return;
+    shell.classList.toggle('open', !!editing);
+    pane.hidden = !editing;
+    if (!editing) return;
     pane.replaceChildren();
 
     const head = el('div', { className: 'tvr-details-head' });
     const close = el('button', { type: 'button', className: 'tvr-icon-button', title: 'Close' },
                     [el('i', { className: 'fa fa-times' })]);
-    close.addEventListener('click', () => { editing = null; selected = new Set(); renderRules(); renderDetails(); });
+    close.addEventListener('click', () => { editing = null; renderLibrary(); renderDetails(); });
 
-    if (editing) {
+    {
       head.append(el('h3', { textContent: editing.title }), el('span', { className: 'tvr-spacer' }), close);
       pane.append(head);
       const body = el('div', { className: 'tvr-details-body' });
@@ -1954,76 +1913,8 @@
       }
       pane.append(actions);
       check();
-      return;
     }
-
-    // One selected and nothing open means the editor was closed: show it again rather than
-    // a read-only copy of the same facts.
-    if (chosen.length === 1) { openEditor(chosen[0]); return; }
-    renderMassEdit(pane, head, close, chosen);
   }
-
-  // Several at once. Only the fields where "the same for all of them" is a sensible thing
-  // to say: a keep window, a preset, the monitoring mode, specials, enabled.
-  function renderMassEdit(pane, head, close, rules) {
-    head.append(el('h3', { textContent: `${plural(rules.length, 'series')} selected` }),
-                el('span', { className: 'tvr-spacer' }), close);
-    pane.append(head);
-    const body = el('div', { className: 'tvr-details-body' });
-    body.append(el('p', { className: 'tvr-lede',
-                          textContent: 'Leave a field on “Unchanged” and it is left alone on every '
-                                       + 'selected series. Nothing is written until you apply.' }));
-    body.append(el('div', { className: 'tvr-details-facts',
-                            textContent: rules.map((rule) => rule.series_title || rule.path).join(', ') }));
-
-    const presetSelect = options(el('select'),
-      [['', 'Unchanged'], ['custom', 'Custom — clear the preset']].concat(
-        (settings.profiles || []).map((preset) => [preset.id, preset.name])), '');
-    const monitoringSelect = options(el('select'), [['', 'Unchanged'], ['inherit', 'Use the global setting'],
-                                                    ['unmonitor-only', 'Unmonitor only'],
-                                                    ['full-sync', 'Full sync']], '');
-    const specialsSelect = options(el('select'), [['', 'Unchanged'], ['inherit', 'Use the global setting'],
-                                                  ['no', 'Exclude specials'], ['yes', 'Include specials']], '');
-    const enabledSelect = options(el('select'), [['', 'Unchanged'], ['yes', 'Enabled'], ['no', 'Disabled']], '');
-    const conditions = conditionFields({ keep_days: '', keep_episodes: '', keep_seasons: '', combine: '' });
-    conditions.combine.prepend(el('option', { value: '', textContent: 'Unchanged' }));
-    conditions.combine.value = '';
-
-    body.append(field('Preset', presetSelect), conditions.node,
-                el('small', { textContent: 'A blank keep value is left alone; set one to apply it to all.' }),
-                field('Monitoring', monitoringSelect), field('Season 0 / specials', specialsSelect),
-                field('State', enabledSelect));
-    pane.append(body);
-
-    const actions = el('div', { className: 'tvr-actions' });
-    const apply = el('button', { type: 'button', className: 'tvr-primary',
-                                 textContent: `Apply to ${plural(rules.length, 'series')}` });
-    apply.addEventListener('click', () => guarded('', async () => {
-      const ids = new Set(rules.map((rule) => rule.id));
-      settings.rules = (settings.rules || []).map((rule) => {
-        if (!ids.has(rule.id)) return rule;
-        const draft = Object.assign({}, rule);
-        if (presetSelect.value) draft.profile_id = presetSelect.value === 'custom' ? '' : presetSelect.value;
-        if (monitoringSelect.value) draft.monitoring = monitoringSelect.value === 'inherit' ? '' : monitoringSelect.value;
-        if (specialsSelect.value) {
-          draft.include_specials = specialsSelect.value === 'inherit' ? null : specialsSelect.value === 'yes';
-        }
-        if (enabledSelect.value) draft.enabled = enabledSelect.value === 'yes';
-        ['days', 'episodes', 'seasons'].forEach((name) => {
-          const value = conditions[name].value;
-          if (value) draft[`keep_${name}`] = value;
-        });
-        if (conditions.combine.value) draft.combine = conditions.combine.value;
-        return draft;
-      });
-      await saveSettings(`${plural(rules.length, 'series')} updated.`);
-      queueChecks([...ids]);
-      renderDetails();
-    }));
-    actions.append(apply);
-    pane.append(actions);
-  }
-
 
   // A rule's keep window, as the one-time pass needs to remember it.
   function scopeOf(rule) {

@@ -232,7 +232,7 @@ class Interface(unittest.TestCase):
 
     def test_the_series_badge_is_a_count_beside_the_title(self):
         # A circle carrying a number, next to the name — not a pill competing with it.
-        self.assertIn('head.append(tick, alertBadge(rule));', self.js)
+        self.assertIn('head.append(alertBadge(rule));', self.js)
         self.assertIn('tvr-dot-badge', self.js)
 
     def test_removing_a_series_is_queued_and_asks_for_the_right_word(self):
@@ -535,21 +535,6 @@ class Interface(unittest.TestCase):
         self.assertIn('id="tvr-details"', self.html)
         self.assertNotRegex(self.js, r"dialog\((existing \? 'Edit series'|'Add series')")
 
-    def test_the_list_offers_a_layout_and_a_selection(self):
-        for identifier in ('tvr-layout-list', 'tvr-layout-grid', 'tvr-select-shown',
-                           'tvr-select-none', 'tvr-selected-count'):
-            self.assertIn(f'id="{identifier}"', self.html)
-        self.assertIn('function renderMassEdit', self.js)
-        self.assertIn('tvr-rules-grid', self.css)
-
-    def test_a_mass_edit_leaves_unchanged_fields_alone(self):
-        # Every field defaults to "Unchanged" and is only applied when it is set, so
-        # selecting thirty series and touching one field cannot rewrite the other five.
-        block = self.js.split('function renderMassEdit')[1].split('function seriesFacts')[0]
-        for control in ('presetSelect', 'monitoringSelect', 'specialsSelect', 'enabledSelect'):
-            self.assertRegex(block, rf'if \({control}\.value\)')
-        self.assertIn("'Unchanged'", block)
-
     def test_the_sidebar_scrolls_on_its_own(self):
         self.assertRegex(self.css, r'\.tvr-side \{[^}]*overflow-y: auto')
         self.assertRegex(self.css, r'\.tvr-side \{[^}]*position: sticky')
@@ -653,9 +638,9 @@ class Interface(unittest.TestCase):
         Removing the button without moving the settings left a connected series with no
         way in at all, which is the regression this pins.
         """
-        self.assertIn('openEditor(rule);', self.js)
+        self.assertIn('openEditor(rule, rule ? undefined : series);', self.js)
         self.assertNotIn('renderOneDetail', self.js)
-        self.assertIn('if (chosen.length === 1) { openEditor(chosen[0]); return; }', self.js)
+        self.assertIn('if (isOpen(rule)) { editing = null;', self.js)
 
     def test_each_column_scrolls_within_something(self):
         # overflow:auto with nothing to overflow moves the whole page instead, which is why
@@ -723,12 +708,6 @@ class Interface(unittest.TestCase):
         self.assertIn('catch (error)', self.js.split('const remember =')[1].split('\n')[0]
                       + self.js.split('const remembered =')[1].split('};')[0])
 
-    def test_selecting_a_series_redraws_the_card_that_was_selected(self):
-        # Opening the editor without redrawing left the card looking unselected, which
-        # shows most in poster view where the whole border carries the state.
-        block = self.js.split('selected = new Set([rule.id]);')[1].split('}')[0]
-        self.assertIn('renderLibrary()', block)
-
     def test_the_list_scrolls_rather_than_the_column_around_it(self):
         self.assertRegex(self.css, r'\.tvr-series-list \{ height: 100%; overflow-y: auto')
         self.assertRegex(self.css, r'#tvr-view-series-all \{ height: 100%; display: flex')
@@ -779,3 +758,21 @@ class Interface(unittest.TestCase):
         self.assertIn('Set monitoring in Sonarr before it goes', block)
         self.assertIn('monitorTree(data.seasons, {})', block)
         self.assertIn("api('set-monitored'", block)
+
+    def test_there_is_no_mass_edit(self):
+        """Bulk change already exists twice, in safer shapes.
+
+        A preset moves every series pointing at it; a default moves every series
+        inheriting it. Each is one edit with a blast radius you can name. A set of ticked
+        boxes is not — a stale tick is invisible, and this app deletes things.
+        """
+        self.assertNotIn('renderMassEdit', self.js)
+        self.assertNotIn('tvr-select-shown', self.html)
+        self.assertNotIn('tvr-select-none', self.html)
+        self.assertNotIn('tvr-pick', self.js.split('function libraryCard')[1].split('function ')[0])
+        self.assertIn('const isOpen = (rule) =>', self.js)
+
+    def test_the_list_offers_a_layout(self):
+        for identifier in ('tvr-layout-list', 'tvr-layout-grid'):
+            self.assertIn(f'id="{identifier}"', self.html)
+        self.assertIn('tvr-rules-grid', self.css)
