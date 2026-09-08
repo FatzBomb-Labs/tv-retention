@@ -700,3 +700,17 @@ class Interface(unittest.TestCase):
         head = self.css.split('.tvr-details-head {')[1].split('}')[0]
         self.assertIn('background: var(--background-color', head)
         self.assertIn('z-index', head)
+
+    def test_the_library_reloads_itself_when_it_is_invalidated(self):
+        """Whoever drops the copy in hand should not have to remember to fetch it again.
+
+        A sync and a newly added rule both make it wrong. One of them cleared it and left
+        the list saying "reading the stored library" until something else navigated.
+        """
+        self.assertIn('function forgetLibrary', self.js)
+        self.assertIn('if (!libraryLoading) loadLibrary()', self.js)
+        # And the two places that invalidate go through it rather than assigning null.
+        import re
+        dropped = re.findall(r'(?<!let )\blibrary = null\b', self.js)
+        self.assertEqual(len(dropped), 1, 'library is dropped somewhere other than forgetLibrary')
+        self.assertIn('function forgetLibrary() {\n    library = null;', self.js)

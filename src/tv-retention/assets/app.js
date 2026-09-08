@@ -450,7 +450,7 @@
     if (LIBRARY[name]) {
       libraryFilter = LIBRARY[name];
       $('tvr-library-title').textContent = TITLES[libraryFilter];
-      if (library === null) guarded('', loadLibrary); else renderLibrary();
+      renderLibrary();          // it fetches itself if what it needs is not in hand
     }
     if (name === 'system-stats') guarded('', renderStatsView);
     if (name === 'system-logs') startLog(); else stopLog();
@@ -751,6 +751,8 @@
     applyAlerts(data.alerts);
     snapshot.plan = data.plan;
     snapshot.sync = data.sync;
+    // Sonarr has just been read: what the page is holding is the reading before it.
+    forgetLibrary();
     render();
     const report = data.report || {};
     const moved = [];
@@ -928,18 +930,35 @@
 
   let layout = 'list';
   let library = null;          // every series Sonarr holds, from the stored reading
+  let libraryLoading = false;
   const LIBRARY_LIMIT = 150;
 
-  // Loaded once from the store. Opening a view is never a reason to ask Sonarr anything —
-  // the sync already did, and its age is stated at the top of the page.
+  // Loaded from the store, and reloaded whenever something makes the copy in hand wrong —
+  // a sync, or a rule that has just been added. Opening a view is never a reason to ask
+  // Sonarr anything: the sync already did, and its age is stated at the top of the page.
   async function loadLibrary() {
-    const gathered = [];
-    for (const instance of (settings.instances || [])) {
-      if (instance.enabled === false) continue;
-      gathered.push(...await seriesFor(instance.id, ''));
+    if (libraryLoading) return;
+    libraryLoading = true;
+    try {
+      const gathered = [];
+      for (const instance of (settings.instances || [])) {
+        if (instance.enabled === false) continue;
+        gathered.push(...await seriesFor(instance.id, ''));
+      }
+      library = gathered;
+    } finally {
+      libraryLoading = false;
     }
-    library = gathered;
     renderLibrary();
+  }
+
+  // Whoever invalidates the copy in hand does not have to remember to reload it: the
+  // render notices and asks. Forgetting that left the list saying "reading the stored
+  // library" until something else happened to navigate.
+  function forgetLibrary() {
+    library = null;
+    seriesCache = {};
+    if (LIBRARY[currentView]) loadLibrary().catch(() => { libraryLoading = false; });
   }
 
   const ruleFor = (series) => (settings.rules || []).find(
@@ -1011,6 +1030,7 @@
     if (library === null) {
       $('tvr-rules-empty').hidden = true;
       container.append(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
+      if (!libraryLoading) loadLibrary().catch(() => { libraryLoading = false; });
       return;
     }
     if (bulkChecking) {
@@ -1655,7 +1675,7 @@
       settings = matched.settings;
       snapshot.settings = settings;
       render();
-      library = null;            // one more series with a rule
+      forgetLibrary();           // one more series with a rule
       const saved = settings.rules[settings.rules.length - 1];
       let done = '';
       // Applied now, against the saved rule, because the unmonitor half exists to stop
