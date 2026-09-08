@@ -134,6 +134,29 @@ def journal(settings: dict, record: dict) -> None:
         pass
 
 
+def read_journal(settings: dict) -> list:
+    """Every run ever recorded, oldest first. A bad line is skipped, not fatal.
+
+    The journal is the audit trail, so it is only ever appended to; anything that totals
+    it reads it whole rather than keeping a second tally that could disagree.
+    """
+    path = state_dir(settings) / 'journal.jsonl'
+    records = []
+    try:
+        with open(path, encoding='utf-8') as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return []
+    return records
+
+
 def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
 

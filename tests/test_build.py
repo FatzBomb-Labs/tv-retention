@@ -168,9 +168,11 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r"api\('progress'[^)]*, true\)")
         self.assertIn('function queueChecks', self.js)
 
-    def test_a_show_being_read_is_not_editable(self):
+    def test_a_show_being_read_says_so(self):
+        # It is not hidden and not silently stale: the card stays, and its plan is replaced
+        # by what is happening to it.
         self.assertIn('isChecking(rule.id)', self.js)
-        self.assertRegex(self.js, r'button\.disabled = true')
+        self.assertRegex(self.js, r"isChecking\(rule\.id\)\) \{\s*\n\s*main\.append")
 
     def test_the_page_has_a_heartbeat_that_never_blocks_it(self):
         # It must not raise the busy overlay, must stand aside for a sweep, and must not
@@ -222,9 +224,9 @@ class Interface(unittest.TestCase):
         self.assertIn('.tvr-dot-badge.blocked', css)
         self.assertIn('blocked', self.js)
 
-    def test_the_series_badge_is_a_count_left_of_the_title(self):
-        # A circle carrying a number, before the name — not a pill competing with it.
-        self.assertRegex(self.js, r'alertBadge\(rule\),\s*\n\s*el\(.span., \{ className: .tvr-rule-title')
+    def test_the_series_badge_is_a_count_beside_the_title(self):
+        # A circle carrying a number, next to the name — not a pill competing with it.
+        self.assertIn('head.append(tick, alertBadge(rule));', self.js)
         self.assertIn('tvr-dot-badge', self.js)
 
     def test_removing_a_series_is_queued_and_asks_for_the_right_word(self):
@@ -394,21 +396,21 @@ class Interface(unittest.TestCase):
     def test_series_problems_are_counted_on_the_series_tab_only(self):
         # The roll-up sits on the tab that acts on it, and the Alerts tab counts only
         # what is wrong with the installation.
-        self.assertIn('id="tvr-side-badge-series"', self.html)
-        self.assertIn("setBadge($('tvr-side-badge-series'), seriesList)", self.js)
-        self.assertIn("setBadge($('tvr-side-badge-alerts'), systemAlerts)", self.js)
-        # The alert counts in the sidebar are the system ones; series problems are counted
-        # on Series, where they are fixed.
-        self.assertRegex(self.js, r"\$\('tvr-count-all'\)\.textContent = systemAlerts\.length")
+        # A badge next to the thing it is about: series problems on the series items,
+        # connection problems on Connections. Neither counts the other's.
+        self.assertIn("setBadge($('tvr-badge-series-connected'), connectedAlerts)", self.js)
+        self.assertIn("setBadge($('tvr-badge-media-connections'), instances)", self.js)
+        for identifier in ('tvr-badge-series-all', 'tvr-badge-series-connected',
+                           'tvr-badge-media-connections', 'tvr-alert-total'):
+            self.assertIn(f'id="{identifier}"', self.html)
 
     def test_a_sweep_clears_each_plan_but_keeps_the_series(self):
         # The series are not what is being re-read; their plans are. A plan left standing
         # during the read is a stale reading shown as a current one — but emptying the
         # whole list to say so throws away the page.
         self.assertIn('bulkChecking', self.js)
-        self.assertIn('if (isChecking(rule.id) || bulkChecking) {', self.js)
+        self.assertIn("textContent: 'Reading from Sonarr…'", self.js)
         self.assertIn('bulkChecking = false;', self.js)
-        self.assertNotRegex(self.js, r'if \(bulkChecking\) \{\s*\n\s*\$\(.tvr-rules-empty.\)')
 
     def test_buttons_do_not_inherit_the_font_shorthand(self):
         """`font: inherit` also sets line-height, and outranks any class that sets it.
@@ -456,7 +458,7 @@ class Interface(unittest.TestCase):
         wired = set(re.findall(r"'(tvr-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
                                r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
                                r"match-hour|match-minute|connectivity))'", self.js))
-        panel = self.html.split('id="tvr-view-settings-schedule"')[1].split('</section>')[0]
+        panel = self.html.split('id="tvr-view-media-schedule"')[1].split('</section>')[0]
         for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
             if identifier in ('tvr-schedule-summary', 'tvr-match-summary') or 'field' in identifier:
                 continue
@@ -500,8 +502,9 @@ class Interface(unittest.TestCase):
         import re
         wanted = set(re.findall(r'data-view="([a-z-]+)"', self.html))
         views = set(re.findall(r'<section id="tvr-view-([a-z-]+)"', self.html))
-        # The four alert views share one section, narrowed by severity.
-        views |= {f'alerts-{name}' for name in ('error', 'warning', 'notice')}
+        # The three series views share one section, narrowed by filter: one library, and
+        # whether a series has a rule is a property of it rather than a different place.
+        views |= {'series-connected', 'series-unconnected'}
         self.assertEqual(wanted, views, 'a sidebar item with no view, or a view nothing reaches')
 
     def test_the_version_constant_matches_the_version_file(self):
@@ -544,3 +547,32 @@ class Interface(unittest.TestCase):
     def test_the_sidebar_scrolls_on_its_own(self):
         self.assertRegex(self.css, r'\.tvr-side \{[^}]*overflow-y: auto')
         self.assertRegex(self.css, r'\.tvr-side \{[^}]*position: sticky')
+
+    def test_one_library_serves_every_series_view(self):
+        """A series Sonarr knows about belongs in one place whether it has a rule or not.
+
+        Add was a separate view answering a different question — "what can I add?" — which
+        is why it showed 2986 of 3022. There is one list now, and three filters over it.
+        """
+        self.assertIn("const LIBRARY = { 'series-all': 'all'", self.js)
+        self.assertIn('function renderLibrary', self.js)
+        self.assertNotIn('function renderAddSeries', self.js)
+        self.assertNotIn('id="tvr-add-grid"', self.html)
+
+    def test_the_ended_toggle_only_hides_what_has_no_rule(self):
+        # A connected ended series is where retention matters most; hiding it would hide
+        # a rule that is actively deleting.
+        self.assertIn('if (hideEnded && series.ended && !rule) return;', self.js)
+
+    def test_neither_the_list_nor_its_payload_carries_three_thousand_of_anything(self):
+        self.assertIn('LIBRARY_LIMIT', self.js)
+        self.assertIn('LIST_FIELDS', (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text())
+        worker = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        for heavy in ("'overview'", "'seasons'"):
+            self.assertNotIn(heavy, worker.split('LIST_FIELDS = (')[1].split(')')[0])
+
+    def test_the_icon_is_not_a_bin(self):
+        # The plugin is named for keeping things.
+        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
+        self.assertIn('Icon="television"', page)
+        self.assertNotIn('trash', page)

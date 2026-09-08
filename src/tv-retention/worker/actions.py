@@ -23,8 +23,9 @@ from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   validate_settings)
 from sonarr import Sonarr, SonarrError
 from store import (CRON, age_seconds, forget_episodes, invalidate_catalogue, job_state,
-                   load_health, load_settings, load_state, log_line, now_iso, read_log,
-                   read_progress, save_settings, save_state, trim_health, write_cache)
+                   load_health, load_settings, load_state, log_line, now_iso, read_cache,
+                   read_journal, read_log, read_progress, save_settings, save_state,
+                   trim_health, write_cache)
 from tmdb import TMDB, TMDBError
 
 MAX_BROWSE_ENTRIES = 500
@@ -169,6 +170,65 @@ def action_scope_pass(settings, request):
                            previous_scope=request.get('previous_scope') or None)
 
 
+def action_stats(settings, request):
+    """Totals, from what is already kept.
+
+    The run journal answers what has been reclaimed and by which series; the stored
+    reading answers the shape of the library. Nothing is recorded specially for this, so
+    the numbers cannot disagree with the history they come from.
+    """
+    runs = {'count': 0, 'deleted': 0, 'freed_bytes': 0, 'first': None, 'last': None}
+    months, series = {}, {}
+    for record in read_journal(settings):
+        if record.get('preview') or record.get('dry_run'):
+            continue          # a test run reclaimed nothing, and should not say it did
+        runs['count'] += 1
+        runs['deleted'] += int(record.get('deleted') or 0)
+        runs['freed_bytes'] += int(record.get('freed_bytes') or 0)
+        started = str(record.get('started') or '')
+        if started:
+            runs['first'] = min(runs['first'] or started, started)
+            runs['last'] = max(runs['last'] or started, started)
+            month = started[:7]
+            months[month] = months.get(month, 0) + int(record.get('freed_bytes') or 0)
+        for rule in record.get('rules') or []:
+            deleted = len(rule.get('deleted') or []) if isinstance(rule.get('deleted'), list) \
+                else int(rule.get('deleted') or 0)
+            if not deleted:
+                continue
+            name = rule.get('series_title') or rule.get('path') or rule.get('rule_id')
+            entry = series.setdefault(name, {'title': name, 'runs': 0, 'deleted': 0, 'freed_bytes': 0})
+            entry['runs'] += 1
+            entry['deleted'] += deleted
+            entry['freed_bytes'] += int(rule.get('freed_bytes') or 0)
+
+    catalogue, managed, managed_bytes, files, episodes, ended, largest = [], 0, 0, 0, 0, 0, None
+    bound = {(rule.get('instance_id'), rule.get('series_id')) for rule in settings.get('rules', [])}
+    for instance in settings.get('instances', []):
+        entry = read_cache(settings, 'catalogue.json').get(instance['id']) or {}
+        catalogue.extend(entry.get('series') or [])
+    for entry in catalogue:
+        files += int(entry.get('episode_file_count') or 0)
+        episodes += int(entry.get('total_episode_count') or 0)
+        ended += 1 if entry.get('ended') else 0
+        size = int(entry.get('size_on_disk') or 0)
+        if largest is None or size > largest['bytes']:
+            largest = {'title': entry.get('title'), 'bytes': size}
+        if (entry.get('instance_id'), entry.get('series_id')) in bound:
+            managed += 1
+            managed_bytes += size
+
+    return {
+        'runs': runs,
+        'months': [{'month': month, 'freed_bytes': freed}
+                   for month, freed in sorted(months.items())][-12:],
+        'series': sorted(series.values(), key=lambda row: -row['freed_bytes'])[:40],
+        'library': {'series': len(catalogue), 'managed': managed, 'managed_bytes': managed_bytes,
+                    'bytes': sum(int(e.get('size_on_disk') or 0) for e in catalogue),
+                    'files': files, 'episodes': episodes, 'ended': ended, 'largest': largest},
+    }
+
+
 def action_health(settings, request):
     """Refresh the cached health, on demand or because the page found it stale."""
     return {'health': trim_health(main.run_health_check(scheduled=False, force=bool(request.get('force'))))}
@@ -232,12 +292,22 @@ def action_settings(settings, request):
 
 
 
+# What a list needs to draw a series. The overview is a paragraph and the per-season
+# breakdown is an array, and three thousand of each turned a 1.8 MB store into a 4.3 MB
+# reply — for two fields a list never shows. They stay on disk for whatever needs them.
+LIST_FIELDS = ('instance_id', 'instance_name', 'series_id', 'title', 'sort_title', 'slug',
+               'year', 'monitored', 'ended', 'status', 'episode_file_count', 'size_on_disk',
+               'path', 'added', 'episode_count', 'total_episode_count', 'season_count',
+               'next_airing', 'previous_airing', 'network', 'runtime', 'certification', 'poster')
+
+
 def action_series(settings, request):
-    """The series list behind the picker, answered entirely from Sonarr."""
+    """The series list behind the library, answered from the stored reading."""
     instance_id = str(request.get('instance_id') or '')
     catalogue = main.catalogue_for(settings, instance_id, force=bool(request.get('force')))
     used = {r['path'] for r in settings.get('rules', []) if r['id'] != str(request.get('except_rule') or '')}
-    return {'series': [dict(entry, in_use=entry['path'] in used,
+    return {'series': [dict({key: entry.get(key) for key in LIST_FIELDS},
+                            in_use=entry['path'] in used,
                             **describe_selectability(entry, entry['path'] in used))
                        for entry in catalogue]}
 
@@ -413,6 +483,7 @@ ACTIONS = {
     'watch': action_watch,
     'sync': action_sync,
     'scope-pass': action_scope_pass,
+    'stats': action_stats,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

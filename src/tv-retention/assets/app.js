@@ -482,7 +482,6 @@
     renderRules();
     renderAlerts();
     renderPresets();
-    renderAddSeries();
     renderInstances();
     renderSchedule();
     renderSettings();
@@ -496,30 +495,32 @@
   const VIEWS = [...document.querySelectorAll('.tvr-side [data-view]')].map((b) => b.dataset.view);
   let currentView = 'series-list';
 
+  // The three series views are one panel with a different filter, because that is what
+  // they are: one library, narrowed. A series Sonarr knows about belongs here whether or
+  // not it has a rule, which is why "add" is no longer a separate place.
+  const LIBRARY = { 'series-all': 'all', 'series-connected': 'connected',
+                    'series-unconnected': 'unconnected' };
+  const TITLES = { all: 'All series', connected: 'Connected series', unconnected: 'Not connected' };
+  let libraryFilter = 'all';
+
   function showView(name) {
-    if (!VIEWS.includes(name)) name = 'series-list';
+    if (!VIEWS.includes(name)) name = 'series-all';
     currentView = name;
-    // The four alert views are one panel with a different filter, because that is what
-    // they are: the same list, narrowed.
-    const panel = name.startsWith('alerts-') ? 'alerts-all' : name;
+    const panel = LIBRARY[name] ? 'series-all' : name;
     [...new Set(VIEWS)].forEach((view) => {
-      const section = $(`tvr-view-${view.startsWith('alerts-') ? 'alerts-all' : view}`);
-      if (section) section.hidden = (view.startsWith('alerts-') ? 'alerts-all' : view) !== panel;
+      const section = $(`tvr-view-${LIBRARY[view] ? 'series-all' : view}`);
+      if (section) section.hidden = (LIBRARY[view] ? 'series-all' : view) !== panel;
     });
     document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
-      button.classList.toggle('active', button.dataset.view === name
-                                        && !button.classList.contains('tvr-side-head'));
+      button.classList.toggle('active', button.dataset.view === name);
     });
-    if (name.startsWith('alerts-')) {
-      severityFilter = name === 'alerts-all' ? 'all' : name.slice('alerts-'.length);
-      $('tvr-alerts-title').textContent = severityFilter === 'all' ? 'Alerts'
-        : `${severityFilter.charAt(0).toUpperCase()}${severityFilter.slice(1)}s`;
-      renderAlerts();
+    if (LIBRARY[name]) {
+      libraryFilter = LIBRARY[name];
+      $('tvr-library-title').textContent = TITLES[libraryFilter];
+      if (library === null) guarded('', loadLibrary); else renderLibrary();
     }
-    if (name === 'series-add') {
-      if (addSeriesList === null) guarded('', loadAddSeries); else renderAddSeries();
-    }
-    if (name === 'history-logs') startLog(); else stopLog();
+    if (name === 'system-stats') guarded('', renderStatsView);
+    if (name === 'system-logs') startLog(); else stopLog();
   }
 
   document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
@@ -683,20 +684,53 @@
   // The sidebar carries the counts. Two badges for two audiences: a series problem belongs
   // to Series, where it is fixed; an installation problem belongs to Alerts. Neither
   // counts the other's.
+  // A badge next to the thing it is about, rather than one list of everything wrong. The
+  // total in the top bar is the one place that still answers "is anything wrong at all?".
   function renderCounts() {
     const rules = settings.rules || [];
-    const seriesList = seriesAlertList();
-    const bySeverity = { error: 0, warning: 0, notice: 0 };
-    systemAlerts.forEach((alert) => { bySeverity[alert.severity] += 1; });
-    $('tvr-count-all').textContent = systemAlerts.length;
-    ['error', 'warning', 'notice'].forEach((name) => {
-      $(`tvr-count-${name}`).textContent = bySeverity[name] || 0;
-    });
-    $('tvr-count-series').textContent = rules.length;
+    const connectedAlerts = seriesAlertList();
+    const instances = systemAlerts.filter((alert) => alert.kind !== 'run-aborted');
+
+    $('tvr-count-connected').textContent = rules.length;
+    $('tvr-count-all-series').textContent = library ? library.length : rules.length;
+    $('tvr-count-unconnected').textContent = library
+      ? library.filter((series) => !ruleFor(series)).length : 0;
     $('tvr-count-presets').textContent = (settings.profiles || []).length;
-    setBadge($('tvr-side-badge-series'), seriesList);
-    setBadge($('tvr-side-badge-alerts'), systemAlerts);
+
+    setBadge($('tvr-badge-series-all'), connectedAlerts);
+    setBadge($('tvr-badge-series-connected'), connectedAlerts);
+    setBadge($('tvr-badge-series-unconnected'), []);
+    setBadge($('tvr-badge-media-connections'), instances);
+    setBadge($('tvr-badge-media-schedule'), []);
+    setBadge($('tvr-badge-media-presets'), []);
+    const failed = (snapshot.runs || []).slice(0, 1).filter((run) => (run.errors || []).length);
+    setBadge($('tvr-badge-system-history'), failed.map(() => ({ severity: 'warning' })));
+
+    const everything = connectedAlerts.concat(systemAlerts);
+    const total = $('tvr-alert-total');
+    total.hidden = everything.length === 0;
+    total.textContent = `${everything.length} ${everything.length === 1 ? 'alert' : 'alerts'}`;
+    total.className = `tvr-alert-total ${worstSeverity(everything) || 'notice'}`;
   }
+
+  // The one overview left: what is wrong, and where to go and fix it.
+  $('tvr-alert-total').addEventListener('click', () => {
+    const everything = seriesAlertList().concat(systemAlerts);
+    dialog('Everything needing attention', (body) => {
+      if (!everything.length) { body.append(el('p', { textContent: 'Nothing.' })); return {}; }
+      const byRule = new Map();
+      everything.forEach((alert) => {
+        const key = alert.rule_id || 'system';
+        byRule.set(key, (byRule.get(key) || []).concat([alert]));
+      });
+      byRule.forEach((list, key) => {
+        const rule = (settings.rules || []).find((candidate) => candidate.id === key);
+        body.append(rule ? seriesAlertCard(rule, list, { hideOpen: false })
+                         : systemAlertCard('TV Retention', list));
+      });
+      return {};
+    }, null, 'Close');
+  });
 
   function changeList(result, title, kind) {
     const wanted = kind && kind !== 'all' ? kind : null;
@@ -923,18 +957,7 @@
     return button;
   }
 
-  function visibleRules() {
-    const term = ($('tvr-search').value || '').toLowerCase();
-    const filter = $('tvr-filter').value;
-    return sortRules((settings.rules || []).filter((rule) => {
-      if (term && !(`${rule.series_title} ${rule.path}`.toLowerCase().includes(term))) return false;
-      if (filter === 'enabled') return rule.enabled;
-      if (filter === 'disabled') return !rule.enabled;
-      if (filter === 'attention') return seriesAlerts(rule.id).length > 0;
-      if (filter === 'blocked') return isBlocked(rule.id);
-      return true;
-    }));
-  }
+
 
   // Opens the series where it actually lives. Sonarr's own slug, so no URL is guessed.
   function sonarrLink(rule) {
@@ -964,165 +987,216 @@
   }
 
   let layout = 'list';
+  let library = null;          // every series Sonarr holds, from the stored reading
+  const LIBRARY_LIMIT = 150;
 
-  function renderRules() {
+  // Loaded once from the store. Opening a view is never a reason to ask Sonarr anything —
+  // the sync already did, and its age is stated at the top of the page.
+  async function loadLibrary() {
+    const gathered = [];
+    for (const instance of (settings.instances || [])) {
+      if (instance.enabled === false) continue;
+      gathered.push(...await seriesFor(instance.id, ''));
+    }
+    library = gathered;
+    renderLibrary();
+  }
+
+  const ruleFor = (series) => (settings.rules || []).find(
+    (rule) => rule.series_id === series.series_id && rule.instance_id === series.instance_id) || null;
+
+  // What the three sidebar items and the two toggles come to, together.
+  function visibleLibrary() {
+    if (library === null) return [];
+    const term = ($('tvr-search').value || '').trim().toLowerCase();
+    const hideEnded = $('tvr-hide-ended').checked;
+    const onlyAlerts = $('tvr-only-alerts').checked;
+    const rows = [];
+    library.forEach((series) => {
+      const rule = ruleFor(series);
+      if (libraryFilter === 'connected' && !rule) return;
+      if (libraryFilter === 'unconnected' && rule) return;
+      // The toggle hides what is ended *and* unmanaged. A connected series is never
+      // hidden: it is your own rule, and an ended one is where retention matters most.
+      if (hideEnded && series.ended && !rule) return;
+      const alertsHere = rule ? seriesAlerts(rule.id) : [];
+      if (onlyAlerts && !alertsHere.length) return;
+      if (term && !(`${series.title} ${series.path || ''}`.toLowerCase().includes(term))) return;
+      rows.push({ series, rule, alerts: alertsHere });
+    });
+    const order = $('tvr-sort').value;
+    const rank = (row) => (row.rule && isBlocked(row.rule.id) ? -1
+      : (ATTENTION_RANK[worstSeverity(row.alerts)] ?? (row.rule ? 3 : 4)));
+    rows.sort((a, b) => (
+      order === 'title-desc' ? String(b.series.sort_title || b.series.title).localeCompare(String(a.series.sort_title || a.series.title))
+      : order === 'added' ? String(b.series.added || '').localeCompare(String(a.series.added || ''))
+      : order === 'size' ? (b.series.size_on_disk || 0) - (a.series.size_on_disk || 0)
+      : order === 'episodes' ? (b.series.total_episode_count || 0) - (a.series.total_episode_count || 0)
+      : order === 'keep' ? keepRank(a.rule) - keepRank(b.rule)
+      : order === 'attention' ? (rank(a) - rank(b)
+          || String(a.series.sort_title || a.series.title).localeCompare(String(b.series.sort_title || b.series.title)))
+      : String(a.series.sort_title || a.series.title).localeCompare(String(b.series.sort_title || b.series.title))));
+    return rows;
+  }
+
+  const keepRank = (rule) => {
+    if (!rule) return Number.MAX_SAFE_INTEGER;
+    const active = presetFor(rule) || rule;
+    return Number(active.keep_days || active.keep_episodes || active.keep_seasons || Number.MAX_SAFE_INTEGER);
+  };
+
+  function posterNode(series, className) {
+    const art = el('div', { className: className || 'tvr-poster' });
+    if (series.poster) {
+      art.append(el('img', { loading: 'lazy', alt: '',
+                             src: `${API}?poster=${series.series_id}&instance=${encodeURIComponent(series.instance_id)}`
+                                  + `&csrf_token=${encodeURIComponent(CSRF)}` }));
+    } else {
+      art.textContent = (series.title || '?').slice(0, 1);
+    }
+    return art;
+  }
+
+  function renderLibrary() {
     renderSeriesRollup();
     const container = $('tvr-rules');
-    const rules = visibleRules();
-    $('tvr-enable-all').textContent = `Enable shown (${rules.length})`;
-    $('tvr-disable-all').textContent = `Disable shown (${rules.length})`;
+    const rows = visibleLibrary();
     container.className = layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules';
     container.replaceChildren();
-    $('tvr-rules-empty').hidden = (settings.rules || []).length > 0;
-    // Selection drives the pane beside the list, so it is shown on the card as well as
-    // counted above it: nothing should be selected that you cannot see is selected.
+    $('tvr-only-alerts-wrap').hidden = seriesAlertList().length === 0;
     selected = new Set([...selected].filter((id) => (settings.rules || []).some((r) => r.id === id)));
     $('tvr-selected-count').hidden = selected.size === 0;
     $('tvr-selected-count').textContent = `${plural(selected.size, 'series')} selected`;
     $('tvr-select-none').hidden = selected.size === 0;
-    rules.forEach((rule) => {
-      // A queued series shows its intent instead of its retention: nothing about the
-      // keep window matters once you have decided to stop managing it.
-      if (queuedRemoval(rule)) { container.append(queuedCard(rule)); return; }
-      const blocked = isBlocked(rule.id);
-      const card = el('div', { className: `tvr-rule ${blocked ? 'blocked' : 'ok'}${rule.enabled ? '' : ' disabled'}`
-                                          + (selected.has(rule.id) ? ' selected' : '') });
-      // Anywhere that is not a control opens the series beside the list.
-      card.addEventListener('click', (event) => {
-        if (event.target.closest('button, input, select, a, label')) return;
+    if (library === null) {
+      $('tvr-rules-empty').hidden = true;
+      container.append(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
+      return;
+    }
+    if (bulkChecking) {
+      $('tvr-rules-empty').hidden = true;
+      container.append(el('div', { className: 'tvr-empty' },
+                          [el('span', { className: 'tvr-spinner' }), text(' Reading from Sonarr…')]));
+      return;
+    }
+    $('tvr-rules-empty').hidden = rows.length > 0;
+    // Three thousand cards is not a list anyone reads, and it is not a page any browser
+    // enjoys laying out. Search and the filters are how you get to the rest.
+    rows.slice(0, LIBRARY_LIMIT).forEach((row) => container.append(
+      row.rule && queuedRemoval(row.rule) ? queuedCard(row.rule) : libraryCard(row)));
+    if (rows.length > LIBRARY_LIMIT) {
+      container.append(el('p', { className: 'tvr-empty',
+                                 textContent: `${rows.length - LIBRARY_LIMIT} more — search, or narrow the filters.` }));
+    }
+  }
+  const renderRules = renderLibrary;
+
+  // One card for a series, whether or not it has a rule. The check is the difference, and
+  // it is the only difference the eye needs: everything else follows from it.
+  function libraryCard(row) {
+    const { series, rule } = row;
+    const blocked = rule ? isBlocked(rule.id) : false;
+    const card = el('div', { className: `tvr-rule ${rule ? (blocked ? 'blocked' : 'ok') : 'loose'}`
+                                        + (rule && !rule.enabled ? ' disabled' : '')
+                                        + (rule && selected.has(rule.id) ? ' selected' : '') });
+    card.addEventListener('click', (event) => {
+      if (event.target.closest('button, input, select, a, label')) return;
+      if (rule && (event.shiftKey || event.ctrlKey || event.metaKey)) {
         editing = null;
-        if (event.shiftKey || event.ctrlKey || event.metaKey) {
-          if (selected.has(rule.id)) selected.delete(rule.id); else selected.add(rule.id);
-        } else {
-          selected = selected.has(rule.id) && selected.size === 1 ? new Set() : new Set([rule.id]);
-        }
-        renderRules();
-        renderDetails();
-      });
-      const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
-      const preset = presetFor(rule);
+        if (selected.has(rule.id)) selected.delete(rule.id); else selected.add(rule.id);
+      } else if (rule) {
+        editing = null;
+        selected = selected.has(rule.id) && selected.size === 1 ? new Set() : new Set([rule.id]);
+      } else {
+        // Nothing to select on a series without a rule: opening it *is* adding it.
+        selected = new Set();
+        openEditor(null, series);
+        return;
+      }
+      renderLibrary();
+      renderDetails();
+    });
+
+    card.append(posterNode(series, 'tvr-poster tvr-poster-row'));
+    const main = el('div', { className: 'tvr-rule-main' });
+
+    const head = el('div', { className: 'tvr-rule-head' });
+    if (rule) {
       const tick = el('input', { type: 'checkbox', className: 'tvr-pick', checked: selected.has(rule.id) });
       tick.addEventListener('change', () => {
         if (tick.checked) selected.add(rule.id); else selected.delete(rule.id);
         editing = null;
-        renderRules();
+        renderLibrary();
         renderDetails();
       });
-      const head = el('div', { className: 'tvr-rule-head' }, [
-        tick,
-        alertBadge(rule),
-        el('span', { className: 'tvr-rule-title', textContent: rule.series_title || '(unmatched)' }),
-        el('span', { className: 'tvr-chip', textContent: instance ? instance.name : 'unknown instance' }),
-      ]);
-      // Retention sits with the identity, spaced away from the instance. A preset says all
-      // of it in one pill; only a custom rule needs its numbers spelled out.
-      const retention = el('span', { className: 'tvr-retention' });
-      if (preset) {
-        retention.append(el('span', { className: 'tvr-chip preset', textContent: preset.name }));
-      } else {
-        ruleSummary(rule).forEach((label) => retention.append(el('span', { className: 'tvr-chip', textContent: label })));
-        retention.append(el('span', { className: 'tvr-chip', textContent: `combine: ${rule.combine}` }));
-      }
-      if (rule.include_specials === true) retention.append(el('span', { className: 'tvr-chip', textContent: 'specials in' }));
-      if (rule.include_specials === false) retention.append(el('span', { className: 'tvr-chip', textContent: 'specials out' }));
-      const link = sonarrLink(rule);
-      if (link) head.insertBefore(link, head.children[2]);
-      head.append(retention);
-      head.append(enableToggle(rule));
-      card.append(head);
+      head.append(tick, alertBadge(rule));
+    }
+    head.append(el('span', { className: `tvr-connected ${rule ? 'yes' : 'no'}`,
+                             title: rule ? 'Has a retention rule' : 'No rule yet' },
+                   [el('i', { className: `fa fa-${rule ? 'check-circle' : 'circle-o'}` })]));
+    head.append(el('span', { className: 'tvr-rule-title', textContent: series.title }));
+    const link = rule ? sonarrLink(rule) : null;
+    if (link) head.append(link);
+    if (rule) head.append(enableToggle(rule));
+    main.append(head);
 
-      const body = el('div', { className: 'tvr-rule-body' });
+    const facts = [series.year, series.network,
+                   series.season_count ? plural(series.season_count, 'season') : '',
+                   series.total_episode_count ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
+                   series.size_on_disk ? bytes(series.size_on_disk) : '',
+                   series.ended ? 'ended' : (series.next_airing ? `next ${when(series.next_airing)}` : '')]
+      .filter(Boolean);
+    main.append(el('div', { className: 'tvr-card-series-facts', textContent: facts.join(' · ') }));
+
+    if (rule) {
+      const retention = el('span', { className: 'tvr-retention' });
+      const preset = presetFor(rule);
+      if (preset) retention.append(el('span', { className: 'tvr-chip preset', textContent: preset.name }));
+      else ruleSummary(rule).forEach((label) => retention.append(el('span', { className: 'tvr-chip', textContent: label })));
+      main.append(retention);
+
       const state = monitoring[rule.id] || {};
       const plan = state.plan;
-      const hasWork = plan && (plan.delete || plan.unmonitor || plan.monitor);
-      const line = el('div', { className: 'tvr-plan-line' });
-      const refresh = el('button', { type: 'button', className: 'tvr-icon-button',
-                                     title: 'Re-read this series from Sonarr' },
-                        [el('i', { className: 'fa fa-refresh' })]);
-      refresh.addEventListener('click', () => queueChecks([rule.id], true));
-      line.append(refresh);
-      // A sweep hides what it is about to replace. The card stays — it is the series that
-      // is being re-read, not the list — but a plan left standing during the read is a
-      // stale reading presented as a current one.
-      if (isChecking(rule.id) || bulkChecking) {
-        line.append(el('span', { className: 'tvr-plan-quiet', textContent: 'Reading from Sonarr…' }));
+      if (isChecking(rule.id)) {
+        main.append(el('div', { className: 'tvr-plan-quiet', textContent: 'Reading from Sonarr…' }));
       } else if (blocked) {
-        line.append(el('span', { className: 'tvr-plan-quiet', textContent: 'Blocked — nothing will run for this series.' }));
-      } else if (!plan) {
-        line.append(el('span', { className: 'tvr-plan-quiet', textContent: 'Not checked yet.' }));
-      } else if (plan.delete || plan.unmonitor || plan.monitor) {
-        const open = (kind) => guarded('', async () => {
+        main.append(el('div', { className: 'tvr-plan-quiet', textContent: 'Blocked — nothing will run for this series.' }));
+      } else if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
+        main.append(changeLines(plan, (kind) => guarded('', async () => {
           const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
           changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
-        });
-        const lines = changeLines(plan, open);
-        line.append(lines);
-        // The plan is recomputed on every check; the reading behind it is as old as it is.
-        line.append(el('span', { className: 'tvr-plan-quiet',
-                                 textContent: `Sonarr read ${ago(state.read_at || state.checked_at)}` }));
-      } else {
-        line.append(el('span', { className: 'tvr-plan-quiet',
-                                 textContent: 'Up to date, no changes scheduled — Sonarr read '
-                                   + ago(state.read_at || state.checked_at) }));
+        })));
+      } else if (plan) {
+        main.append(el('div', { className: 'tvr-plan-quiet', textContent: 'Nothing scheduled.' }));
       }
-      body.append(line);
-
-      const actions = el('div', { className: 'tvr-rule-actions' });
-      const editButton = el('button', { type: 'button', className: 'tvr-small', textContent: 'Edit' });
-      editButton.addEventListener('click', () => openEditor(rule));
-      actions.append(editButton);
-      if (isChecking(rule.id) || bulkChecking) {
-        [...actions.children].forEach((button) => { button.disabled = true; });
-        card.classList.add('tvr-busy-row');
-      }
-      body.append(actions);
-      card.append(body);
-      container.append(card);
-    });
-  }
-
-  $('tvr-search').addEventListener('input', renderRules);
-  $('tvr-filter').addEventListener('change', renderRules);
-  $('tvr-sort').addEventListener('change', renderRules);
-
-  // Acts on what the filter is showing, and says how many, because "all" on a filtered
-  // list of nine out of thirty-six is not what anybody means.
-  function setAllShown(wanted) {
-    return guarded('', async () => {
-      const shown = visibleRules();
-      const changing = shown.filter((rule) => !!rule.enabled !== wanted);
-      if (!changing.length) throw new Error(`Every series shown is already ${wanted ? 'enabled' : 'disabled'}.`);
-      if (!window.confirm(`${wanted ? 'Enable' : 'Disable'} ${plural(changing.length, 'series')}?`)) return;
-      changing.forEach((rule) => {
-        const target = (settings.rules || []).find((other) => other.id === rule.id);
-        if (target) target.enabled = wanted;
-      });
-      await saveSettings(`${plural(changing.length, 'series')} ${wanted ? 'enabled' : 'disabled'}.`);
-    });
+    }
+    card.append(main);
+    return card;
   }
 
   ['list', 'grid'].forEach((mode) => {
     $(`tvr-layout-${mode}`).addEventListener('click', () => {
       layout = mode;
       ['list', 'grid'].forEach((other) => $(`tvr-layout-${other}`).classList.toggle('active', other === mode));
-      renderRules();
+      renderLibrary();
     });
   });
+  ['tvr-hide-ended', 'tvr-only-alerts', 'tvr-search', 'tvr-sort'].forEach((id) => {
+    $(id).addEventListener('input', renderLibrary);
+    $(id).addEventListener('change', renderLibrary);
+  });
   $('tvr-select-shown').addEventListener('click', () => {
-    visibleRules().forEach((rule) => selected.add(rule.id));
+    visibleLibrary().forEach((row) => { if (row.rule) selected.add(row.rule.id); });
     editing = null;
-    renderRules();
+    renderLibrary();
     renderDetails();
   });
   $('tvr-select-none').addEventListener('click', () => {
     selected = new Set();
     editing = null;
-    renderRules();
+    renderLibrary();
     renderDetails();
   });
-
-  $('tvr-enable-all').addEventListener('click', () => setAllShown(true));
-  $('tvr-disable-all').addEventListener('click', () => setAllShown(false));
 
   // -- alerts ------------------------------------------------------------
   // One card per series, not one per problem. The series is the thing you act on, so it
@@ -1143,7 +1217,6 @@
     'test-instance': 'Test the connection',
     'enable-recycle-bin': 'Give Sonarr a recycle bin',
   };
-  let severityFilter = 'all';
 
   // A small mark before each problem, sized and coloured by rule. Geometric characters
   // rather than emoji: these have no colour-emoji presentation to fall back to, so they
@@ -1289,7 +1362,7 @@
     // The counts describe what this tab shows — system problems — with series problems
     // summarised by the roll-up, because they are acted on from the series card.
     const system = systemAlerts.slice();
-    const matches = (alert) => severityFilter === 'all' || alert.severity === severityFilter;
+    const matches = () => true;
     const systemBox = $('tvr-alerts-system');
     systemBox.replaceChildren();
     const shown = system.filter(matches);
@@ -1304,9 +1377,9 @@
   }
 
   $('tvr-series-rollup').addEventListener('click', () => {
-    $('tvr-filter').value = 'attention';
+    $('tvr-only-alerts').checked = true;
     $('tvr-search').value = '';
-    renderRules();
+    renderLibrary();
   });
 
   $('tvr-recheck-all').addEventListener('click', () => guarded('', async () => {
@@ -1606,7 +1679,7 @@
       settings = matched.settings;
       snapshot.settings = settings;
       render();
-      addSeriesList = null;      // one fewer series to offer
+      library = null;            // one more series with a rule
       const saved = settings.rules[settings.rules.length - 1];
       let done = '';
       // Applied now, against the saved rule, because the unmonitor half exists to stop
@@ -1816,7 +1889,7 @@
 
   // Sonarr's own record for a rule's series, from the stored reading.
   function seriesFacts(rule) {
-    const list = (addSeriesList || []).concat(...Object.values(seriesCache));
+    const list = library || [];
     return list.find((entry) => entry && entry.series_id === rule.series_id
                                 && entry.instance_id === rule.instance_id) || null;
   }
@@ -1845,86 +1918,6 @@
   // than a wall: three thousand cards is not a list anyone reads.
   const ADD_LIMIT = 60;
 
-  let addSeriesList = null;
-
-  // Loaded once, from the stored reading, and reused. Opening this view is not a reason to
-  // ask Sonarr anything — the sync already did.
-  async function loadAddSeries() {
-    const gathered = [];
-    for (const instance of (settings.instances || [])) {
-      if (instance.enabled === false) continue;
-      gathered.push(...await seriesFor(instance.id, ''));
-    }
-    addSeriesList = gathered;
-    renderAddSeries();
-  }
-
-  function renderAddSeries() {
-    const grid = $('tvr-add-grid');
-    if (!grid) return;
-    if (addSeriesList === null) {
-      $('tvr-add-empty').hidden = true;
-      grid.replaceChildren(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
-      return;
-    }
-    const taken = new Set((settings.rules || []).map((rule) => `${rule.instance_id}:${rule.series_id}`));
-    const term = ($('tvr-add-search').value || '').trim().toLowerCase();
-    const available = addSeriesList.filter((series) => {
-      if (taken.has(`${series.instance_id}:${series.series_id}`)) return false;
-      return !term || (series.title || '').toLowerCase().includes(term);
-    });
-    const order = $('tvr-add-sort').value;
-    available.sort((a, b) => (
-      order === 'added' ? String(b.added || '').localeCompare(String(a.added || ''))
-      : order === 'size' ? (b.size_on_disk || 0) - (a.size_on_disk || 0)
-      : order === 'episodes' ? (b.total_episode_count || 0) - (a.total_episode_count || 0)
-      : String(a.sort_title || a.title).localeCompare(String(b.sort_title || b.title))));
-
-    const total = addSeriesList.filter((series) =>
-      !taken.has(`${series.instance_id}:${series.series_id}`)).length;
-    $('tvr-add-count').textContent = term ? `${available.length} of ${plural(total, 'series')}`
-                                          : plural(total, 'series');
-    $('tvr-add-empty').hidden = available.length > 0;
-    grid.replaceChildren();
-    available.slice(0, ADD_LIMIT).forEach((series) => grid.append(addCard(series)));
-    if (available.length > ADD_LIMIT) {
-      grid.append(el('p', { className: 'tvr-empty',
-                            textContent: `${available.length - ADD_LIMIT} more — narrow the search.` }));
-    }
-  }
-
-  function addCard(series) {
-    const card = el('div', { className: 'tvr-card-series' });
-    const art = el('div', { className: 'tvr-poster' });
-    if (series.poster) {
-      art.append(el('img', { loading: 'lazy', alt: '',
-                             src: `${API}?poster=${series.series_id}&instance=${encodeURIComponent(series.instance_id)}`
-                                  + `&csrf_token=${encodeURIComponent(CSRF)}` }));
-    } else {
-      art.textContent = (series.title || '?').slice(0, 1);
-    }
-    const facts = [];
-    if (series.season_count) facts.push(plural(series.season_count, 'season'));
-    if (series.total_episode_count) facts.push(`${series.episode_file_count}/${series.total_episode_count} episodes`);
-    if (series.size_on_disk) facts.push(bytes(series.size_on_disk));
-    const body = el('div', { className: 'tvr-card-series-body' }, [
-      el('div', { className: 'tvr-card-series-title', textContent: series.title, title: series.title }),
-      el('div', { className: 'tvr-card-series-sub',
-                  textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
-      el('div', { className: 'tvr-card-series-facts', textContent: facts.join(' · ') }),
-    ]);
-    if (series.ended) body.append(el('span', { className: 'tvr-chip', textContent: 'ended' }));
-    else if (series.next_airing) {
-      body.append(el('span', { className: 'tvr-chip on', textContent: `next ${when(series.next_airing)}` }));
-    }
-    const add = el('button', { type: 'button', className: 'tvr-primary tvr-small', textContent: 'Add' });
-    add.addEventListener('click', () => openEditor(null, series));
-    body.append(add);
-    card.append(art, body);
-    return card;
-  }
-
-  ['tvr-add-search', 'tvr-add-sort'].forEach((id) => $(id).addEventListener('input', renderAddSeries));
 
   const REMOVAL_ACTIONS = [
     ['remove', 'Leave the series untouched in Sonarr'],
@@ -2306,6 +2299,64 @@
       settingsDirty(false);
     }));
   });
+
+  // -- stats -------------------------------------------------------------
+  // Answered from what is already kept: the run journal for what has been reclaimed, and
+  // the stored reading for the shape of the library. Nothing new is recorded for this.
+  async function renderStatsView() {
+    const data = await api('stats', {}, 'Totalling…', true);
+    const summary = $('tvr-stats-summary');
+    const runs = data.runs || {};
+    $('tvr-stats-age').textContent = runs.first ? `since ${when(runs.first)}` : 'no runs yet';
+    $('tvr-stats-empty').hidden = (runs.count || 0) > 0;
+    summary.replaceChildren(...[
+      ['RECLAIMED', bytes(runs.freed_bytes || 0), `${plural(runs.deleted || 0, 'episode')} deleted`],
+      ['RUNS', String(runs.count || 0), runs.last ? `last ${when(runs.last)}` : 'none yet'],
+      ['UNDER A RULE', plural((data.library || {}).managed || 0, 'series'),
+       `of ${plural((data.library || {}).series || 0, 'series')} in Sonarr`],
+      ['MANAGED SIZE', bytes((data.library || {}).managed_bytes || 0),
+       `library holds ${bytes((data.library || {}).bytes || 0)}`],
+    ].map(([name, value, note]) => el('div', {}, [
+      el('span', { textContent: name }), el('strong', { textContent: value }),
+      el('small', { textContent: note }),
+    ])));
+
+    const months = $('tvr-stats-months');
+    months.replaceChildren();
+    const rows = data.months || [];
+    const peak = Math.max(1, ...rows.map((row) => row.freed_bytes || 0));
+    if (!rows.length) months.append(el('p', { className: 'tvr-plan-quiet', textContent: 'Nothing reclaimed yet.' }));
+    rows.forEach((row) => {
+      const bar = el('div', { className: 'tvr-bar-fill' });
+      bar.style.width = `${Math.max(2, Math.round((row.freed_bytes / peak) * 100))}%`;
+      months.append(el('div', { className: 'tvr-bar-row' }, [
+        el('span', { className: 'tvr-bar-label', textContent: row.month }),
+        el('div', { className: 'tvr-bar' }, [bar]),
+        el('span', { className: 'tvr-bar-value', textContent: bytes(row.freed_bytes) }),
+      ]));
+    });
+
+    const shape = data.library || {};
+    $('tvr-stats-library').replaceChildren(...[
+      ['Series in Sonarr', String(shape.series || 0)],
+      ['Episodes on disk', `${shape.files || 0} of ${shape.episodes || 0}`],
+      ['Ended series', String(shape.ended || 0)],
+      ['Largest series', shape.largest ? `${shape.largest.title} — ${bytes(shape.largest.bytes)}` : '—'],
+    ].map(([name, value]) => el('div', { className: 'tvr-inline-row' }, [
+      el('span', { className: 'tvr-inline-label', textContent: name }),
+      el('span', { textContent: value }),
+    ])));
+
+    const body = $('tvr-stats-series').querySelector('tbody');
+    body.replaceChildren();
+    (data.series || []).forEach((row) => body.append(el('tr', {}, [
+      el('td', { textContent: row.title }),
+      el('td', { textContent: String(row.runs) }),
+      el('td', { textContent: String(row.deleted) }),
+      el('td', { textContent: bytes(row.freed_bytes) }),
+    ])));
+    $('tvr-stats-series').hidden = !(data.series || []).length;
+  }
 
   function renderAbout() {
     const box = $('tvr-about-state');
