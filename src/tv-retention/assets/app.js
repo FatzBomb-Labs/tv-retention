@@ -1768,7 +1768,7 @@
         const reading = existing ? (monitoring[rule.id] || {}) : {};
         const stamp = existing ? (reading.read_at || reading.checked_at)
                                : (snapshot.sync || {}).synced_at;
-        readText.textContent = `Last Sonarr sync: ${stamp ? ago(stamp) : 'never'}`;
+        readText.textContent = `Last refreshed: ${stamp ? ago(stamp) : 'never'}`;
       };
       readLine.append(readText);
       sayRead();

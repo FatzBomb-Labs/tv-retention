@@ -150,6 +150,24 @@ def fingerprint(alert) -> str:
     return hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]
 
 
+def managed_only(alerts, settings: dict) -> list:
+    """Alerts about series a run would actually touch.
+
+    A rule that is switched off is not being managed, so nothing about it is a problem to
+    report: it raises none while it is off, and every one it had comes back the moment it
+    is switched on. Nothing is deleted — the facts stay in the health cache and go on
+    being re-decided; they are simply not anybody's problem while no run will act on them.
+
+    Not the same as muting, which is a decision about a *kind* of alert across every
+    series, and which leaves a blocking alert blocking. This is a decision about one
+    series, and a series that is off is not blocked from a run it is not part of.
+    """
+    off = {rule.get('id') for rule in settings.get('rules') or [] if not rule.get('enabled')}
+    if not off:
+        return list(alerts or [])
+    return [alert for alert in alerts or [] if alert.get('rule_id') not in off]
+
+
 def annotate(alerts, settings: dict, acknowledged: dict) -> list:
     """Mark what has been acknowledged and drop what has been muted.
 
@@ -159,7 +177,7 @@ def annotate(alerts, settings: dict, acknowledged: dict) -> list:
     options = settings.get('alerts') or {}
     muted = set(options.get('muted') or [])
     shown = []
-    for alert in alerts or []:
+    for alert in managed_only(alerts, settings):
         if alert.get('kind') in muted:
             continue
         seen = (acknowledged or {}).get(alert['key'])

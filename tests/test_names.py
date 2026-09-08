@@ -194,6 +194,37 @@ class Acknowledgement(unittest.TestCase):
         kinds = [alert['kind'] for alert in self.alerts.annotate(both, settings, {})]
         self.assertEqual(kinds, ['no-recycle-bin'])
 
+    def test_a_series_that_is_switched_off_raises_nothing(self):
+        """Nothing about a series no run will touch is a problem worth reporting."""
+        settings = {'rules': [{'id': 'r1', 'enabled': False}, {'id': 'r2', 'enabled': True}]}
+        found = [self.alerts.make('ended-expired', rule_id='r1'),
+                 self.alerts.make('unmatched', rule_id='r2'),
+                 self.alerts.make('no-recycle-bin', instance_id='i1')]
+        shown = self.alerts.annotate(found, settings, {})
+        self.assertEqual([alert['kind'] for alert in shown], ['unmatched', 'no-recycle-bin'],
+                         'a rule about the instance is not about a series')
+
+    def test_switching_it_back_on_brings_its_alerts_back(self):
+        # Nothing was deleted: the facts stay in the cache and stop being ignored.
+        found = [self.alerts.make('ended-expired', rule_id='r1')]
+        off = {'rules': [{'id': 'r1', 'enabled': False}]}
+        on = {'rules': [{'id': 'r1', 'enabled': True}]}
+        self.assertEqual(self.alerts.annotate(found, off, {}), [])
+        self.assertEqual(len(self.alerts.annotate(found, on, {})), 1)
+
+    def test_muting_and_switching_off_are_not_the_same_question(self):
+        """Muting is about a kind across every series, and leaves a blocker blocking.
+
+        Switching a series off is about that one series, and it is not blocked from a run
+        it is not part of.
+        """
+        blocker = self.alerts.make('unmatched', rule_id='r1')
+        self.assertTrue(blocker['blocking'])
+        muted = self.alerts.annotate([blocker], {'alerts': {'muted': ['unmatched']}}, {})
+        self.assertEqual(muted, [], 'muted is hidden, and still blocks elsewhere')
+        off = self.alerts.annotate([blocker], {'rules': [{'id': 'r1', 'enabled': False}]}, {})
+        self.assertEqual(off, [])
+
     def test_the_header_counts_what_it_was_told_to(self):
         found = [self.alerts.make('unmatched', rule_id='r1'),
                  self.alerts.make('no-recycle-bin', instance_id='i1'),

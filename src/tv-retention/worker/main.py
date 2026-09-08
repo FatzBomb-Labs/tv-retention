@@ -1189,9 +1189,10 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
 
     for alert in cleared:
         log_line(settings, 'warning', f'resolved: {alert["title"]} — {alert.get("detail", "")}')
-    summary = alerts.summarise(health['alerts'])
+    reportable = alerts.managed_only(health['alerts'], settings)
+    summary = alerts.summarise(reportable)
     if summary['error']:
-        headline = [a for a in health['alerts'] if a['severity'] == alerts.ERROR]
+        headline = [a for a in reportable if a['severity'] == alerts.ERROR]
         notify(settings, f'TV Retention: {summary["error"]} problem(s) need attention',
                ' | '.join(f'{a["title"]}: {a["detail"]}' for a in headline)[:600],
                'warning', event='health_problems')

@@ -879,7 +879,7 @@ class Interface(unittest.TestCase):
         self.assertIn("className: 'tvr-icon-button tvr-identity-refresh'", self.js)
         # On the line whose age is the reason anyone presses it.
         self.assertIn('readLine.append(refresh);', self.js)
-        self.assertIn('`Last Sonarr sync: ${stamp ? ago(stamp) : \'never\'}`', self.js)
+        self.assertIn('`Last refreshed: ${stamp ? ago(stamp) : \'never\'}`', self.js)
         block = self.js.split('const refresh = el(')[1].split('const controls =')[0]
         self.assertIn('if (existing) {', block)          # a rule is re-checked
         self.assertIn('refreshCounts();', block)         # everything else is re-counted
