@@ -666,16 +666,20 @@ class Interface(unittest.TestCase):
             self.assertRegex(self.css, selector)
         self.assertRegex(self.css, r'\.tvr-topbar \{ position: sticky; top: 0')
 
-    def test_a_poster_is_fitted_everywhere_or_nowhere(self):
-        """There were three rules for one thing, two of them cropping.
+    def test_a_poster_is_bounded_rather_than_sized(self):
+        """A poster must not be able to exceed its box, whatever its shape.
 
-        Which won depended on where in the file it sat, so a poster fitted in the list and
-        was cut in the grid for no reason anyone could see from the markup.
+        Sizing it to the box and relying on object-fit only looked right: in a centred
+        box the percentage height has nothing definite to resolve against, so the image
+        kept its own height and the box clipped it. Bounds cannot do that.
         """
         import re
-        fits = re.findall(r'object-fit:\s*(\w+)', self.css)
-        self.assertEqual(set(fits), {'contain'}, 'a poster is cropped somewhere')
-        self.assertEqual(len(fits), 1, 'one rule, so ordering cannot decide it')
+        rule = self.css.split('.tvr-poster img {')[1].split('}')[0]
+        self.assertIn('max-width: 100%', rule)
+        self.assertIn('max-height: 100%', rule)
+        self.assertIn('height: auto', rule)
+        self.assertEqual(re.findall(r'object-fit:\s*cover', self.css), [],
+                         'a poster is cropped somewhere')
 
     def test_the_panel_heading_is_opaque(self):
         # A translucent sticky heading lets its own contents scroll through it.
