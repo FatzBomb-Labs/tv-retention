@@ -8,7 +8,7 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 There is no Python or PHP in the Webtop development container. Run
 `./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
 `python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 300 tests with no expected failures.
+there. The suite is 318 tests with no expected failures.
 
 ## Layout
 
@@ -46,18 +46,12 @@ Sonarr and decides things, plus the tick and the CLI.
 - The Run button may only be hidden on a complete, current plan. A stale or partial
   reading must never be presented as "nothing to do".
 - Media files Sonarr does not know about are reported, never deleted.
-- Deletion goes through the Sonarr API so its database and monitoring stay correct;
-  the filesystem is touched directly only for sidecars, empty folders, and the
-  plugin-managed recycle folder.
 - `worker/core.py` stays free of network access and deletions so the retention logic can
   be tested against fixtures.
-- Dry run defaults to on, and every new install starts with no retention schedule. The
-  health check is read-only and defaults to on.
+- Test Mode defaults to on, and every new install starts with no retention schedule.
 - A cached reading is always shown with its age; nothing cached may be presented as live.
 - Settings are validated on load, not only on save: a rule written before a field existed
   must still arrive with it, or the interface has nowhere to put the value.
-- Both caches store mapped objects. Changing what the Sonarr mapping produces means
-  bumping CACHE_SCHEMA, or the new field reads as absent until the cache expires.
 - Sonarr reads happen in the background, per show. They must never raise the busy overlay,
   and must never hold a show other than the one being read.
 - A widened rule offers a one-time pass over the episodes the widening brought into scope,
@@ -73,6 +67,14 @@ Sonarr and decides things, plus the tick and the CLI.
 
 ## Deployment
 
-This is an uninstalled development release. `install/tv-retention.plg` is the self-contained
-installer. Work through [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) on the target system
-before turning dry run off.
+`install/tv-retention.plg` is the self-contained installer. Work through
+[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) on the target system before turning Test Mode off.
+
+It is installed on FatzServer, so a rename is not free: the slug appears in
+`/boot/config/plugins/<slug>/`, the state folder, `/usr/local/emhttp/plugins/<slug>/`, the
+package name, and the marker in `/var/log/plugins/` that `update_cron` requires before it
+will honour a plugin's cron file at all.
+
+Development changes are deployed by copying `src/tv-retention/` over
+`/usr/local/emhttp/plugins/tv-retention/`. That is enough to test, but only reinstalling
+the `.plg` makes it survive — the package is what an Unraid upgrade restores from.
