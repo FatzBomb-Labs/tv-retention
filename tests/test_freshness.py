@@ -385,3 +385,51 @@ class Sync(unittest.TestCase):
         report = main.sync_from_sonarr(self.settings)
         self.assertTrue(report['errors'])
         self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1, 'yesterday beats nothing')
+
+    def test_a_sync_cannot_write_to_sonarr(self):
+        """Opening the plugin must never delete anything.
+
+        The sync runs unattended — on a tick, and on a page load when the reading has
+        aged out — so "it only reads" cannot be a matter of reading the code carefully.
+        Every method that changes something in Sonarr fails the test if it is reached.
+        """
+        forbidden = []
+
+        class ReadOnly:
+            def series(self):
+                return [dict(row) for row in holder.library]
+
+            def series_one(self, series_id):
+                return dict(holder.library[0])
+
+            def episodes(self, series_id, files_only=True):
+                return [dict(item) for item in holder.episodes]
+
+            def __getattr__(self, name):
+                forbidden.append(name)
+                raise AssertionError(f'a sync must not call Sonarr.{name}')
+
+        holder = self
+        main.client_for = lambda *a, **k: ReadOnly()
+        main.Sonarr = lambda instance: ReadOnly()
+        main.check_one_rule = self.originals[3]      # the real one, so it reads for itself
+        main.sync_from_sonarr(self.settings)
+        self.assertEqual(forbidden, [])
+
+    def test_a_sync_never_starts_a_run(self):
+        # Separate decisions on the tick: one keeps the data current, the other acts on it.
+        started = []
+        original = main.run
+        main.run = lambda *a, **k: started.append(True)
+        try:
+            main.sync_from_sonarr(self.settings)
+        finally:
+            main.run = original
+        self.assertEqual(started, [])
+
+    def test_a_sync_stands_aside_for_a_run_rather_than_waiting(self):
+        # A page opening mid-run must not hang behind it; the lock refuses, it does not queue.
+        with main.run_lock():
+            with self.assertRaises(Rejected):
+                with main.run_lock():
+                    pass
