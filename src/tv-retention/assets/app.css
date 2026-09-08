@@ -31,17 +31,30 @@
 
 /* Longhands, not `font: inherit`: the shorthand also sets line-height, at a specificity
    (#id + element) that no class rule can beat, so every button-shaped line in a dense
-   list silently reverted to the page's paragraph spacing. */
+   list silently reverted to the page's paragraph spacing.
+
+   The resets after the border are not cosmetic. Unraid's default-base.css styles every
+   button on the page with `margin: 10px 12px 10px 0`, `min-width: 86px`, `letter-spacing:
+   1.8px` and `white-space: nowrap`, through a `:where()` selector that contributes no
+   specificity at all — so every one of those properties this file does not name simply
+   applies. Twenty pixels of margin on every button is where the sidebar's spacing came
+   from, and an 86px floor is why a one-character icon button was never small. */
 #tv-retention button { font-family: inherit; font-size: inherit; font-weight: inherit;
   font-style: inherit; padding: 5px 12px; border-radius: 4px; cursor: pointer;
-  border: 1px solid var(--tvr-line); background: transparent; color: inherit; }
+  border: 1px solid var(--tvr-line); background: transparent; color: inherit;
+  margin: 0; min-width: 0; white-space: normal; }
 #tv-retention button:hover:not([disabled]) { background: var(--tvr-soft); }
+#tv-retention button.tvr-plan, #tv-retention button.tvr-plan-total,
+#tv-retention button.tvr-rollup, #tv-retention button.tvr-side-item,
+#tv-retention button.tvr-tree-caret {
+  text-transform: none; letter-spacing: normal; text-align: left; }
 #tv-retention button.tvr-primary { background: var(--tvr-accent); border-color: var(--tvr-accent);
   color: #1a1a1a; font-weight: 600; }
 #tv-retention button.tvr-primary:hover:not([disabled]) { filter: brightness(1.08); }
 #tv-retention button.tvr-danger { border-color: var(--tvr-bad); color: var(--tvr-bad); }
 #tv-retention button[disabled] { opacity: .45; cursor: not-allowed; }
 #tv-retention input, #tv-retention select, #tv-retention textarea { font: inherit; padding: 4px 7px;
+  line-height: 1.35; min-height: 0;
   border: 1px solid var(--tvr-line); border-radius: 4px; background: transparent; color: inherit; max-width: 100%; }
 #tv-retention input[disabled] { opacity: .45; }
 
@@ -314,7 +327,7 @@
 #tv-retention button.tvr-icon-button:hover { opacity: 1; }
 #tv-retention button.tvr-icon-button:disabled { opacity: .3; cursor: progress; }
 .tvr-uptodate { font-size: 12px; opacity: .7; }
-#tv-retention button.tvr-rollup { display: block; width: 100%; text-align: left; padding: 10px 12px;
+#tv-retention button.tvr-rollup { display: block; width: 100%; text-align: left; padding: 6px 10px;
   border-radius: 6px; border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-warn);
   margin-bottom: 12px; }
 .tvr-editor-foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--tvr-line); }

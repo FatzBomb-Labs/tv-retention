@@ -341,6 +341,30 @@ class Interface(unittest.TestCase):
         self.assertNotIn('tvr-mono', block)
         self.assertNotIn('rule.path', block)
 
+    def test_the_webgui_defaults_this_page_has_to_undo_are_undone(self):
+        """Unraid styles every button and text input through `:where()` selectors.
+
+        `:where()` contributes no specificity, so those rules never *conflict* with this
+        file — every property it does not name simply applies. That is not a cascade
+        problem anyone sees; it is twenty pixels of margin on each of fifteen sidebar
+        entries, an 86px floor under a one-character icon button, and a 2rem line box
+        around a 13px input.
+        """
+        base = self.css.split('#tv-retention button {')[1].split('}')[0]
+        for undone in ('margin: 0', 'min-width: 0', 'white-space: normal'):
+            self.assertIn(undone, base, 'the WebGUI sets this on every button')
+        fields = self.css.split('#tv-retention input, #tv-retention select,')[1].split('}')[0]
+        self.assertIn('min-height: 0', fields)
+        self.assertIn('line-height: 1.35', fields)
+
+    def test_a_sentence_shaped_button_is_not_shouted(self):
+        # Uppercase with 1.8px tracking is the WebGUI's idea of a button. These are
+        # buttons because they can be clicked, not because they are named actions.
+        block = self.css.split('#tv-retention button.tvr-plan, #tv-retention button.tvr-plan-total,')[1] \
+                        .split('}')[0]
+        self.assertIn('text-transform: none', block)
+        self.assertIn('letter-spacing: normal', block)
+
     def test_badge_styling_outranks_the_generic_button_rule(self):
         """`#tv-retention button` outranks a bare class, which is not obvious and bit once.
 
