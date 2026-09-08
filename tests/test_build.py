@@ -877,13 +877,15 @@ class Interface(unittest.TestCase):
         to have moved since the catalogue was read.
         """
         self.assertIn("className: 'tvr-icon-button tvr-identity-refresh'", self.js)
-        self.assertIn("[enabled.node, refresh]", self.js)
+        # On the line whose age is the reason anyone presses it.
+        self.assertIn('readLine.append(refresh);', self.js)
+        self.assertIn('`Last Sonarr sync: ${stamp ? ago(stamp) : \'never\'}`', self.js)
         block = self.js.split('const refresh = el(')[1].split('const controls =')[0]
         self.assertIn('if (existing) {', block)          # a rule is re-checked
         self.assertIn('refreshCounts();', block)         # everything else is re-counted
         self.assertNotIn('tvr-linky', self.js)           # the text link it replaced
         self.assertNotIn('tvr-linky', self.css)
-        # Out of flow, so stacking two controls costs the title no height.
+        # Out of flow, so the switch beside it costs the title no height.
         self.assertIn('.tvr-identity-controls { position: absolute', self.css)
 
     def test_the_form_does_not_shadow_the_map_of_readings(self):

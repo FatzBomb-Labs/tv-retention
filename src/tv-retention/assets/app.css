@@ -645,7 +645,9 @@
 .tvr-identity-line { font-size: 12px; opacity: .8; line-height: 1.35; }
 .tvr-identity-next { opacity: .95; }
 .tvr-identity-plan { margin-top: 2px; }
-.tvr-identity-read { font-size: 11px; opacity: .55; }
+.tvr-identity-read { grid-column: 1 / -1; display: flex; align-items: center;
+  justify-content: flex-end; gap: 4px; font-size: 11px; opacity: .55; }
+.tvr-identity-read:hover { opacity: .85; }
 @media (max-width: 1250px) { .tvr-series-shell.open { grid-template-columns: 1fr; } }
 
 /* Three columns that scroll independently, under a header that does not scroll at all.

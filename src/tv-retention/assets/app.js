@@ -1745,7 +1745,7 @@
       // What the next run would do, with the facts rather than in a box of its own below
       // them: it is a fact about this series, and it was the thing being scrolled past.
       const planLines = el('div', { className: 'tvr-identity-plan', hidden: true });
-      const readLine = el('div', { className: 'tvr-identity-read', hidden: true });
+      const readLine = el('div', { className: 'tvr-identity-read' });
       const sayPlan = (plan) => {
         if (!existing) return;
         planLines.hidden = false;
@@ -1760,14 +1760,15 @@
                           textContent: plan ? 'Nothing scheduled for the next run'
                                             : 'Not read from Sonarr yet' }));
       };
-      // The age of the reading, and nothing else on the line: the button that renews it
-      // sits with the other thing this series can be told to do.
+      // How old everything above it is, with the button that renews it on the same line —
+      // the age is the reason anyone presses it. A series being added has no reading of
+      // its own, so it is dated by the catalogue reading it was drawn from.
       const readText = el('span');
       const sayRead = () => {
         const reading = existing ? (monitoring[rule.id] || {}) : {};
-        const stamp = reading.read_at || reading.checked_at;
-        readText.textContent = stamp ? `Sonarr read ${ago(stamp)}` : '';
-        readLine.hidden = !readText.textContent;
+        const stamp = existing ? (reading.read_at || reading.checked_at)
+                               : (snapshot.sync || {}).synced_at;
+        readText.textContent = `Last Sonarr sync: ${stamp ? ago(stamp) : 'never'}`;
       };
       readLine.append(readText);
       sayRead();
@@ -1801,7 +1802,8 @@
           }
         });
       });
-      const controls = el('div', { className: 'tvr-identity-controls' }, [enabled.node, refresh]);
+      readLine.append(refresh);
+      const controls = el('div', { className: 'tvr-identity-controls' }, [enabled.node]);
       const identity = el('div', { className: 'tvr-identity' }, [
         controls,
         posterNode(series, 'tvr-poster tvr-poster-panel'),
@@ -1817,8 +1819,9 @@
           ]),
           // The path is Sonarr's business. Nothing here is decided by it, nothing here
           // reads it, and it was the one line long enough to wrap the panel.
-          originLine, countLine, nextLine, planLines, readLine,
+          originLine, countLine, nextLine, planLines,
         ]),
+        readLine,
       ]);
 
       // Custom first, and what a new series starts on. A preset is a decision to share
