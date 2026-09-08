@@ -293,7 +293,49 @@ class Interface(unittest.TestCase):
         """
         self.assertNotIn('function enableToggle', self.js)
         self.assertIn('tvr-rule.disabled', self.css)
-        self.assertIn("toggle(rule.enabled ? 'Enabled' : 'Disabled'", self.js)
+        self.assertIn("toggle('', rule.enabled, null, { className: 'tvr-identity-switch' })", self.js)
+
+    def test_switching_a_series_off_happens_when_it_is_switched(self):
+        """Not on Update. It is not a change to a form, it is a thing being done.
+
+        Left as a form field it needed a save to take effect, so the list behind the panel
+        went on showing a series as on after it had been switched off — and the dirty check
+        called an already-applied value an unsaved change.
+        """
+        block = self.js.split("const enabled = toggle('', rule.enabled")[1].split('const identity')[0]
+        self.assertIn("await saveSettings(null, true)", block)
+        self.assertIn('target.enabled = rule.enabled = !on', block)   # nothing written, nothing shown
+        self.assertIn('enabled.node.hidden = !existing', block)       # nothing to switch while adding
+        state = self.js.split('state: () => JSON.stringify(')[1].split('}) };')[0]
+        self.assertNotIn('enabled', state)
+
+    def test_the_switch_says_which_way_it_is_without_a_word_beside_it(self):
+        # A caption reading "Enabled" beside every series is a word that never changes.
+        block = self.js.split('const sayState = ()')[1].split('sayState();')[0]
+        self.assertIn('Click to disable it.', block)
+        self.assertIn('Click to enable it.', block)
+        self.assertIn("aria-label", block)
+        self.assertIn('.tvr-identity-switch { margin-left: auto', self.css)
+
+    def test_the_editor_does_not_repeat_what_the_panel_already_says(self):
+        """An ended series with no episodes said the same four facts four times.
+
+        The alert card's own heading named the series, counted its issues and dated the
+        reading, and its footer offered a re-check — all of which the panel around it
+        already carries.
+        """
+        self.assertIn("seriesAlertCard(rule, alertsHere, { compact: true })", self.js)
+        block = self.js.split('function seriesAlertCard')[1].split('function systemAlertCard')[0]
+        self.assertIn('if (compact) return card;', block)
+        self.assertIn("if (!compact) {", block)
+
+    def test_the_path_is_sonarrs_business_and_is_not_shown(self):
+        # Nothing in the editor is decided by it, and it was the one line long enough to
+        # wrap the panel.
+        block = self.js.split("const identity = el('div', { className: 'tvr-identity' }")[1] \
+                       .split('\n      ]);')[0]
+        self.assertNotIn('tvr-mono', block)
+        self.assertNotIn('rule.path', block)
 
     def test_badge_styling_outranks_the_generic_button_rule(self):
         """`#tv-retention button` outranks a bare class, which is not obvious and bit once.
@@ -799,3 +841,27 @@ class Interface(unittest.TestCase):
             body = self.js.split(block)[1].split('\n  }')[0]
             self.assertNotIn('sonarrLink', body)
         self.assertIn('sonarrLink(Object.assign({}, rule,', self.js)
+
+    def test_the_title_row_gives_the_link_and_the_switch_their_own_room(self):
+        # Butted against the title, the link read as part of the name.
+        self.assertIn('.tvr-identity-title { display: flex; align-items: center; gap: 8px;', self.css)
+
+    def test_a_change_badge_is_as_wide_as_its_own_number(self):
+        """Grid items stretch to the widest in the column unless told not to.
+
+        So a badge reading "4" was drawn as wide as one reading "186", and the poster
+        carried a column of mostly empty pills.
+        """
+        block = self.css.split('.tvr-card-changes {')[1].split('}')[0]
+        self.assertIn('justify-items: start', block)
+
+    def test_the_banner_sits_under_the_series_it_names(self):
+        # And still sticks, so the close button survives the poster scrolling away.
+        block = self.js.split('const context = editing.build(body);')[1].split('const actions')[0]
+        self.assertIn("body.querySelector('.tvr-identity')", block)
+        self.assertIn('identity.after(head)', block)
+
+    def test_nothing_still_reaches_for_the_tab_bar_that_was_removed(self):
+        # querySelector returns null and .click() on null throws, so each of these was a
+        # dead button waiting for someone to press it.
+        self.assertNotIn('.tvr-tabs', self.js)

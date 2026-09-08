@@ -177,21 +177,6 @@
   }
 
   // -- tabs --------------------------------------------------------------
-  // Read from the markup rather than listed here. A hand-kept copy disagreed with the page
-  // the moment a tab was removed: the lookup for the departed panel returned null, setting
-  // hidden on null threw, and the loop that shows one panel and hides the rest died at
-  // that point — so every tab listed after the missing one stopped appearing at all. The
-  // list the markup already carries is the one to trust.
-  const TABS = [...document.querySelectorAll('.tvr-tabs button')].map((button) => button.dataset.tab);
-  document.querySelectorAll('.tvr-tabs button').forEach((button) => {
-    button.addEventListener('click', () => {
-      document.querySelectorAll('.tvr-tabs button').forEach((other) => other.classList.toggle('active', other === button));
-      TABS.forEach((name) => { $(`tvr-panel-${name}`).hidden = name !== button.dataset.tab; });
-      if (button.dataset.tab === 'log') startLog();
-      else stopLog();
-    });
-  });
-
   function browseFolder(startPath, onPick) {
     let current = startPath || '/mnt/user';
     dialog('Choose a folder', (body) => {
@@ -1269,22 +1254,29 @@
     const options = config || {};
     const severity = worstSeverity(list);
     const blocked = list.some((alert) => alert.blocking);
-    const card = el('div', { className: `tvr-alert-card ${severity}` });
-    const head = el('div', { className: 'tvr-alert-card-head' }, [
-      el('span', { className: 'tvr-rule-title', textContent: rule.series_title || rule.path }),
-      el('span', { className: 'tvr-alert-count', textContent: plural(list.length, 'issue') }),
-    ]);
-    if (blocked) head.append(el('span', { className: 'tvr-tag blocking', textContent: 'blocked' }));
-    const state = monitoring[rule.id];
-    head.append(el('span', { className: 'tvr-alert-age',
-                             textContent: state ? `Sonarr read ${ago(state.read_at || state.checked_at)}` : 'not checked' }));
-    card.append(head);
+    // Compact is the series editor, where the panel above has already named the series,
+    // counted its issues, dated the reading and offered a re-read. Repeating all four
+    // under a heading made an ended series with no episodes say the same thing four ways.
+    const compact = !!options.compact;
+    const card = el('div', { className: `tvr-alert-card ${severity}${compact ? ' compact' : ''}` });
+    if (!compact) {
+      const head = el('div', { className: 'tvr-alert-card-head' }, [
+        el('span', { className: 'tvr-rule-title', textContent: rule.series_title || rule.path }),
+        el('span', { className: 'tvr-alert-count', textContent: plural(list.length, 'issue') }),
+      ]);
+      if (blocked) head.append(el('span', { className: 'tvr-tag blocking', textContent: 'blocked' }));
+      const state = monitoring[rule.id];
+      head.append(el('span', { className: 'tvr-alert-age',
+                               textContent: state ? `Sonarr read ${ago(state.read_at || state.checked_at)}` : 'not checked' }));
+      card.append(head);
+    }
     list.forEach((alert) => card.append(alertItem(alert)));
+    if (compact) return card;
     const foot = el('div', { className: 'tvr-alert-foot' });
     if (!options.hideOpen) {
       const open = el('button', { type: 'button', className: 'tvr-small', textContent: 'Show in Series' });
       open.addEventListener('click', () => {
-        document.querySelector('.tvr-tabs button[data-tab="series"]').click();
+        showView('series-all');
         $('tvr-search').value = rule.series_title || rule.path;
         renderRules();
       });
@@ -1336,7 +1328,7 @@
         return;
       }
       if (alert.action === 'open-instance' || alert.action === 'test-instance') {
-        document.querySelector('.tvr-tabs button[data-tab="settings"]').click();
+        showView('media-connections');
         const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
         if (instance) editInstance(instance);
         return;
@@ -1661,21 +1653,62 @@
                      series.size_on_disk ? bytes(series.size_on_disk) : '',
                      series.ended ? 'ended' : (series.next_airing ? `next ${when(series.next_airing)}` : '')]
         .filter(Boolean);
-      const enabled = toggle(rule.enabled ? 'Enabled' : 'Disabled', rule.enabled, null, {});
+      // Not a field on a form: switching a series off is a thing you do, not a change you
+      // save, so it takes effect where it is clicked and the list redraws behind it. No
+      // caption either — the tooltip says which way it is, and one word beside the name
+      // was a word that never changed.
+      const enabled = toggle('', rule.enabled, null, { className: 'tvr-identity-switch' });
+      const sayState = () => {
+        const on = enabled.input.checked;
+        enabled.node.title = on
+          ? 'Enabled — every run includes this series. Click to disable it.'
+          : 'Disabled — every run skips this series. Click to enable it.';
+        enabled.input.setAttribute('aria-label', on ? 'Enabled' : 'Disabled');
+      };
+      sayState();
+      // Only a saved rule has something to switch. While adding one there is nothing yet
+      // to disable, and a switch that did nothing would still look like it had.
+      enabled.node.hidden = !existing;
+      if (existing) {
+        enabled.input.addEventListener('change', () => {
+          const on = enabled.input.checked;
+          const target = (settings.rules || []).find((other) => other.id === rule.id);
+          if (!target) return;
+          enabled.input.disabled = true;
+          guarded('', async () => {
+            try {
+              target.enabled = rule.enabled = on;
+              await saveSettings(null, true);
+              sayState();
+              notice(`${rule.series_title} ${on ? 'enabled' : 'disabled'}.`, 'ok');
+            } catch (error) {
+              // Nothing was written, so nothing should look as though it was.
+              target.enabled = rule.enabled = !on;
+              enabled.input.checked = !on;
+              sayState();
+              throw error;
+            } finally {
+              enabled.input.disabled = false;
+            }
+          });
+        });
+      }
       const identity = el('div', { className: 'tvr-identity' }, [
         posterNode(series, 'tvr-poster tvr-poster-panel'),
         el('div', { className: 'tvr-identity-body' }, [
           el('div', { className: 'tvr-identity-title' }, [
-            el('span', { textContent: series.title || rule.series_title }),
+            el('span', { className: 'tvr-identity-name',
+                         textContent: series.title || rule.series_title }),
             // The one place it belongs: beside the name, where you are already looking at
             // this series. On every card in a list it was three thousand links to nowhere
             // anyone was going.
             sonarrLink(Object.assign({}, rule, { slug: series.slug || rule.slug,
                                                  instance_id: series.instance_id })) || text(''),
+            enabled.node,
           ]),
+          // The path is Sonarr's business. Nothing here is decided by it, nothing here
+          // reads it, and it was the one line long enough to wrap the panel.
           el('div', { className: 'tvr-details-facts', textContent: facts.join(' · ') }),
-          el('div', { className: 'tvr-details-facts tvr-mono', textContent: series.path || rule.path || '' }),
-          enabled.node,
         ]),
       ]);
 
@@ -1809,7 +1842,7 @@
         const state = monitoring[rule.id] || {};
         const plan = state.plan;
         const alertsHere = seriesAlerts(rule.id);
-        if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { hideOpen: true }));
+        if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
         const box = el('div', { className: 'tvr-panel-plan' });
         box.append(el('div', { className: 'tvr-once-title', textContent: 'Next run' }));
         if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
@@ -1846,7 +1879,6 @@
                                         combine: conditions.combine.value,
                                         include_specials: specials.value,
                                         monitoring: monitoring.value,
-                                        enabled: enabled.input.checked,
                                         once: monitorNew.input.checked }) };
     },
       save: async (context) => {
@@ -1941,10 +1973,13 @@
 
     {
       head.append(el('h3', { textContent: editing.title }), el('span', { className: 'tvr-spacer' }), close);
-      pane.append(head);
       const body = el('div', { className: 'tvr-details-body' });
       pane.append(body);
       const context = editing.build(body);
+      // Under the identity, not above it. It still sticks, so the close button stays
+      // reachable once the poster has scrolled away.
+      const identity = body.querySelector('.tvr-identity');
+      if (identity) identity.after(head); else body.prepend(head);
       const actions = el('div', { className: 'tvr-actions' });
       const primary = el('button', { type: 'button', className: 'tvr-primary',
                                      textContent: editing.existing ? 'Update' : 'Add series' });
