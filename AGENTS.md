@@ -60,7 +60,10 @@ Sonarr and decides things, plus the tick and the CLI.
   and must never hold a show other than the one being read.
 - A widened rule offers a one-time pass over the episodes the widening brought into scope,
   and offers it only then. The window as it was travels with the request, so "newly scoped"
-  stays answerable at run time: episodes move, and a remembered list of ids does not.
+  stays answerable later: episodes move, and a remembered list of ids does not. Monitoring
+  is the only half offered, because it is the only half that is a choice — a run unmonitors
+  everything outside the window regardless, so saving does it too rather than leaving Sonarr
+  a day to fetch what that run would delete.
 - Both object caches are keyed by the shape of what Sonarr's mapping produces, not only by
   a schema number. Listing a field in `SERIES_FIELDS` or `EPISODE_FIELDS` *is* the cache
   bump, and a test fails if the mapping produces a key the list does not name.

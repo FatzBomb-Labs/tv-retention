@@ -1582,8 +1582,6 @@
       const before = existing ? scopeOf(rule) : null;
       const monitorNew = toggle('Once, on save: monitor the episodes this newly covers',
                                 false, null, { className: 'tvr-row-switch' });
-      const unmonitorOut = toggle('Once, on save: unmonitor everything outside the keep window',
-                                  false, null, { className: 'tvr-row-switch' });
       // What each action would actually touch, against the window as it stands in the
       // form. Without it the two toggles are a decision made blind.
       const monitorCount = el('div', { className: 'tvr-once-count' });
@@ -1595,10 +1593,13 @@
                                    + 'Leave this off and nothing is fetched — the window simply '
                                    + 'covers them from now on.' }),
         monitorCount,
-        unmonitorOut.node,
-        el('small', { textContent: 'Stops Sonarr fetching episodes the next run would delete. '
-                                   + 'A run does this too, so this only closes the gap between '
-                                   + 'saving and the next run.' }),
+      ]);
+      // Not a toggle. A run unmonitors everything outside the window whatever anyone
+      // chooses, so offering the choice here only decided whether it happened now or
+      // within a day — and off by default meant Sonarr spent that day fetching episodes
+      // the next run would delete. It is stated instead, because it still happens.
+      const unmonitorNote = el('div', { className: 'tvr-once' }, [
+        el('div', { className: 'tvr-once-title', textContent: 'On save' }),
         unmonitorCount,
       ]);
 
@@ -1629,8 +1630,9 @@
             monitorCount.textContent += ` (${byHand} more were unmonitored by hand and are left alone)`;
           }
           unmonitorCount.textContent = counts.out_scope_monitored
-            ? `${counts.out_scope_monitored}/${counts.out_scope} episodes out of ${title}'s keep scope are still monitored`
-            : `Nothing to unmonitor — nothing outside ${title}'s keep scope is monitored`;
+            ? `${counts.out_scope_monitored}/${counts.out_scope} episodes out of ${title}'s keep scope are still `
+              + 'monitored, and will be unmonitored so Sonarr stops fetching them'
+            : `Nothing outside ${title}'s keep scope is monitored`;
         }), 250);
       };
       const draftScope = () => ({
@@ -1643,15 +1645,10 @@
       const updateScopeRow = () => {
         const mode = monitoring.value || (settings.retention || {}).monitoring || 'unmonitor-only';
         const widens = !existing || widensScope(before, draftScope());
-        monitorNew.node.hidden = mode === 'full-sync' || !widens;
-        if (monitorNew.node.hidden) monitorNew.input.checked = false;
-        const narrows = !existing || !widens;
-        unmonitorOut.node.hidden = mode === 'full-sync' || (existing && widens && !narrows);
-        if (unmonitorOut.node.hidden) unmonitorOut.input.checked = false;
-        scopeRow.hidden = monitorNew.node.hidden && unmonitorOut.node.hidden;
-        [...scopeRow.querySelectorAll('small')].forEach((note, index) => {
-          note.hidden = index === 0 ? monitorNew.node.hidden : unmonitorOut.node.hidden;
-        });
+        // Full sync monitors the window continuously, so a one-time pass over it is a
+        // thing already happening; and a window that has not grown has covered nothing new.
+        scopeRow.hidden = mode === 'full-sync' || !widens;
+        if (scopeRow.hidden) monitorNew.input.checked = false;
       };
       [monitoring, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
        conditions.combine, specials].forEach((input) => {
@@ -1690,8 +1687,8 @@
         conditions.node,
         field('Season 0 / specials', specials),
         field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
-        scopeRow);
-      return { presetSelect, conditions, specials, monitoring, monitorNew, unmonitorOut,
+        scopeRow, unmonitorNote);
+      return { presetSelect, conditions, specials, monitoring, monitorNew,
                before, enabled,
                // A rule needs somewhere to keep from: a preset, or at least one value.
                valid: () => !!(presetSelect.value || conditions.days.value
@@ -1704,7 +1701,7 @@
                                         include_specials: specials.value,
                                         monitoring: monitoring.value,
                                         enabled: enabled.input.checked,
-                                        once: monitorNew.input.checked || unmonitorOut.input.checked }) };
+                                        once: monitorNew.input.checked }) };
     },
       save: async (context) => {
       const draft = {
@@ -1736,11 +1733,13 @@
       let done = '';
       // Applied now, against the saved rule, because the unmonitor half exists to stop
       // downloads that would otherwise happen before the next run.
-      if (saved && (context.monitorNew.input.checked || context.unmonitorOut.input.checked)) {
+      if (saved) {
         const pass = await api('scope-pass', {
           rule_id: saved.id,
           monitor_new: context.monitorNew.input.checked,
-          unmonitor_outside: context.unmonitorOut.input.checked,
+          // Always: a run does this regardless, so leaving it until then only gives Sonarr
+          // a day to fetch episodes that run would delete.
+          unmonitor_outside: true,
           previous_scope: context.before,
         }, 'Setting monitoring in Sonarr…');
         const parts = [];

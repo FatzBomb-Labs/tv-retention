@@ -744,3 +744,19 @@ class Interface(unittest.TestCase):
                         block.index('settings.profiles'),
                         'Custom is not the first option')
         self.assertIn("profile_id: '',", self.js)
+
+    def test_unmonitoring_outside_the_window_is_not_a_choice(self):
+        """A run does it regardless, so offering it only chose now or within a day.
+
+        Off by default, that day was one Sonarr spent fetching episodes the run would
+        delete. It is stated on the panel instead, because it still happens.
+        """
+        self.assertNotIn('unmonitorOut', self.js)
+        self.assertIn('unmonitor_outside: true', self.js)
+        self.assertIn('will be unmonitored so Sonarr stops fetching them', self.js)
+
+    def test_monitoring_newly_covered_episodes_remains_a_choice(self):
+        # The other half is a real decision: nothing else will ever do it under Unmonitor
+        # only, and saying yes can mean hundreds of gigabytes.
+        self.assertIn('monitorNew', self.js)
+        self.assertIn('monitor_new: context.monitorNew.input.checked', self.js)
