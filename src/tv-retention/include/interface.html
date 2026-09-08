@@ -1,16 +1,21 @@
-<header class="tvr-head">
-  <div>
-    <div class="tvr-eyebrow">LIBRARY RETENTION</div>
-    <h1>TV Retention <span class="tvr-version" id="tvr-version"></span></h1>
-    <p>Keep a set number of days, episodes, or seasons per series. Every rule is bound to a Sonarr series, and deletions go through Sonarr so its database and monitoring stay correct.</p>
+<header class="tvr-topbar">
+  <div class="tvr-brand">
+    <i class="fa fa-trash" aria-hidden="true"></i>
+    <span class="tvr-brand-name">TV Retention</span>
+    <span class="tvr-version" id="tvr-version"></span>
   </div>
-  <div class="tvr-head-actions">
-    <div class="tvr-head-run">
-      <button type="button" id="tvr-refresh-all" class="tvr-icon-button tvr-icon-large" title="Sync with Sonarr now — everything else on this page is answered from the last sync"><i class="fa fa-refresh"></i></button>
-      <button type="button" id="tvr-run" class="tvr-primary">Run now</button>
+  <div class="tvr-topbar-actions">
+    <div class="tvr-changes" id="tvr-changes">
+      <button type="button" id="tvr-changes-button" class="tvr-changes-button" aria-expanded="false">
+        <span id="tvr-changes-label">No scheduled changes</span>
+        <i class="fa fa-caret-down" id="tvr-changes-caret" aria-hidden="true"></i>
+      </button>
+      <div class="tvr-changes-menu" id="tvr-changes-menu" hidden></div>
     </div>
-    <span id="tvr-uptodate" class="tvr-uptodate" hidden></span>
-    <div id="tvr-plan-header" class="tvr-plan-header"></div>
+    <button type="button" id="tvr-refresh-all" class="tvr-icon-button tvr-icon-large"
+            title="Sync with Sonarr now — everything else on this page is answered from the last sync"><i class="fa fa-refresh"></i></button>
+    <button type="button" id="tvr-run" class="tvr-icon-button tvr-icon-large tvr-run"
+            title="Run now"><i class="fa fa-play"></i></button>
   </div>
 </header>
 
@@ -19,239 +24,343 @@
 <div id="tvr-checking" class="tvr-banner" hidden></div>
 <div id="tvr-test-banner" class="tvr-banner" hidden><strong>Test mode is on.</strong> The schedule runs and reports exactly what it would do, but changes nothing. Manual runs are not affected. Turn it off under <em>Settings → Schedule</em> once you are satisfied.</div>
 
-<section class="tvr-stats" aria-label="Summary">
-  <div><span>SERIES</span><strong id="tvr-stat-rules">0</strong><small id="tvr-stat-rules-sub">None yet</small></div>
-  <div><span>NEEDS ATTENTION</span><strong id="tvr-stat-alerts">0</strong><small id="tvr-stat-alerts-sub">&nbsp;</small></div>
-  <div><span>LAST RUN</span><strong id="tvr-stat-last">Never</strong><small id="tvr-stat-last-sub">&nbsp;</small></div>
-  <div><span>SCHEDULE</span><strong id="tvr-stat-schedule">Off</strong><small id="tvr-stat-schedule-sub">&nbsp;</small></div>
-</section>
-
-<nav class="tvr-tabs" aria-label="TV Retention views">
-  <button type="button" class="active" data-tab="series">Series <span class="tvr-tab-badge" id="tvr-series-badge" hidden></span></button>
-  <button type="button" data-tab="alerts">Alerts <span class="tvr-tab-badge" id="tvr-tab-badge" hidden></span></button>
-  <button type="button" data-tab="presets">Presets</button>
-  <button type="button" data-tab="settings">Settings</button>
-  <button type="button" data-tab="history">Job History</button>
-  <button type="button" data-tab="log">Live Log</button>
-  <button type="button" data-tab="help">Help</button>
-</nav>
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-series" class="tvr-panel">
-  <div class="tvr-toolbar tvr-series-toolbar">
-    <label class="tvr-field"><span>Search</span><input id="tvr-search" type="search" placeholder="Series name or folder…"></label>
-    <label class="tvr-field"><span>Sort</span><select id="tvr-sort">
-      <option value="attention">Needs attention</option>
-      <option value="title">Title</option>
-      <option value="title-desc">Title, Z–A</option>
-      <option value="checked">Least recently checked</option>
-      <option value="keep">Keep window, shortest first</option>
-      <option value="preset">Preset</option>
-      <option value="instance">Sonarr instance</option>
-    </select></label>
-    <label class="tvr-field"><span>Filter</span><select id="tvr-filter">
-      <option value="all">All series</option>
-      <option value="enabled">Enabled only</option>
-      <option value="disabled">Disabled only</option>
-      <option value="attention">Needs attention</option>
-      <option value="blocked">Blocked only</option>
-    </select></label>
-    <span class="tvr-spacer"></span>
-    <button type="button" id="tvr-enable-all" class="tvr-small">Enable shown</button>
-    <button type="button" id="tvr-disable-all" class="tvr-small">Disable shown</button>
-    <button type="button" id="tvr-add" class="tvr-primary">Add series</button>
-  </div>
-  <button type="button" id="tvr-series-rollup" class="tvr-rollup" hidden></button>
-  <div id="tvr-rules" class="tvr-rules"></div>
-  <p id="tvr-rules-empty" class="tvr-empty">No series yet. Choose <strong>Add series</strong> to pick one from Sonarr.</p>
-</section>
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-alerts" class="tvr-panel" hidden>
-  <div class="tvr-toolbar">
-    <div class="tvr-seg" role="group" aria-label="Filter by severity">
-      <button type="button" class="active" data-severity="all">All <span id="tvr-count-all">0</span></button>
-      <button type="button" data-severity="error">Errors <span id="tvr-count-error">0</span></button>
-      <button type="button" data-severity="warning">Warnings <span id="tvr-count-warning">0</span></button>
-      <button type="button" data-severity="notice">Notices <span id="tvr-count-notice">0</span></button>
+<div class="tvr-shell">
+  <nav class="tvr-side" aria-label="Sections">
+    <div class="tvr-side-group">
+      <button type="button" class="tvr-side-head" data-view="alerts-all">
+        <span>Alerts</span><span class="tvr-tab-badge" id="tvr-side-badge-alerts" hidden></span>
+      </button>
+      <button type="button" class="tvr-side-item" data-view="alerts-all">All <span class="tvr-side-count" id="tvr-count-all">0</span></button>
+      <button type="button" class="tvr-side-item" data-view="alerts-error">Errors <span class="tvr-side-count" id="tvr-count-error">0</span></button>
+      <button type="button" class="tvr-side-item" data-view="alerts-warning">Warnings <span class="tvr-side-count" id="tvr-count-warning">0</span></button>
+      <button type="button" class="tvr-side-item" data-view="alerts-notice">Notices <span class="tvr-side-count" id="tvr-count-notice">0</span></button>
     </div>
-    <span class="tvr-spacer"></span>
-    <button type="button" id="tvr-recheck-all" class="tvr-secondary">Re-check everything</button>
-  </div>
-  <h2 class="tvr-h2">System</h2>
-  <div id="tvr-alerts-system" class="tvr-rules"></div>
-  <p id="tvr-alerts-system-empty" class="tvr-empty">Nothing wrong with the installation.</p>
-</section>
 
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-presets" class="tvr-panel" hidden>
-  <p class="tvr-lede">A preset is a named retention setting — <strong>Keep 30 days</strong>, <strong>Keep 2 seasons</strong> — that any number of series can point at. Change the preset and every series using it changes with it.</p>
-  <div id="tvr-presets" class="tvr-rules"></div>
-  <p id="tvr-presets-empty" class="tvr-empty">No presets yet. Series can still carry their own values.</p>
-  <div class="tvr-actions"><button type="button" id="tvr-add-preset" class="tvr-primary">Add preset</button></div>
-</section>
-
-<!-- ------------------------------------------------------------------ -->
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-settings" class="tvr-panel" hidden>
-  <h2 class="tvr-h2">Schedule</h2>
-  <div class="tvr-card">
-    <div class="tvr-card-head">
-      <h2 class="tvr-card-title">Scheduled run</h2>
-      <label class="tvr-switch"><input type="checkbox" id="tvr-schedule-enabled"><span class="tvr-slider"></span><span class="tvr-switch-text">Enabled</span></label>
+    <div class="tvr-side-group">
+      <button type="button" class="tvr-side-head" data-view="series-list">
+        <span>Series</span><span class="tvr-tab-badge" id="tvr-side-badge-series" hidden></span>
+      </button>
+      <button type="button" class="tvr-side-item" data-view="series-list">Connected series <span class="tvr-side-count" id="tvr-count-series">0</span></button>
+      <button type="button" class="tvr-side-item" data-view="series-add">Add series</button>
+      <button type="button" class="tvr-side-item" data-view="series-presets">Presets <span class="tvr-side-count" id="tvr-count-presets">0</span></button>
     </div>
-    <p class="tvr-lede" id="tvr-schedule-summary">Off</p>
-    <div class="tvr-row">
-      <label class="tvr-field"><span>When to run</span>
-        <select id="tvr-freq">
-          <option value="hourly">Hourly</option>
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-          <option value="custom">Custom cron…</option>
+
+    <div class="tvr-side-group">
+      <button type="button" class="tvr-side-head" data-view="history-jobs"><span>History</span></button>
+      <button type="button" class="tvr-side-item" data-view="history-jobs">Job history</button>
+      <button type="button" class="tvr-side-item" data-view="history-logs">Logs</button>
+    </div>
+
+    <div class="tvr-side-group">
+      <button type="button" class="tvr-side-head" data-view="settings-schedule"><span>Settings</span></button>
+      <button type="button" class="tvr-side-item" data-view="settings-schedule">Schedule</button>
+      <button type="button" class="tvr-side-item" data-view="settings-retention">Retention</button>
+      <button type="button" class="tvr-side-item" data-view="settings-connections">Connections</button>
+      <button type="button" class="tvr-side-item" data-view="settings-storage">Storage</button>
+      <button type="button" class="tvr-side-item" data-view="settings-logging">Logging</button>
+      <button type="button" class="tvr-side-item" data-view="settings-notifications">Notifications</button>
+      <button type="button" class="tvr-side-item" data-view="settings-about">About</button>
+      <button type="button" class="tvr-side-item" data-view="settings-help">Help</button>
+    </div>
+  </nav>
+
+  <main class="tvr-main">
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-alerts-all" class="tvr-view">
+    <div class="tvr-view-head">
+      <h2 id="tvr-alerts-title">Alerts</h2>
+      <span class="tvr-spacer"></span>
+      <button type="button" id="tvr-recheck-all" class="tvr-secondary">Re-check everything</button>
+    </div>
+    <button type="button" id="tvr-series-rollup" class="tvr-rollup" hidden></button>
+    <h3 class="tvr-h3">System</h3>
+    <div id="tvr-alerts-system" class="tvr-rules"></div>
+    <p id="tvr-alerts-system-empty" class="tvr-empty">Nothing wrong with the installation.</p>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-series-list" class="tvr-view" hidden>
+    <div class="tvr-view-head">
+      <h2>Connected series</h2>
+      <span class="tvr-spacer"></span>
+      <button type="button" id="tvr-enable-all" class="tvr-small">Enable shown</button>
+      <button type="button" id="tvr-disable-all" class="tvr-small">Disable shown</button>
+    </div>
+    <div class="tvr-toolbar tvr-series-toolbar">
+      <label class="tvr-field"><span>Search</span><input id="tvr-search" type="search" placeholder="Series name or folder…"></label>
+      <label class="tvr-field"><span>Sort</span><select id="tvr-sort">
+        <option value="attention">Needs attention</option>
+        <option value="title">Title</option>
+        <option value="title-desc">Title, Z–A</option>
+        <option value="checked">Least recently checked</option>
+        <option value="keep">Keep window, shortest first</option>
+        <option value="preset">Preset</option>
+        <option value="instance">Sonarr instance</option>
+      </select></label>
+      <label class="tvr-field"><span>Filter</span><select id="tvr-filter">
+        <option value="all">All series</option>
+        <option value="enabled">Enabled only</option>
+        <option value="disabled">Disabled only</option>
+        <option value="attention">Needs attention</option>
+        <option value="blocked">Blocked only</option>
+      </select></label>
+    </div>
+    <div id="tvr-rules" class="tvr-rules"></div>
+    <p id="tvr-rules-empty" class="tvr-empty">No series yet. Choose <strong>Add series</strong> to pick one from Sonarr.</p>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-series-add" class="tvr-view" hidden>
+    <div class="tvr-view-head">
+      <h2>Add series</h2>
+      <span class="tvr-spacer"></span>
+      <span class="tvr-chip" id="tvr-add-count">—</span>
+    </div>
+    <p class="tvr-lede">Everything Sonarr holds that has no rule here yet, from the last sync. A series with no episodes is fine to add: the rule waits for its first import.</p>
+    <div class="tvr-toolbar">
+      <label class="tvr-field tvr-grow"><span>Search</span><input id="tvr-add-search" type="search" placeholder="Title…"></label>
+      <label class="tvr-field"><span>Sort</span><select id="tvr-add-sort">
+        <option value="title">Title</option>
+        <option value="added">Recently added to Sonarr</option>
+        <option value="size">Largest on disk</option>
+        <option value="episodes">Most episodes</option>
+      </select></label>
+    </div>
+    <div id="tvr-add-grid" class="tvr-grid"></div>
+    <p id="tvr-add-empty" class="tvr-empty">Every series Sonarr knows about already has a rule.</p>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-series-presets" class="tvr-view" hidden>
+    <div class="tvr-view-head">
+      <h2>Presets</h2>
+      <span class="tvr-spacer"></span>
+      <button type="button" id="tvr-add-preset" class="tvr-primary">Add preset</button>
+    </div>
+    <p class="tvr-lede">A preset is a named retention setting — <strong>Keep 30 days</strong>, <strong>Keep 2 seasons</strong> — that any number of series can point at. Change the preset and every series using it changes with it.</p>
+    <div id="tvr-presets" class="tvr-rules"></div>
+    <p id="tvr-presets-empty" class="tvr-empty">No presets yet. Series can still carry their own values.</p>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-history-jobs" class="tvr-view" hidden>
+    <div class="tvr-view-head">
+      <h2>Job history</h2>
+      <span class="tvr-spacer"></span>
+      <button type="button" id="tvr-clear-history" class="tvr-secondary">Clear history</button>
+    </div>
+    <div id="tvr-last-run"></div>
+    <div class="tvr-scroll"><table class="tvr-table" id="tvr-history-table">
+      <thead><tr><th>Started</th><th>Trigger</th><th>Mode</th><th>Planned</th><th>Deleted</th><th>Reclaimed</th><th>Notes</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <p id="tvr-history-empty" class="tvr-empty">No runs recorded yet.</p>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-history-logs" class="tvr-view" hidden>
+    <div class="tvr-view-head">
+      <h2>Logs</h2>
+      <span class="tvr-spacer"></span>
+      <label class="tvr-switch"><input type="checkbox" id="tvr-log-follow" checked><span class="tvr-slider"></span><span class="tvr-switch-text">Follow</span></label>
+      <span id="tvr-log-status" class="tvr-chip">idle</span>
+      <button type="button" id="tvr-log-clear" class="tvr-secondary">Clear view</button>
+    </div>
+    <pre id="tvr-log" class="tvr-log" aria-live="polite"></pre>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-schedule" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Schedule</h2></div>
+    <p class="tvr-lede">Changes here save as you make them.</p>
+    <div class="tvr-card">
+      <div class="tvr-card-head">
+        <h3 class="tvr-card-title">Scheduled run</h3>
+        <label class="tvr-switch"><input type="checkbox" id="tvr-schedule-enabled"><span class="tvr-slider"></span><span class="tvr-switch-text">Enabled</span></label>
+      </div>
+      <p class="tvr-lede" id="tvr-schedule-summary">Off</p>
+      <div class="tvr-row">
+        <label class="tvr-field"><span>When to run</span>
+          <select id="tvr-freq">
+            <option value="hourly">Hourly</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="custom">Custom cron…</option>
+          </select>
+        </label>
+        <label class="tvr-field" id="tvr-field-weekday"><span>Day</span><select id="tvr-weekday"></select></label>
+        <label class="tvr-field" id="tvr-field-monthly-mode"><span>Which day</span>
+          <select id="tvr-monthly-mode">
+            <option value="day">Day of the month</option>
+            <option value="first">First…</option>
+            <option value="last">Last…</option>
+          </select>
+        </label>
+        <label class="tvr-field" id="tvr-field-monthly-day"><span>Day of month</span><select id="tvr-monthly-day"></select></label>
+        <label class="tvr-field" id="tvr-field-monthly-weekday"><span>Of</span><select id="tvr-monthly-weekday"></select></label>
+        <label class="tvr-field" id="tvr-field-hour"><span>Hour</span><select id="tvr-hour"></select></label>
+        <label class="tvr-field" id="tvr-field-minute"><span>Minute</span><select id="tvr-minute"></select></label>
+      </div>
+      <label class="tvr-field" id="tvr-field-cron"><span>Cron expression</span><input type="text" id="tvr-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
+      <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-test-mode"><span class="tvr-slider"></span><span class="tvr-switch-text">Test mode — run the schedule without making changes</span></label>
+      <small>Everything happens as it would on a real run: matching, evaluation, history, notifications. Nothing is written to Sonarr, and every line of the output is marked <span class="tvr-mono">[TEST MODE]</span>. Manual runs ignore this and always make real changes.</small>
+      <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity rather than skipped. Sonarr is read again immediately before a run, so nothing acts on a stale reading.</small></p>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-retention" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Retention</h2></div>
+    <h3 class="tvr-h3">Monitoring</h3>
+    <div class="tvr-card">
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Monitoring</span>
+        <select id="tvr-monitoring">
+          <option value="unmonitor-only">Unmonitor only — never asks Sonarr to fetch anything</option>
+          <option value="full-sync">Full sync — monitoring follows the keep window both ways</option>
         </select>
-      </label>
-      <label class="tvr-field" id="tvr-field-weekday"><span>Day</span><select id="tvr-weekday"></select></label>
-      <label class="tvr-field" id="tvr-field-monthly-mode"><span>Which day</span>
-        <select id="tvr-monthly-mode">
-          <option value="day">Day of the month</option>
-          <option value="first">First…</option>
-          <option value="last">Last…</option>
+      </div>
+      <small id="tvr-monitoring-help"></small>
+      <small>Unmonitoring happens either way, including episodes with no file: those are never deleted, so nothing else would ever reach them, and Sonarr would go on fetching what the next run removes. Any series can override this.</small>
+    </div>
+
+    <h3 class="tvr-h3">Global rules</h3>
+    <div class="tvr-card">
+      <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-include-specials"><span class="tvr-slider"></span><span class="tvr-switch-text">Include specials (season 0)</span></label>
+      <small>Applies to deletion and to the monitoring comparison together. Each series can override it.</small>
+      <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-estimated-dates"><span class="tvr-slider"></span><span class="tvr-switch-text">Estimate missing air dates from neighbouring episodes</span></label>
+      <small>Sonarr's air date is used first, then TMDB. With this off, an episode none of those can date is never deleted.</small>
+      <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-search-after"><span class="tvr-slider"></span><span class="tvr-switch-text">Search for newly monitored episodes</span></label>
+      <small>When a run monitors an episode, ask Sonarr to look for it rather than waiting for its next RSS pass. Monitoring many at once means downloading many at once.</small>
+    </div>
+    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-connections" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Connections</h2></div>
+    <h3 class="tvr-h3">Sonarr instances</h3>
+    <div id="tvr-instances" class="tvr-instances"></div>
+    <div class="tvr-actions"><button type="button" id="tvr-add-instance" class="tvr-secondary">Add Sonarr instance</button></div>
+
+    <h3 class="tvr-h3">TMDB</h3>
+    <div class="tvr-card">
+      <p class="tvr-lede">Optional, and used only to fill in air dates Sonarr leaves blank. Entering a key is what enables it.</p>
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">API key</span>
+        <input type="password" id="tvr-tmdb-key" autocomplete="off" placeholder="Not set">
+        <span id="tvr-tmdb-result" class="tvr-result"></span>
+        <button type="button" id="tvr-tmdb-test">Test</button>
+      </div>
+    </div>
+    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-storage" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Storage</h2></div>
+    <div class="tvr-card">
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Folder</span>
+        <input type="text" id="tvr-state-dir" spellcheck="false">
+        <button type="button" id="tvr-browse-state">Browse…</button>
+      </div>
+      <small>Holds the reading taken from Sonarr, run journals, the log and cached artwork. Kept off the flash device.</small>
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Runs kept in history</span>
+        <input type="number" id="tvr-history-size" min="1" max="500">
+      </div>
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Sync with Sonarr every</span>
+        <select id="tvr-ttl-hours">
+          <option value="6">6 hours</option>
+          <option value="12">12 hours</option>
+          <option value="24">24 hours</option>
+          <option value="48">2 days</option>
+          <option value="168">A week</option>
         </select>
-      </label>
-      <label class="tvr-field" id="tvr-field-monthly-day"><span>Day of month</span><select id="tvr-monthly-day"></select></label>
-      <label class="tvr-field" id="tvr-field-monthly-weekday"><span>Of</span><select id="tvr-monthly-weekday"></select></label>
-      <label class="tvr-field" id="tvr-field-hour"><span>Hour</span><select id="tvr-hour"></select></label>
-      <label class="tvr-field" id="tvr-field-minute"><span>Minute</span><select id="tvr-minute"></select></label>
+      </div>
+      <small>Everything on screen is answered from the last sync, so this is how stale it may get. A run always reads Sonarr again first, and the refresh control at the top syncs on demand.</small>
     </div>
-    <label class="tvr-field" id="tvr-field-cron"><span>Cron expression</span><input type="text" id="tvr-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
-    <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-test-mode"><span class="tvr-slider"></span><span class="tvr-switch-text">Test mode — run the schedule without making changes</span></label>
-    <small>Everything happens as it would on a real run: matching, evaluation, history, notifications. Nothing is written to disk or to Sonarr, and every line of the output is marked <span class="tvr-mono">[TEST MODE]</span>. Manual runs ignore this and always make real changes.</small>
-    <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity rather than skipped.</small></p>
-  </div>
+    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
+  </section>
 
-  <h2 class="tvr-h2">Sonarr instances</h2>
-  <div id="tvr-instances" class="tvr-instances"></div>
-  <div class="tvr-actions"><button type="button" id="tvr-add-instance" class="tvr-secondary">Add Sonarr instance</button></div>
-
-  <h2 class="tvr-h2">TMDB</h2>
-  <div class="tvr-card">
-    <p class="tvr-lede">Optional, and used only to fill in air dates Sonarr leaves blank. Entering a key is what enables it.</p>
-    <div class="tvr-inline-row">
-      <span class="tvr-inline-label">API key</span>
-      <input type="password" id="tvr-tmdb-key" autocomplete="off" placeholder="Not set">
-      <span id="tvr-tmdb-result" class="tvr-result"></span>
-      <button type="button" id="tvr-tmdb-test">Test</button>
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-logging" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Logging</h2></div>
+    <div class="tvr-card">
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Detail</span>
+        <select id="tvr-log-level">
+          <option value="minimal">Minimal — only what stops work</option>
+          <option value="error">Errors</option>
+          <option value="warning">Warnings and errors</option>
+          <option value="info">Normal — what the plugin did</option>
+          <option value="verbose">Verbose — every series, every check</option>
+        </select>
+      </div>
+      <small>Shown live under <em>History → Logs</em>. A test run marks every line <span class="tvr-mono">[TEST MODE]</span>.</small>
     </div>
-  </div>
+    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
+  </section>
 
-  <h2 class="tvr-h2">Monitoring</h2>
-  <div class="tvr-card">
-    <div class="tvr-inline-row">
-      <span class="tvr-inline-label">Monitoring</span>
-      <select id="tvr-monitoring">
-        <option value="unmonitor-only">Unmonitor only — never asks Sonarr to fetch anything</option>
-        <option value="full-sync">Full sync — monitoring follows the keep window both ways</option>
-      </select>
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-notifications" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Notifications</h2></div>
+    <p class="tvr-lede">Unraid notifications, for things that need a person. Retention itself is never announced — episodes being deleted and monitoring being brought into line are the job, not the news.</p>
+    <div class="tvr-card tvr-notify-grid" id="tvr-notifications"></div>
+    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-about" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>About</h2></div>
+    <div class="tvr-card">
+      <p><strong>TV Retention</strong> <span id="tvr-about-version"></span></p>
+      <p>Keeps a chosen number of days, episodes, or seasons per series and removes the rest through Sonarr, so Sonarr's database and monitoring stay correct.</p>
+      <p class="tvr-lede">The plugin touches no filesystem of its own. Sizes, air dates, import dates and monitoring all arrive with the episodes, and deletion is a Sonarr call — so Sonarr's recycle bin, its extra-file handling and its empty-folder cleanup all apply as they are.</p>
+      <div id="tvr-about-state"></div>
     </div>
-    <small id="tvr-monitoring-help"></small>
-    <small>Unmonitoring happens either way, including episodes with no file: those are never deleted, so nothing else would ever reach them, and Sonarr would go on fetching what the next run removes. Any series can override this.</small>
-  </div>
+  </section>
 
-  <h2 class="tvr-h2">Global rules</h2>
-  <div class="tvr-card">
-    <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-include-specials"><span class="tvr-slider"></span><span class="tvr-switch-text">Include specials (season 0)</span></label>
-    <small>Applies to deletion and to the monitoring comparison together. Each series can override it.</small>
-    <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-estimated-dates"><span class="tvr-slider"></span><span class="tvr-switch-text">Estimate missing air dates from neighbouring episodes</span></label>
-    <small>Sonarr’s air date is used first, then TMDB. With this off, an episode none of those can date is never deleted.</small>
-    <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-search-after"><span class="tvr-slider"></span><span class="tvr-switch-text">Search for newly monitored episodes</span></label>
-    <small>When a run monitors an episode, ask Sonarr to look for it rather than waiting for its next RSS pass. Only episodes that run newly monitored — but monitoring many at once means downloading many at once.</small>
-  </div>
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-settings-help" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Help</h2></div>
+    <h3 class="tvr-h3">How a rule decides</h3>
+    <p class="tvr-lede">A rule may set any combination of <strong>keep days</strong>, <strong>keep episodes</strong>, and <strong>keep seasons</strong>. Each condition votes on every episode, and the combine mode settles disagreements.</p>
+    <div class="tvr-scroll"><table class="tvr-table">
+      <thead><tr><th>Combine mode</th><th>An episode is deleted when</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td>Earliest</td><td>every condition says so</td><td>Keeps the most. The safe default.</td></tr>
+        <tr><td>Latest</td><td>every condition says so, and none was undecidable</td><td>Keeps the least, without acting on an unknown.</td></tr>
+        <tr><td>Any</td><td>any condition says so</td><td>Most aggressive. Ignores conditions it cannot judge.</td></tr>
+      </tbody>
+    </table></div>
+    <h3 class="tvr-h3">What is never deleted</h3>
+    <ul class="tvr-list">
+      <li>Anything belonging to a series that is blocked by an error.</li>
+      <li>Media files Sonarr does not know about — they are reported instead.</li>
+      <li>Specials, unless you include them.</li>
+      <li>Episodes that have not aired yet, whatever the rule says about the old ones.</li>
+      <li>Everything, on a scheduled run while Test Mode is on.</li>
+    </ul>
+    <h3 class="tvr-h3">Monitoring</h3>
+    <p class="tvr-lede"><strong>Unmonitor only</strong> never asks Sonarr to fetch anything: it unmonitors what it deletes, and whatever falls outside the keep window. <strong>Full sync</strong> also monitors everything inside the window, including episodes with no file — which asks Sonarr to download them. Deleting a file always unmonitors it in both modes; anything else would have Sonarr fetch it back and the next run delete it again.</p>
+    <h3 class="tvr-h3">Where the data comes from</h3>
+    <p class="tvr-lede">Sonarr is read once a day, and everything on screen is answered from that reading — which is why nothing here waits on it. The age is shown beside the scheduled changes, the refresh control at the top syncs on demand, and a run always reads Sonarr again before it acts.</p>
+    <h3 class="tvr-h3">Air dates</h3>
+    <p class="tvr-lede">Sonarr's air date is used first, then TMDB if a key is set, then an estimate from the episodes either side, then the date Sonarr first acquired the episode. The source of each date is shown against every episode, so it is clear when a decision rests on an estimate rather than a real air date.</p>
+  </section>
 
-  <h2 class="tvr-h2">App storage</h2>
-  <div class="tvr-card">
-    <div class="tvr-inline-row">
-      <span class="tvr-inline-label">Folder</span>
-      <input type="text" id="tvr-state-dir" spellcheck="false">
-      <button type="button" id="tvr-browse-state">Browse…</button>
-    </div>
-    <small>Holds run journals, the log and the caches. Kept off the flash device.</small>
-    <div class="tvr-inline-row">
-      <span class="tvr-inline-label">Runs kept in history</span>
-      <input type="number" id="tvr-history-size" min="1" max="500">
-    </div>
-  </div>
-
-  <h2 class="tvr-h2">Logging</h2>
-  <div class="tvr-card">
-    <div class="tvr-inline-row">
-      <span class="tvr-inline-label">Detail</span>
-      <select id="tvr-log-level">
-        <option value="minimal">Minimal — only what stops work</option>
-        <option value="error">Errors</option>
-        <option value="warning">Warnings and errors</option>
-        <option value="info">Normal — what the plugin did</option>
-        <option value="verbose">Verbose — every series, every check</option>
-      </select>
-    </div>
-    <small>Shown live on the Live Log tab. A test run marks every line <span class="tvr-mono">[TEST MODE]</span>.</small>
-  </div>
-
-  <h2 class="tvr-h2">Notifications</h2>
-  <div class="tvr-card tvr-notify-grid" id="tvr-notifications"></div>
-
-  <div class="tvr-actions"><button type="button" id="tvr-save" class="tvr-primary">Save settings</button>
-    <span id="tvr-settings-dirty" class="tvr-dirty" hidden>Unsaved changes</span></div>
-</section>
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-history" class="tvr-panel" hidden>
-  <div class="tvr-toolbar"><span class="tvr-spacer"></span><button type="button" id="tvr-clear-history" class="tvr-secondary">Clear history</button></div>
-  <div id="tvr-last-run"></div>
-  <div class="tvr-scroll"><table class="tvr-table" id="tvr-history-table">
-    <thead><tr><th>Started</th><th>Trigger</th><th>Mode</th><th>Planned</th><th>Deleted</th><th>Reclaimed</th><th>Notes</th></tr></thead>
-    <tbody></tbody>
-  </table></div>
-  <p id="tvr-history-empty" class="tvr-empty">No runs recorded yet.</p>
-</section>
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-log" class="tvr-panel" hidden>
-  <div class="tvr-toolbar">
-    <label class="tvr-switch"><input type="checkbox" id="tvr-log-follow" checked><span class="tvr-slider"></span><span class="tvr-switch-text">Follow</span></label>
-    <span class="tvr-spacer"></span>
-    <span id="tvr-log-status" class="tvr-chip">idle</span>
-    <button type="button" id="tvr-log-clear" class="tvr-secondary">Clear view</button>
-  </div>
-  <pre id="tvr-log" class="tvr-log" aria-live="polite"></pre>
-</section>
-
-<!-- ------------------------------------------------------------------ -->
-<section id="tvr-panel-help" class="tvr-panel" hidden>
-  <h2 class="tvr-h2">How a rule decides</h2>
-  <p class="tvr-lede">A rule may set any combination of <strong>keep days</strong>, <strong>keep episodes</strong>, and <strong>keep seasons</strong>. Each condition votes on every episode, and the combine mode settles disagreements.</p>
-  <div class="tvr-scroll"><table class="tvr-table">
-    <thead><tr><th>Combine mode</th><th>An episode is deleted when</th><th>Effect</th></tr></thead>
-    <tbody>
-      <tr><td>Earliest</td><td>every condition says so</td><td>Keeps the most. The safe default.</td></tr>
-      <tr><td>Latest</td><td>every condition says so, and none was undecidable</td><td>Keeps the least, without acting on an unknown.</td></tr>
-      <tr><td>Any</td><td>any condition says so</td><td>Most aggressive. Ignores conditions it cannot judge.</td></tr>
-    </tbody>
-  </table></div>
-  <h2 class="tvr-h2">What is never deleted</h2>
-  <ul class="tvr-list">
-    <li>Anything belonging to a series that is blocked by an error.</li>
-    <li>Media files Sonarr does not know about — they are reported instead.</li>
-    <li>Specials, unless you include them.</li>
-    <li>Episodes that have not aired yet, whatever the rule says about the old ones.</li>
-    <li>Everything, on a scheduled run while Test Mode is on.</li>
-  </ul>
-  <h2 class="tvr-h2">Monitoring</h2>
-  <p class="tvr-lede"><strong>Unmonitor only</strong> never asks Sonarr to fetch anything: it unmonitors what it deletes, and whatever falls outside the keep window. <strong>Full sync</strong> also monitors everything inside the window, including episodes with no file — which asks Sonarr to download them. Deleting a file always unmonitors it in both modes; anything else would have Sonarr fetch it back and the next run delete it again.</p>
-  <h2 class="tvr-h2">Air dates</h2>
-  <p class="tvr-lede">Sonarr's air date is used first, then TMDB if a key is set, then an estimate from the episodes either side, then the date Sonarr first acquired the episode. The source of each date is shown against every episode, so it is clear when a decision rests on an estimate rather than a real air date.</p>
-</section>
+  </main>
+</div>
 
 <dialog id="tvr-dialog" class="tvr-dialog"><form method="dialog" id="tvr-dialog-form"><div id="tvr-dialog-body"></div>
 <menu class="tvr-dialog-actions"><span id="tvr-dialog-extra"></span><span class="tvr-spacer"></span><button value="cancel" class="tvr-secondary">Cancel</button><button value="ok" id="tvr-dialog-ok" class="tvr-primary">Save</button></menu></form></dialog>

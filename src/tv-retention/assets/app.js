@@ -474,18 +474,57 @@
 
   function render() {
     $('tvr-version').textContent = snapshot.version || '';
+    $('tvr-about-version').textContent = snapshot.version || '';
     $('tvr-array').hidden = !!snapshot.array_ready;
     $('tvr-test-banner').hidden = !snapshot.test_mode;
-    renderStats();
-    renderPlanHeader();
+    renderCounts();
+    renderTopBar();
     renderRules();
     renderAlerts();
     renderPresets();
+    renderAddSeries();
     renderInstances();
     renderSchedule();
     renderSettings();
     renderHistory();
+    renderAbout();
   }
+
+  // -- navigation --------------------------------------------------------
+  // One view at a time, named by the sidebar item that reaches it. The list comes from the
+  // markup so the two cannot disagree, which is the failure that blanked four tabs.
+  const VIEWS = [...document.querySelectorAll('.tvr-side [data-view]')].map((b) => b.dataset.view);
+  let currentView = 'series-list';
+
+  function showView(name) {
+    if (!VIEWS.includes(name)) name = 'series-list';
+    currentView = name;
+    // The four alert views are one panel with a different filter, because that is what
+    // they are: the same list, narrowed.
+    const panel = name.startsWith('alerts-') ? 'alerts-all' : name;
+    [...new Set(VIEWS)].forEach((view) => {
+      const section = $(`tvr-view-${view.startsWith('alerts-') ? 'alerts-all' : view}`);
+      if (section) section.hidden = (view.startsWith('alerts-') ? 'alerts-all' : view) !== panel;
+    });
+    document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.view === name
+                                        && !button.classList.contains('tvr-side-head'));
+    });
+    if (name.startsWith('alerts-')) {
+      severityFilter = name === 'alerts-all' ? 'all' : name.slice('alerts-'.length);
+      $('tvr-alerts-title').textContent = severityFilter === 'all' ? 'Alerts'
+        : `${severityFilter.charAt(0).toUpperCase()}${severityFilter.slice(1)}s`;
+      renderAlerts();
+    }
+    if (name === 'series-add') {
+      if (addSeriesList === null) guarded('', loadAddSeries); else renderAddSeries();
+    }
+    if (name === 'history-logs') startLog(); else stopLog();
+  }
+
+  document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
+    button.addEventListener('click', () => showView(button.dataset.view));
+  });
 
   // Each line opens exactly what it names. The total replaces the old button: a count you
   // can read is more use than a button that only promises one.
@@ -584,25 +623,56 @@
     return stamp ? `synced with Sonarr ${ago(stamp)}` : '';
   }
 
-  function renderPlanHeader() {
+  // The top bar carries one number and opens what it counts. Nothing drops when there is
+  // nothing scheduled: an empty menu is a promise the plugin cannot keep.
+  function renderTopBar() {
     const plan = snapshot.plan || { actionable: 0, trustworthy: false, unknown: 0 };
-    const box = $('tvr-plan-header');
-    box.replaceChildren();
-    const quiet = plan.trustworthy && !plan.actionable;
-    $('tvr-run').hidden = quiet;
-    const label = $('tvr-uptodate');
-    label.hidden = !quiet;
-    if (quiet) {
-      label.textContent = `Up to date, no changes scheduled${syncedAgo() ? ` — ${syncedAgo()}` : ''}`;
-      return;
-    }
+    const rows = changeSummary(plan);
+    const button = $('tvr-changes-button');
+    const label = $('tvr-changes-label');
+    const menu = $('tvr-changes-menu');
+    const nothing = plan.trustworthy && !plan.actionable;
+
+    label.textContent = nothing ? 'No scheduled changes'
+      : (plan.trustworthy ? plural(plan.actionable, 'scheduled change')
+         : `${plural(plan.actionable, 'scheduled change')} so far`);
+    button.classList.toggle('quiet', nothing);
+    $('tvr-changes-caret').hidden = nothing;
+    button.disabled = nothing;
+    // The run button is the play: nothing to run means nothing to press.
+    $('tvr-run').disabled = nothing || !snapshot.array_ready;
+    $('tvr-run').title = nothing ? 'Nothing is scheduled to change' : 'Run now';
+
+    menu.hidden = true;
+    menu.replaceChildren();
+    if (nothing) return;
     const open = (kind) => guarded('', async () => {
+      menu.hidden = true;
       const data = await api('preview', {}, 'Working out what would change…');
       changeList(data.result, 'Scheduled changes', kind);
     });
-    box.append(changeLines(plan, open));
-    if (syncedAgo()) box.append(el('div', { className: 'tvr-plan-quiet', textContent: syncedAgo() }));
+    const all = el('button', { type: 'button', className: 'tvr-changes-row all',
+                               textContent: `All ${plural(plan.actionable, 'change')}` });
+    all.addEventListener('click', () => open('all'));
+    menu.append(all);
+    rows.forEach((row) => {
+      const line = el('button', { type: 'button', className: `tvr-changes-row ${row.tone}`,
+                                  textContent: row.text });
+      line.addEventListener('click', () => open(row.kind));
+      menu.append(line);
+    });
+    if (syncedAgo()) menu.append(el('div', { className: 'tvr-changes-foot', textContent: syncedAgo() }));
   }
+
+  $('tvr-changes-button').addEventListener('click', (event) => {
+    event.stopPropagation();
+    const menu = $('tvr-changes-menu');
+    menu.hidden = !menu.hidden;
+    $('tvr-changes-button').setAttribute('aria-expanded', String(!menu.hidden));
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#tvr-changes')) $('tvr-changes-menu').hidden = true;
+  });
 
   function setBadge(badge, list) {
     badge.hidden = list.length === 0;
@@ -610,24 +680,22 @@
     badge.className = `tvr-tab-badge ${worstSeverity(list) || 'notice'}`;
   }
 
-  function renderStats() {
+  // The sidebar carries the counts. Two badges for two audiences: a series problem belongs
+  // to Series, where it is fixed; an installation problem belongs to Alerts. Neither
+  // counts the other's.
+  function renderCounts() {
     const rules = settings.rules || [];
-    $('tvr-stat-rules').textContent = rules.length;
-    $('tvr-stat-rules-sub').textContent = `${rules.filter((r) => r.enabled).length} enabled`;
-    // Two badges for two audiences: the Series tab carries what is wrong with a series,
-    // the Alerts tab what is wrong with the installation. Neither counts the other's.
     const seriesList = seriesAlertList();
-    const blocked = rules.filter((rule) => isBlocked(rule.id)).length;
-    $('tvr-stat-alerts').textContent = seriesList.length + systemAlerts.length;
-    $('tvr-stat-alerts-sub').textContent = blocked ? `${plural(blocked, 'series')} blocked` : 'nothing blocking';
-    setBadge($('tvr-series-badge'), seriesList);
-    setBadge($('tvr-tab-badge'), systemAlerts);
-    const last = (snapshot.runs || [])[0];
-    $('tvr-stat-last').textContent = last ? when(last.started) : 'Never';
-    $('tvr-stat-last-sub').textContent = last
-      ? `${last.dry_run ? 'would delete' : 'deleted'} ${last.dry_run ? last.planned : last.deleted} files` : ' ';
-    $('tvr-stat-schedule').textContent = (settings.schedule || {}).enabled ? 'On' : 'Off';
-    $('tvr-stat-schedule-sub').textContent = snapshot.schedule_text || 'Manual runs only';
+    const bySeverity = { error: 0, warning: 0, notice: 0 };
+    systemAlerts.forEach((alert) => { bySeverity[alert.severity] += 1; });
+    $('tvr-count-all').textContent = systemAlerts.length;
+    ['error', 'warning', 'notice'].forEach((name) => {
+      $(`tvr-count-${name}`).textContent = bySeverity[name] || 0;
+    });
+    $('tvr-count-series').textContent = rules.length;
+    $('tvr-count-presets').textContent = (settings.profiles || []).length;
+    setBadge($('tvr-side-badge-series'), seriesList);
+    setBadge($('tvr-side-badge-alerts'), systemAlerts);
   }
 
   function changeList(result, title, kind) {
@@ -1171,13 +1239,6 @@
     // The counts describe what this tab shows — system problems — with series problems
     // summarised by the roll-up, because they are acted on from the series card.
     const system = systemAlerts.slice();
-    const counts = { error: 0, warning: 0, notice: 0 };
-    system.forEach((alert) => { counts[alert.severity] = (counts[alert.severity] || 0) + 1; });
-    $('tvr-count-all').textContent = system.length;
-    ['error', 'warning', 'notice'].forEach((severity) => {
-      $(`tvr-count-${severity}`).textContent = counts[severity] || 0;
-    });
-
     const matches = (alert) => severityFilter === 'all' || alert.severity === severityFilter;
     const systemBox = $('tvr-alerts-system');
     systemBox.replaceChildren();
@@ -1196,14 +1257,6 @@
     $('tvr-filter').value = 'attention';
     $('tvr-search').value = '';
     renderRules();
-  });
-
-  document.querySelectorAll('.tvr-seg button').forEach((button) => {
-    button.addEventListener('click', () => {
-      document.querySelectorAll('.tvr-seg button').forEach((other) => other.classList.toggle('active', other === button));
-      severityFilter = button.dataset.severity;
-      renderAlerts();
-    });
   });
 
   $('tvr-recheck-all').addEventListener('click', () => guarded('', async () => {
@@ -1323,9 +1376,10 @@
     return seriesCache[key];
   }
 
-  function editRule(existing) {
+  function editRule(existing, preselect) {
     const rule = Object.assign({
-      id: '', enabled: true, instance_id: (settings.instances[0] || {}).id || '',
+      id: '', enabled: true,
+      instance_id: (preselect && preselect.instance_id) || (settings.instances[0] || {}).id || '',
       series_id: null, series_title: '', tvdb_id: null, path: '',
       profile_id: existing ? '' : ((settings.profiles || [])[0] || {}).id || '',
       keep_days: '', keep_episodes: '', keep_seasons: '', combine: 'earliest',
@@ -1358,7 +1412,10 @@
             : entry.reason),
         });
         holder.replaceChildren(picker.node);
-        const current = catalogue.find((entry) => String(entry.series_id) === String(rule.series_id));
+        // Arriving from the Add view, the series is already chosen; the picker still shows
+        // it, so the choice can be changed without leaving the dialog.
+        const wanted = preselect ? preselect.series_id : rule.series_id;
+        const current = catalogue.find((entry) => String(entry.series_id) === String(wanted));
         if (current) picker.set(current);
         const blocked = catalogue.filter((entry) => !entry.selectable).length;
         hint.textContent = blocked
@@ -1493,6 +1550,7 @@
       settings = matched.settings;
       snapshot.settings = settings;
       render();
+      addSeriesList = null;      // one fewer series to offer
       const saved = settings.rules[settings.rules.length - 1];
       let done = '';
       // Applied now, against the saved rule, because the unmonitor half exists to stop
@@ -1533,7 +1591,91 @@
     return keys.some((key) => grew(before[key], after[key])) || before.combine !== after.combine;
   }
 
-  $('tvr-add').addEventListener('click', () => editRule(null));
+  // -- add series --------------------------------------------------------
+  // Everything Sonarr holds that has no rule yet, from the stored reading. A search rather
+  // than a wall: three thousand cards is not a list anyone reads.
+  const ADD_LIMIT = 60;
+
+  let addSeriesList = null;
+
+  // Loaded once, from the stored reading, and reused. Opening this view is not a reason to
+  // ask Sonarr anything — the sync already did.
+  async function loadAddSeries() {
+    const gathered = [];
+    for (const instance of (settings.instances || [])) {
+      if (instance.enabled === false) continue;
+      gathered.push(...await seriesFor(instance.id, ''));
+    }
+    addSeriesList = gathered;
+    renderAddSeries();
+  }
+
+  function renderAddSeries() {
+    const grid = $('tvr-add-grid');
+    if (!grid) return;
+    if (addSeriesList === null) {
+      $('tvr-add-empty').hidden = true;
+      grid.replaceChildren(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
+      return;
+    }
+    const taken = new Set((settings.rules || []).map((rule) => `${rule.instance_id}:${rule.series_id}`));
+    const term = ($('tvr-add-search').value || '').trim().toLowerCase();
+    const available = addSeriesList.filter((series) => {
+      if (taken.has(`${series.instance_id}:${series.series_id}`)) return false;
+      return !term || (series.title || '').toLowerCase().includes(term);
+    });
+    const order = $('tvr-add-sort').value;
+    available.sort((a, b) => (
+      order === 'added' ? String(b.added || '').localeCompare(String(a.added || ''))
+      : order === 'size' ? (b.size_on_disk || 0) - (a.size_on_disk || 0)
+      : order === 'episodes' ? (b.total_episode_count || 0) - (a.total_episode_count || 0)
+      : String(a.sort_title || a.title).localeCompare(String(b.sort_title || b.title))));
+
+    const total = addSeriesList.filter((series) =>
+      !taken.has(`${series.instance_id}:${series.series_id}`)).length;
+    $('tvr-add-count').textContent = term ? `${available.length} of ${plural(total, 'series')}`
+                                          : plural(total, 'series');
+    $('tvr-add-empty').hidden = available.length > 0;
+    grid.replaceChildren();
+    available.slice(0, ADD_LIMIT).forEach((series) => grid.append(addCard(series)));
+    if (available.length > ADD_LIMIT) {
+      grid.append(el('p', { className: 'tvr-empty',
+                            textContent: `${available.length - ADD_LIMIT} more — narrow the search.` }));
+    }
+  }
+
+  function addCard(series) {
+    const card = el('div', { className: 'tvr-card-series' });
+    const art = el('div', { className: 'tvr-poster' });
+    if (series.poster) {
+      art.append(el('img', { loading: 'lazy', alt: '',
+                             src: `${API}?poster=${series.series_id}&instance=${encodeURIComponent(series.instance_id)}`
+                                  + `&csrf_token=${encodeURIComponent(CSRF)}` }));
+    } else {
+      art.textContent = (series.title || '?').slice(0, 1);
+    }
+    const facts = [];
+    if (series.season_count) facts.push(plural(series.season_count, 'season'));
+    if (series.total_episode_count) facts.push(`${series.episode_file_count}/${series.total_episode_count} episodes`);
+    if (series.size_on_disk) facts.push(bytes(series.size_on_disk));
+    const body = el('div', { className: 'tvr-card-series-body' }, [
+      el('div', { className: 'tvr-card-series-title', textContent: series.title, title: series.title }),
+      el('div', { className: 'tvr-card-series-sub',
+                  textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
+      el('div', { className: 'tvr-card-series-facts', textContent: facts.join(' · ') }),
+    ]);
+    if (series.ended) body.append(el('span', { className: 'tvr-chip', textContent: 'ended' }));
+    else if (series.next_airing) {
+      body.append(el('span', { className: 'tvr-chip on', textContent: `next ${when(series.next_airing)}` }));
+    }
+    const add = el('button', { type: 'button', className: 'tvr-primary tvr-small', textContent: 'Add' });
+    add.addEventListener('click', () => editRule(null, series));
+    body.append(add);
+    card.append(art, body);
+    return card;
+  }
+
+  ['tvr-add-search', 'tvr-add-sort'].forEach((id) => $(id).addEventListener('input', renderAddSeries));
 
   const REMOVAL_ACTIONS = [
     ['remove', 'Leave the series untouched in Sonarr'],
@@ -1853,7 +1995,8 @@
     $('tvr-tmdb-key').value = (settings.tmdb || {}).api_key || '';
     $('tvr-state-dir').value = settings.state_dir || '';
     $('tvr-history-size').value = settings.log_retention_runs;
-    $('tvr-log-level').value = (settings.logging || {}).level || 'warning';
+    $('tvr-log-level').value = (settings.logging || {}).level || 'info';
+    $('tvr-ttl-hours').value = String((settings.health || {}).ttl_hours || 24);
 
     const box = $('tvr-notifications');
     box.replaceChildren();
@@ -1878,6 +2021,7 @@
       state_dir: $('tvr-state-dir').value.trim(),
       log_retention_runs: $('tvr-history-size').value,
       logging: Object.assign({}, settings.logging, { level: $('tvr-log-level').value }),
+      health: Object.assign({}, settings.health, { ttl_hours: $('tvr-ttl-hours').value }),
       notifications,
     });
   }
@@ -1894,16 +2038,42 @@
   // This panel keeps an explicit Save — it holds text you type, and saving a half-typed
   // path on every keystroke would be worse. What it must not do is let a change leave the
   // page unsaved without saying so.
-  const settingsDirty = (on) => { $('tvr-settings-dirty').hidden = !on; };
-  $('tvr-panel-settings').addEventListener('change', (event) => {
-    if (event.target.closest('#tvr-instances')) return;   // instance cards save themselves
-    settingsDirty(true);
+  // The settings are spread across several views now, each with its own Save. They all
+  // post the whole document, so saving from one view keeps what another holds.
+  const settingsDirty = (on) => {
+    document.querySelectorAll('.tvr-dirty-mark').forEach((mark) => { mark.hidden = !on; });
+  };
+  document.querySelectorAll('.tvr-view[id^="tvr-view-settings"]').forEach((view) => {
+    view.addEventListener('change', (event) => {
+      if (event.target.closest('#tvr-instances')) return;   // instance cards save themselves
+      if (event.target.closest('#tvr-view-settings-schedule')) return;  // and so does the schedule
+      settingsDirty(true);
+    });
+    view.addEventListener('input', () => settingsDirty(true));
   });
-  $('tvr-panel-settings').addEventListener('input', () => settingsDirty(true));
-  $('tvr-save').addEventListener('click', () => guarded('', async () => {
-    await saveSettings('Settings saved.');
-    settingsDirty(false);
-  }));
+  document.querySelectorAll('.tvr-save').forEach((button) => {
+    button.addEventListener('click', () => guarded('', async () => {
+      await saveSettings('Settings saved.');
+      settingsDirty(false);
+    }));
+  });
+
+  function renderAbout() {
+    const box = $('tvr-about-state');
+    if (!box) return;
+    const sync = (snapshot.sync || {});
+    const rows = [
+      ['Series with a rule', plural((settings.rules || []).length, 'series')],
+      ['Sonarr last read', sync.synced_at ? ago(sync.synced_at) : 'not yet'],
+      ['Schedule', (settings.schedule || {}).enabled ? (snapshot.schedule_text || 'on') : 'off'],
+      ['Test Mode', snapshot.test_mode ? 'on — a scheduled run changes nothing' : 'off'],
+      ['Storage', settings.state_dir || ''],
+    ];
+    box.replaceChildren(...rows.map(([name, value]) => el('div', { className: 'tvr-inline-row' }, [
+      el('span', { className: 'tvr-inline-label', textContent: name }),
+      el('span', { textContent: String(value) }),
+    ])));
+  }
   $('tvr-browse-state').addEventListener('click', () => {
     browseFolder($('tvr-state-dir').value || '/mnt/user/appdata', (picked) => { $('tvr-state-dir').value = picked; });
   });

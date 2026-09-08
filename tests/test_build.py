@@ -394,14 +394,12 @@ class Interface(unittest.TestCase):
     def test_series_problems_are_counted_on_the_series_tab_only(self):
         # The roll-up sits on the tab that acts on it, and the Alerts tab counts only
         # what is wrong with the installation.
-        panels = self.html.split('id="tvr-panel-')
-        series_panel = next(part for part in panels if part.startswith('series"'))
-        alerts_panel = next(part for part in panels if part.startswith('alerts"'))
-        self.assertIn('id="tvr-series-rollup"', series_panel)
-        self.assertNotIn('rollup', alerts_panel)
-        self.assertIn('id="tvr-series-badge"', self.html)
-        self.assertIn("setBadge($('tvr-series-badge'), seriesList)", self.js)
-        self.assertIn("setBadge($('tvr-tab-badge'), systemAlerts)", self.js)
+        self.assertIn('id="tvr-side-badge-series"', self.html)
+        self.assertIn("setBadge($('tvr-side-badge-series'), seriesList)", self.js)
+        self.assertIn("setBadge($('tvr-side-badge-alerts'), systemAlerts)", self.js)
+        # The alert counts in the sidebar are the system ones; series problems are counted
+        # on Series, where they are fixed.
+        self.assertRegex(self.js, r"\$\('tvr-count-all'\)\.textContent = systemAlerts\.length")
 
     def test_a_sweep_clears_each_plan_but_keeps_the_series(self):
         # The series are not what is being re-read; their plans are. A plan left standing
@@ -447,7 +445,7 @@ class Interface(unittest.TestCase):
         self.assertNotIn('tvr-save-schedule', self.js)
 
     def test_a_form_that_keeps_an_explicit_save_says_when_it_is_dirty(self):
-        self.assertIn('id="tvr-settings-dirty"', self.html)
+        self.assertIn('class="tvr-dirty tvr-dirty-mark"', self.html)
         self.assertIn('settingsDirty(true)', self.js)
         self.assertIn('settingsDirty(false)', self.js)
 
@@ -458,7 +456,7 @@ class Interface(unittest.TestCase):
         wired = set(re.findall(r"'(tvr-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
                                r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
                                r"match-hour|match-minute|connectivity))'", self.js))
-        panel = self.html.split('<h2 class="tvr-h2">Schedule</h2>')[1].split('<h2')[0]
+        panel = self.html.split('id="tvr-view-settings-schedule"')[1].split('</section>')[0]
         for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
             if identifier in ('tvr-schedule-summary', 'tvr-match-summary') or 'field' in identifier:
                 continue
@@ -496,13 +494,15 @@ class Interface(unittest.TestCase):
         that shows one panel and hides the rest died at that point — so Settings, Job
         History, Live Log and Help, all listed after it, simply stopped appearing.
         """
-        self.assertRegex(self.js, r"const TABS = \[\.\.\.document\.querySelectorAll\('\.tvr-tabs button'\)\]")
+        self.assertRegex(self.js, r"const VIEWS = \[\.\.\.document\.querySelectorAll\('\.tvr-side \[data-view\]'\)\]")
 
     def test_every_tab_has_a_panel_and_every_panel_has_a_tab(self):
         import re
-        tabs = set(re.findall(r'data-tab="([a-z]+)"', self.html))
-        panels = set(re.findall(r'<section id="tvr-panel-([a-z]+)"', self.html))
-        self.assertEqual(tabs, panels, 'a tab without a panel, or a panel nothing reaches')
+        wanted = set(re.findall(r'data-view="([a-z-]+)"', self.html))
+        views = set(re.findall(r'<section id="tvr-view-([a-z-]+)"', self.html))
+        # The four alert views share one section, narrowed by severity.
+        views |= {f'alerts-{name}' for name in ('error', 'warning', 'notice')}
+        self.assertEqual(wanted, views, 'a sidebar item with no view, or a view nothing reaches')
 
     def test_the_version_constant_matches_the_version_file(self):
         """They are read from different places and must not drift.

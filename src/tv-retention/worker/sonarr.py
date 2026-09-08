@@ -28,7 +28,12 @@ USER_AGENT = 'TV-Delete/1.0 (Unraid plugin)'
 # mapping produces a key this list does not name.
 SERIES_FIELDS = ('instance_id', 'instance_name', 'series_id', 'title', 'sort_title', 'slug',
                  'tvdb_id', 'tmdb_id', 'year', 'monitored', 'ended', 'status',
-                 'episode_file_count', 'size_on_disk', 'path', 'tags', 'added')
+                 'episode_file_count', 'size_on_disk', 'path', 'tags', 'added',
+                 # Enough to draw a series without asking Sonarr again: it all arrives in
+                 # the same payload the catalogue already costs.
+                 'episode_count', 'total_episode_count', 'season_count', 'seasons',
+                 'next_airing', 'previous_airing', 'network', 'runtime', 'certification',
+                 'genres', 'overview', 'poster')
 EPISODE_FIELDS = ('episode_id', 'file_id', 'has_file', 'series_id', 'season', 'episode',
                   'title', 'air_date', 'air_source', 'date_added', 'monitored', 'path', 'size')
 MAPPING_SCHEMA = hashlib.sha256(
@@ -139,6 +144,31 @@ class Sonarr:
             # When Sonarr took the series on. The only way to notice a new one: /series
             # ignores paging and sorting, so there is nothing lighter to ask.
             'added': entry.get('added') or '',
+            # Counts Sonarr has already worked out. `episode_count` is what it considers
+            # available — on disk, or aired and monitored — which is not the total.
+            'episode_count': int(statistics.get('episodeCount') or 0),
+            'total_episode_count': int(statistics.get('totalEpisodeCount') or 0),
+            'season_count': int(statistics.get('seasonCount') or 0),
+            'seasons': [{'season': season.get('seasonNumber'),
+                         'monitored': bool(season.get('monitored')),
+                         'episodes': int((season.get('statistics') or {}).get('totalEpisodeCount') or 0),
+                         'files': int((season.get('statistics') or {}).get('episodeFileCount') or 0),
+                         'bytes': int((season.get('statistics') or {}).get('sizeOnDisk') or 0)}
+                        for season in entry.get('seasons') or []],
+            # What is coming, and what last arrived. A series with nothing due for months
+            # is a different proposition from one airing tonight.
+            'next_airing': entry.get('nextAiring') or '',
+            'previous_airing': entry.get('previousAiring') or '',
+            'network': entry.get('network') or '',
+            'runtime': int(entry.get('runtime') or 0),
+            'certification': entry.get('certification') or '',
+            'genres': entry.get('genres') or [],
+            'overview': entry.get('overview') or '',
+            # Sonarr's own path for the artwork, fetched through the plugin's bridge so the
+            # browser never needs the API key. Stored rather than derived: the query string
+            # carries a cache-busting stamp that changes when the artwork does.
+            'poster': next((image.get('url') or '' for image in entry.get('images') or []
+                            if image.get('coverType') == 'poster'), ''),
         }
 
     def episodes(self, series_id: int, files_only: bool = True) -> list:

@@ -3,34 +3,87 @@ declare(strict_types=1);
 // Served from Unraid's authenticated /plugins location. There is no standalone listener:
 // every request arrives already authenticated by emhttp, and is re-checked against the
 // session CSRF token before any work is handed to the Python worker.
-header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store');
-header('X-Content-Type-Options: nosniff');
+
+const TVR_SETTINGS = '/boot/config/plugins/tv-retention/settings.json';
 
 function fail_request(int $status, string $message): never {
     http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['ok' => false, 'error' => $message]);
     exit;
 }
 
+function tvr_check_token(string $provided): void {
+    $vars = @parse_ini_file('/var/local/emhttp/var.ini', false, INI_SCANNER_RAW);
+    $expected = is_array($vars) ? ($vars['csrf_token'] ?? '') : '';
+    if ($expected === '' || !hash_equals($expected, $provided)) {
+        fail_request(403, 'Session token expired. Reload the Unraid page.');
+    }
+}
+
+// -- artwork ----------------------------------------------------------------
+// Sonarr already stores every poster; this streams one through, so the browser never
+// needs an API key and the plugin never keeps a second copy of a 3.6 GB library. Cached
+// on disk because a grid asks for fifty at once and Sonarr should be asked once.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && isset($_GET['poster'])) {
+    tvr_check_token((string)($_GET['csrf_token'] ?? ''));
+    $series = (int)($_GET['poster'] ?? 0);
+    $wanted = (string)($_GET['instance'] ?? '');
+    if ($series <= 0) fail_request(400, 'No series');
+
+    $settings = json_decode((string)@file_get_contents(TVR_SETTINGS), true);
+    if (!is_array($settings)) fail_request(503, 'Settings are unreadable');
+    $instance = null;
+    foreach (($settings['instances'] ?? []) as $candidate) {
+        if (($candidate['id'] ?? '') === $wanted) { $instance = $candidate; break; }
+    }
+    if ($instance === null) fail_request(404, 'No such Sonarr instance');
+
+    $dir = rtrim((string)($settings['state_dir'] ?? '/mnt/user/appdata/tv-retention'), '/') . '/posters';
+    $cached = $dir . '/' . $wanted . '-' . $series . '.jpg';
+    if (!is_file($cached) || filesize($cached) === 0) {
+        @mkdir($dir, 0755, true);
+        // 250px: eight kilobytes against sixty for the full size, and a card is smaller
+        // than either. The larger ones stay in Sonarr, where they already are.
+        $url = rtrim((string)$instance['url'], '/') . '/api/v3/mediacover/' . $series . '/poster-250.jpg';
+        $stream = stream_context_create(['http' => [
+            'method' => 'GET', 'timeout' => 15, 'ignore_errors' => true,
+            'header' => 'X-Api-Key: ' . (string)$instance['api_key'],
+        ]]);
+        $body = @file_get_contents($url, false, $stream);
+        $status = 0;
+        foreach ($http_response_header ?? [] as $line) {
+            if (preg_match('#^HTTP/\S+\s+(\d+)#', $line, $found)) $status = (int)$found[1];
+        }
+        if ($body === false || $status !== 200 || $body === '') {
+            http_response_code(404);
+            exit;
+        }
+        @file_put_contents($cached, $body);
+    }
+    header('Content-Type: image/jpeg');
+    header('Cache-Control: private, max-age=86400');
+    header('X-Content-Type-Options: nosniff');
+    readfile($cached);
+    exit;
+}
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail_request(405, 'POST required');
 
-$vars = @parse_ini_file('/var/local/emhttp/var.ini', false, INI_SCANNER_RAW);
-$expected = is_array($vars) ? ($vars['csrf_token'] ?? '') : '';
 // Unraid's auto-prepend validates the POST token, keeps $csrf_token, then unsets the field.
-$provided = $_POST['csrf_token'] ?? ($csrf_token ?? '');
-if (!is_string($provided) || $expected === '' || !hash_equals($expected, $provided)) {
-    fail_request(403, 'Session token expired. Reload the Unraid page.');
-}
+tvr_check_token((string)($_POST['csrf_token'] ?? ($csrf_token ?? '')));
 
 $payload = $_POST['payload'] ?? '';
 if (!is_string($payload) || strlen($payload) > 1048576) fail_request(413, 'Request too large');
 $request = json_decode($payload, true);
-$actions = ['snapshot', 'settings', 'health', 'test-instance', 'series',
-            'monitoring', 'monitor-apply', 'browse', 'match',
-            'progress', 'check-rule', 'log', 'alerts', 'alert-action', 'enable-recycle-bin',
-            'preview', 'run', 'test-tmdb', 'clear-history'];
-if (!is_array($request) || !in_array($request['action'] ?? '', $actions, true)) fail_request(400, 'Unknown action');
+// The worker owns the list of actions and rejects anything it does not know. A copy of
+// that list here went stale the moment three actions were added, and the interface got
+// "Unknown action" for work the backend was perfectly willing to do.
+if (!is_array($request) || !is_string($request['action'] ?? null)) fail_request(400, 'No action');
 if (!is_executable('/usr/bin/python3')) fail_request(503, 'Python 3 is unavailable on this server.');
 
 $command = ['/usr/bin/python3', dirname(__DIR__) . '/worker/main.py', 'rpc'];
