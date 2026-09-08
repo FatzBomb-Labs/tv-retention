@@ -417,6 +417,8 @@
   // cron tick asks the same question every minute whether or not anyone is here, which is
   // why a notification never waits for someone to open this page.
   const WATCH_SECONDS = 15;
+  // The heartbeat costs no network at all now — it re-decides every plan from the stored
+  // reading, which is what makes a page left open all day still correct about time.
   let watchStamp = '';
 
   async function watchTick() {
@@ -430,6 +432,7 @@
     }
     if (!data.array_ready) return;
     if ((data.progress || {}).running) { startPolling(); return; }
+    snapshot.sync = data.sync || snapshot.sync;
     // Re-rendering on a timer would fight with whatever is being read on screen, so it
     // only happens when the reply actually differs from the last one.
     const stamp = JSON.stringify([data.alerts, data.plan, data.stale_rules,
@@ -569,6 +572,13 @@
     return rows;
   }
 
+  // Everything on screen is answered from one reading, so its age is said once, here,
+  // rather than repeated against every series.
+  function syncedAgo() {
+    const stamp = (snapshot.sync || {}).synced_at;
+    return stamp ? `synced with Sonarr ${ago(stamp)}` : '';
+  }
+
   function renderPlanHeader() {
     const plan = snapshot.plan || { actionable: 0, trustworthy: false, unknown: 0 };
     const box = $('tvr-plan-header');
@@ -578,7 +588,7 @@
     const label = $('tvr-uptodate');
     label.hidden = !quiet;
     if (quiet) {
-      label.textContent = `Up to date, no changes scheduled${plan.oldest ? ` — Sonarr read ${ago(plan.oldest)}` : ''}`;
+      label.textContent = `Up to date, no changes scheduled${syncedAgo() ? ` — ${syncedAgo()}` : ''}`;
       return;
     }
     const open = (kind) => guarded('', async () => {
@@ -586,6 +596,7 @@
       changeList(data.result, 'Scheduled changes', kind);
     });
     box.append(changeLines(plan, open));
+    if (syncedAgo()) box.append(el('div', { className: 'tvr-plan-quiet', textContent: syncedAgo() }));
   }
 
   function setBadge(badge, list) {
@@ -683,10 +694,24 @@
     }, null, 'Close');
   }
 
-  $('tvr-refresh-all').addEventListener('click', () => guarded('', async () => {
-    const ids = (settings.rules || []).filter((rule) => rule.enabled).map((rule) => rule.id);
-    if (!ids.length) throw new Error('There are no enabled series to check.');
-    queueChecks(ids, true);
+  // The one control that waits on Sonarr, and it says so. Everything else on this page is
+  // answered from the stored reading, which is why nothing else makes you wait.
+  $('tvr-refresh-all').addEventListener('click', () => guarded('Reading Sonarr…', async () => {
+    const data = await api('sync', {}, 'Reading Sonarr…');
+    settings = data.settings;
+    snapshot.settings = settings;
+    applyHealth(data.health);
+    applyAlerts(data.alerts);
+    snapshot.plan = data.plan;
+    snapshot.sync = data.sync;
+    render();
+    const report = data.report || {};
+    const moved = [];
+    if (report.series_added && report.series_added.length) moved.push(`${plural(report.series_added.length, 'series')} added`);
+    if (report.series_changed) moved.push(`${plural(report.series_changed, 'series')} changed`);
+    if (report.series_removed) moved.push(`${plural(report.series_removed, 'series')} gone`);
+    if ((report.episodes_changed || []).length) moved.push(`${plural(report.episodes_changed.length, 'managed series')} moved`);
+    notice(moved.length ? `Synced with Sonarr — ${moved.join(', ')}.` : 'Synced with Sonarr. Nothing had changed.', 'ok');
   }));
 
   $('tvr-run').addEventListener('click', () => guarded('', async () => {
@@ -808,7 +833,7 @@
       const state = monitoring[rule.id];
       return el('span', {
         className: `tvr-dot-badge ${state ? 'clear' : 'unknown'}`,
-        title: state ? `No problems — Sonarr read ${ago(state.read_at || state.checked_at)}` : 'Not checked yet',
+        title: state ? `No problems — ${syncedAgo() || 'read ' + ago(state.read_at || state.checked_at)}` : 'Not checked yet',
         textContent: '',
       });
     }

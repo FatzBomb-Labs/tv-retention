@@ -655,22 +655,20 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
 def catalogue_for(settings: dict, instance_id: str, force: bool = False) -> list:
     """The instance's series list, cached on disk.
 
-    This is the single most expensive Sonarr call — 12 MB and about two seconds on a
-    three thousand series library — and it is needed for matching, for the series picker,
-    and for the connection test.
+    Served from the store, never on a timer. The sync is what refreshes it, so browsing
+    three thousand series costs a file read and the interface never waits on Sonarr. It is
+    fetched here only when there is nothing stored at all — a first run, or a mapping
+    change that retired what was — because an empty picker is worse than a pause.
 
-    The cache holds *mapped* series, so it is keyed by the cache schema as well as by age:
-    adding a field to the mapping has to retire what is stored, or the new field reads as
-    absent everywhere until the entry happens to expire. That is exactly how the ended
-    pill stayed blank after the mapping learned to carry a series' ended flag.
+    The store holds *mapped* series, so it is keyed by the mapping's shape: a field added
+    without that key moving reads as absent everywhere until the entry is replaced. That
+    is exactly how the ended pill stayed blank once before.
     """
     cache = read_cache(settings, 'catalogue.json')
     entry = cache.get(instance_id) or {}
-    ttl = int(settings.get('catalogue_ttl_minutes', 60)) * 60
-    age = age_seconds(entry.get('fetched_at'))
-    fresh = entry.get('series') and entry.get('schema') == SCHEMA and age is not None and age < ttl
-    if not force and fresh:
-        return entry['series']
+    stored = entry.get('series') if entry.get('schema') == SCHEMA else None
+    if stored and not force:
+        return stored
     series = client_for(settings, instance_id).series()
     cache[instance_id] = {'schema': SCHEMA, 'fetched_at': now_iso(), 'series': series}
     write_cache(settings, 'catalogue.json', cache)
@@ -678,20 +676,13 @@ def catalogue_for(settings: dict, instance_id: str, force: bool = False) -> list
 
 
 def series_record(settings: dict, rule: dict) -> dict:
-    """The rule's series, without paying for the library to get it.
-
-    A check needs one series' lifecycle. Reaching through the catalogue for it meant that
-    whenever the catalogue's hour was up, a single series check paid twelve megabytes and
-    three and a half seconds to learn eleven kilobytes. A fresh catalogue is still used —
-    it is already in hand — and anything else asks Sonarr for the one series.
-    """
+    """The rule's series, from the store, or read on its own if it is not there yet."""
     entry = read_cache(settings, 'catalogue.json').get(rule.get('instance_id')) or {}
-    age = age_seconds(entry.get('fetched_at'))
-    ttl = int(settings.get('catalogue_ttl_minutes', 60)) * 60
-    if entry.get('schema') == SCHEMA and age is not None and age < ttl:
+    if entry.get('schema') == SCHEMA:
         for series in entry.get('series') or []:
             if series.get('series_id') == rule.get('series_id'):
                 return series
+    # Not in the store: a series added since the last sync, being read on demand.
     try:
         return client_for(settings, rule['instance_id']).series_one(rule['series_id'])
     except Rejected:
@@ -727,118 +718,96 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     return episodes, series, store_episodes(settings, rule, episodes, series), False
 
 
-def watch_sonarr(settings: dict, health: dict, min_interval: int = 30) -> bool:
-    """Ask each instance which series changed, instead of re-reading them all to find out.
+def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
+    """Read Sonarr once, store what it says, and report what moved.
 
-    `history/since` names the series Sonarr has imported to or deleted from since the
-    last look: on this library, two of thirty-six over a day where a blind sweep read all
-    thirty-six. The cursor is carried forward with a slight overlap, because a record
-    written while the call is in flight would otherwise fall between two windows.
+    This is the only place the plugin reads Sonarr without being asked to. Everything the
+    interface does — browsing series, widening a keep window, deciding what a run would
+    delete — is answered from what this leaves behind, so the page never waits on Sonarr
+    and a rule edited at midnight costs nothing at all.
 
-    It does not see monitoring toggled by hand in Sonarr — that is not a history event —
-    so it never marks a series clean, only dirty. The TTL still catches the rest.
+    Series come at series level for the whole library, because that payload already
+    carries seasons, episode counts, sizes and air dates: everything a list or a grid
+    wants. Episodes come only for series under a rule, because only a retention decision
+    needs them, and any other series can be read on demand in about thirty milliseconds.
+
+    Nothing is written unless it differs. The comparison saves no network — a change to a
+    monitored flag is invisible until the episodes are read — but it says what changed
+    since yesterday, which is worth more than the writes it avoids.
     """
-    watch = health.setdefault('watch', {})
-    dirty = set(health.get('dirty') or [])
-    moved = False
+    started = now_iso()
+    report = {'started': started, 'reason': reason, 'series_added': [], 'series_removed': 0,
+              'series_changed': 0, 'episodes_changed': [], 'errors': []}
+    catalogue = read_cache(settings, 'catalogue.json')
+
     for instance in settings.get('instances', []):
         if not instance.get('enabled', True):
             continue
-        entry = watch.get(instance['id']) or {}
-        seen = age_seconds(entry.get('checked_at'))
-        if seen is not None and seen < min_interval:
+        try:
+            fresh = Sonarr(instance).series()
+        except Rejected as error:
+            report['errors'].append(f'{instance["name"]}: {error}')
             continue
-        started = dt.datetime.now(dt.timezone.utc)
-        if not entry.get('cursor'):
-            # First look starts the cursor here rather than replaying years of history.
-            watch[instance['id']] = {'cursor': started.isoformat(), 'checked_at': started.isoformat()}
-            moved = True
+        entry = catalogue.get(instance['id']) or {}
+        previous = {series['series_id']: series for series in (entry.get('series') or [])
+                    if entry.get('schema') == SCHEMA}
+        for series in fresh:
+            was = previous.get(series['series_id'])
+            if was is None:
+                # Only news on a library we have seen before; the first sync is the
+                # baseline, and announcing three thousand series is true and useless.
+                if previous:
+                    report['series_added'].append(series['title'])
+            elif canonical_json(was) != canonical_json(series):
+                report['series_changed'] += 1
+        report['series_removed'] += len(set(previous) - {s['series_id'] for s in fresh})
+        catalogue[instance['id']] = {'schema': SCHEMA, 'fetched_at': now_iso(), 'series': fresh}
+
+    write_cache(settings, 'catalogue.json', catalogue)
+
+    for rule in settings.get('rules', []):
+        if not rule.get('enabled') or rule.get('match_status') != 'matched':
             continue
         try:
-            touched = Sonarr(instance).changes_since(entry['cursor'])
-        except Rejected:
+            client = client_for(settings, rule['instance_id'])
+            episodes = client.episodes(rule['series_id'], files_only=False)
+            if not interpolate_air_dates(episodes):
+                fill_from_history(client, rule['series_id'], episodes)
+        except Rejected as error:
+            report['errors'].append(f'{rule.get("series_title") or rule["path"]}: {error}')
             continue
-        # Never behind where we already were: the overlap guards against a record written
-        # mid-call, it is not licence to keep sliding backwards.
-        overlap = (started - dt.timedelta(seconds=90)).isoformat()
-        watch[instance['id']] = {'cursor': max(overlap, entry['cursor']),
-                                 'checked_at': started.isoformat()}
-        moved = True
-        for rule in settings.get('rules', []):
-            if rule.get('instance_id') == instance['id'] and rule.get('series_id') in touched:
-                dirty.add(rule['id'])
-    if moved:
-        health['dirty'] = sorted(dirty)
-    return moved
-
-
-def log_settings_change(settings: dict, previous: dict, updated: dict) -> None:
-    """Say what a save actually changed, so the log answers "when did this become true?"."""
-    for key in ('schedule', 'retention', 'logging', 'notifications', 'health', 'state_dir',
-                'log_retention_runs', 'instances', 'profiles', 'rules', 'tmdb'):
-        was, now = canonical_json(previous.get(key)), canonical_json(updated.get(key))
-        if was == now:
-            continue
-        if key == 'schedule':
-            log_line(settings, 'info', 'schedule saved: '
-                     + (schedules.describe(updated.get('schedule') or {})
-                        if (updated.get('schedule') or {}).get('enabled') else 'disabled'))
-        elif key in ('instances', 'profiles', 'rules'):
-            log_line(settings, 'info', f'{key} changed: {len(previous.get(key) or [])} '
-                                       f'-> {len(updated.get(key) or [])}')
-        else:
-            log_line(settings, 'info', f'{key} settings saved')
-
-
-def sweep_stale(settings: dict, limit: int = 5) -> int:
-    """Re-read the readings that have gone longest without one, a few per tick.
-
-    This is the only thing that catches an episode monitored or unmonitored by hand in
-    Sonarr: it is not a history event, and no cheap endpoint reveals it. It used to be a
-    scheduled full sweep with its own frequency, hour and minute in the interface — three
-    controls for "do not let a reading get too old", which is what the TTL already says.
-    """
-    health = load_health(settings)
-    ttl = int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
-    overdue = []
-    for rule in settings.get('rules', []):
-        if not rule.get('enabled'):
-            continue
-        entry = (health.get('rules') or {}).get(rule['id']) or {}
-        age = age_seconds(entry.get('read_at') or entry.get('checked_at'))
-        if age is None or age > ttl:
-            overdue.append((age if age is not None else float('inf'), rule))
-    if not overdue:
-        return 0
-    overdue.sort(key=lambda pair: -pair[0])
-    for _, rule in overdue[:limit]:
-        with contextlib.suppress(Rejected, SonarrError):
-            check_one_rule(settings, rule, force=True)
-    return len(overdue[:limit])
-
-
-def watch_and_recheck(settings: dict, min_interval: int = 30, limit: int = 25) -> int:
-    """Ask what changed, re-read only that, and say so if it needs saying.
-
-    This is what the per-minute tick runs, so a problem reaches the notification before
-    anyone opens the page — rather than because they did, which would leave the page as
-    the only thing that ever knew. The question itself is a query, not a download: over a
-    ninety second window it is two calls and no records at all.
-    """
-    health = load_health(settings)
-    if not watch_sonarr(settings, health, min_interval=min_interval):
-        return 0
-    write_cache(settings, 'health.json', health)
-    dirty = [rule for rule in settings.get('rules', [])
-             if rule.get('enabled') and rule['id'] in (health.get('dirty') or [])][:limit]
-    if not dirty:
-        return 0
-    previous = list(health.get('alerts') or [])
-    for rule in dirty:
+        stored, _, _ = episode_cache(settings, rule)
+        if stored is None or canonical_json(stored) != canonical_json(episodes):
+            report['episodes_changed'].append(rule.get('series_title') or rule['path'])
+        store_episodes(settings, rule, episodes, series_record(settings, rule))
         with contextlib.suppress(Rejected, SonarrError):
             check_one_rule(settings, rule)
-    announce_alerts(settings, previous, load_health(settings).get('alerts') or [])
-    return len(dirty)
+
+    mark_synced(settings, report)
+    if report['series_added']:
+        names = ', '.join(report['series_added'][:8])
+        notify(settings, f'Sonarr added {len(report["series_added"])} series',
+               f'{names}. Add a rule in TV Retention if you want retention applied.',
+               event='series_added')
+    log_line(settings, 'info',
+             f'sync ({reason}): {report["series_changed"]} series changed, '
+             f'{len(report["series_added"])} added, {report["series_removed"]} removed, '
+             f'{len(report["episodes_changed"])} of the managed series moved')
+    return report
+
+
+def mark_synced(settings: dict, report: dict) -> None:
+    write_cache(settings, 'sync.json', dict(report, synced_at=now_iso()))
+
+
+def last_sync(settings: dict) -> dict:
+    return read_cache(settings, 'sync.json')
+
+
+def sync_is_due(settings: dict) -> bool:
+    """True when the stored reading has aged past the interval, or there is none."""
+    age = age_seconds(last_sync(settings).get('synced_at'))
+    return age is None or age > int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
 
 
 def recompute_plans(settings: dict, health: dict) -> int:
@@ -875,48 +844,6 @@ def recompute_plans(settings: dict, health: dict) -> int:
                                         others + alerts_for_rule(settings, rule, fresh))
         changed += 1
     return changed
-
-
-def watch_new_series(settings: dict, health: dict, min_hours: int = 6) -> list:
-    """Notice series added to Sonarr, so they can be managed rather than accumulate.
-
-    There is no cheap way to ask this one. /series ignores paging and sorting — the same
-    11.5 MiB whatever is requested — so it is refreshed on a slow cadence instead, which
-    the picker and the matcher want kept warm anyway, and this moves that cost off the
-    interactive path onto the tick.
-
-    The first refresh only records where we are. Announcing three thousand series as newly
-    added would be true and useless.
-    """
-    seen = health.setdefault('series_seen', {})
-    announced = []
-    for instance in settings.get('instances', []):
-        if not instance.get('enabled', True):
-            continue
-        entry = seen.get(instance['id']) or {}
-        age = age_seconds(entry.get('checked_at'))
-        if age is not None and age < min_hours * 3600:
-            continue
-        try:
-            catalogue = catalogue_for(settings, instance['id'], force=True)
-        except Rejected:
-            continue
-        latest = max((series.get('added') or '' for series in catalogue), default='')
-        mark = entry.get('latest_added')
-        seen[instance['id']] = {'latest_added': latest, 'checked_at': now_iso()}
-        if not mark:
-            continue
-        fresh = [series for series in catalogue if (series.get('added') or '') > mark]
-        if not fresh:
-            continue
-        titles = ', '.join(series['title'] for series in fresh[:8])
-        notify(settings, f'Sonarr added {len(fresh)} series',
-               f'{titles}. Add a rule in TV Retention if you want retention applied.',
-               event='series_added')
-        log_line(settings, 'warning', f'Sonarr added {len(fresh)} series: {titles}')
-        announced.extend(fresh)
-    return announced
-
 
 def announce_alerts(settings: dict, previous: list, current: list) -> list:
     """Notify about problems that were not there before.
@@ -1263,32 +1190,14 @@ def tick() -> int:
             state = job_state(settings)
             state['last_run'] = now_iso()
 
-    # Every minute: what has Sonarr changed? Only the series it names are re-read, so this
-    # costs two small queries in the common case where the answer is "nothing".
-    with contextlib.suppress(Rejected, SonarrError):
-        watched = watch_and_recheck(settings, min_interval=45)
-        if watched:
-            actions.append(f'sonarr reported {watched} changed series')
-            log_line(settings, 'info', f'Sonarr reported {watched} changed series')
-
-    # Series added to Sonarr, on a slow cadence because there is no cheap way to ask.
-    with contextlib.suppress(Rejected, SonarrError):
-        health = load_health(settings)
-        before = canonical_json(health.get('series_seen') or {})
-        added = watch_new_series(settings, health)
-        if canonical_json(health.get('series_seen') or {}) != before:
-            write_cache(settings, 'health.json', health)
-        if added:
-            actions.append(f'sonarr added {len(added)} series')
-
-    # The backstop, spread rather than scheduled. Sonarr's history cannot report monitoring
-    # toggled by hand in its own UI, so a series has to be read outright now and then; this
-    # re-reads whatever has gone longest without one, a few at a time, so every series is
-    # covered within its TTL without a five-in-the-morning spike or a setting to get wrong.
-    with contextlib.suppress(Rejected, SonarrError):
-        swept = sweep_stale(settings)
-        if swept:
-            actions.append(f'read {swept} series that had gone stale')
+    # One reading a day, and the interface answers from it until the next one. Nothing
+    # else here goes to Sonarr: a page open, a rule edited, a keep window widened are all
+    # arithmetic over what this left behind.
+    if sync_is_due(settings):
+        with contextlib.suppress(Rejected, SonarrError):
+            with run_lock():
+                report = sync_from_sonarr(settings, reason='due')
+            actions.append(f'synced with Sonarr: {report["series_changed"]} series changed')
 
     if schedules.is_due(settings.get('schedule') or {}, now, state.get('last_run')):
         if not sonarr_reachable(settings):
@@ -1297,6 +1206,10 @@ def tick() -> int:
             state['pending_run'] = now_iso()
             actions.append('run queued: Sonarr is unreachable')
         else:
+            # Reconcile immediately before acting. The stored reading is what the plan was
+            # built from, and a run is the one moment that must not act on it blind.
+            with contextlib.suppress(Rejected, SonarrError):
+                sync_from_sonarr(settings, reason='before the run')
             state['last_run'] = now_iso()
             save_job_state(settings, state)
             actions.append('scheduled run')

@@ -86,12 +86,12 @@ def plan_summary(settings: dict, health: dict) -> dict:
 def action_snapshot(settings, request):
     state = load_state(settings)
     health = load_health(settings)
-    # One small question — "what changed?" — in place of re-reading every series to find
-    # out. Rate limited, and it only ever adds to what must be re-read.
-    requested = request.get('watch_seconds')
-    if main.array_ready() and main.watch_sonarr(settings, health,
-                                      min_interval=30 if requested is None else int(requested)):
-        write_cache(settings, 'health.json', health)
+    # A page opening on a reading older than the interval syncs first, so "it is probably
+    # up to date" is true rather than hopeful.
+    if main.array_ready() and main.sync_is_due(settings):
+        with contextlib.suppress(Rejected, SonarrError):
+            with main.run_lock():
+                main.sync_from_sonarr(settings, reason='opened stale')
         health = load_health(settings)
     return {
         'version': VERSION,
@@ -111,26 +111,32 @@ def action_snapshot(settings, request):
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
         'jobs': job_state(settings),
         'plan': plan_summary(settings, load_health(settings)),
+        'sync': main.last_sync(settings),
         'test_mode': bool((settings.get('schedule') or {}).get('test_mode', True)),
     }
 
 
-def action_watch(settings, request):
-    """The open page's heartbeat, and nothing more.
+def action_sync(settings, request):
+    """Read Sonarr now, because someone asked. The only unbounded wait in the interface."""
+    main.require_ready()
+    with main.run_lock():
+        report = main.sync_from_sonarr(settings, reason='asked for')
+    health = load_health(settings)
+    return {'report': report, 'health': trim_health(health), 'alerts': health.get('alerts') or [],
+            'plan': plan_summary(settings, health), 'sync': main.last_sync(settings),
+            'settings': redact(load_settings())}
 
-    It asks Sonarr what changed and marks what that affects. It deliberately does not
-    re-read those series here: the page has a queue for that which shows each card being
-    read, and a heartbeat that blocks for several seconds is not a heartbeat.
+
+def action_watch(settings, request):
+    """The open page's heartbeat. It never goes to Sonarr.
+
+    Time alone moves a keep window, so the plans are re-decided from the stored reading
+    and the page follows. Anything that needs Sonarr waits for the daily sync, or for
+    someone to press the button.
     """
     if not main.array_ready():
         return {'array_ready': False, 'stale_rules': []}
     health = load_health(settings)
-    # `or` would turn an explicit zero into the default, and zero is the one value a
-    # caller passes when it means "ask now".
-    requested = request.get('min_interval')
-    if main.watch_sonarr(settings, health, min_interval=15 if requested is None else int(requested)):
-        write_cache(settings, 'health.json', health)
-        health = load_health(settings)
     # Free, and the reason the page can call this every fifteen seconds: the plan is
     # arithmetic over episodes already in hand, and time alone can move a keep window.
     if main.recompute_plans(settings, health):
@@ -141,6 +147,7 @@ def action_watch(settings, request):
             'health': trim_health(health),
             'alerts': health.get('alerts') or [],
             'stale_rules': main.stale_rule_ids(settings, health),
+            'sync': main.last_sync(settings),
             'plan': plan_summary(settings, health)}
 
 
@@ -386,6 +393,7 @@ ACTIONS = {
     'enable-recycle-bin': action_enable_recycle_bin,
     'check-rule': action_check_rule,
     'watch': action_watch,
+    'sync': action_sync,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

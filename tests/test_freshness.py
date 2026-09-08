@@ -182,11 +182,25 @@ class Freshness(unittest.TestCase):
         self.assertEqual(main.series_record(self.settings, self.rule)['title'], 'From catalogue')
         self.assertEqual(self.client.calls, [])
 
-    def test_a_stale_catalogue_is_not_refreshed_to_read_one_series(self):
-        old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=5)).isoformat()
+    def test_the_stored_library_is_served_whatever_its_age(self):
+        """Age is not what decides here any more; the sync is.
+
+        A stored reading was once refused once it passed a TTL, which meant browsing could
+        trigger a twelve megabyte fetch at any moment. Now the sync is the only thing that
+        refreshes it, so an old reading is served — with its age said plainly elsewhere —
+        and nothing the interface does surprises anyone with a wait.
+        """
+        old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=5)).isoformat()
         main.write_cache(self.settings, 'catalogue.json', {'i1': {
             'schema': store.SCHEMA, 'fetched_at': old,
             'series': [{'series_id': 1, 'title': 'Old'}]}})
+        self.assertEqual(main.series_record(self.settings, self.rule)['title'], 'Old')
+        self.assertEqual(self.client.calls, [], 'browsing must not reach Sonarr')
+
+    def test_a_series_not_in_the_store_yet_is_read_on_its_own(self):
+        # Added to Sonarr since the last sync: thirty milliseconds, not a resync.
+        main.write_cache(self.settings, 'catalogue.json', {'i1': {
+            'schema': store.SCHEMA, 'fetched_at': main.now_iso(), 'series': []}})
         self.assertEqual(main.series_record(self.settings, self.rule)['title'], 'A')
         self.assertEqual(self.client.calls, [('series_one', 1)])
 
@@ -196,238 +210,8 @@ class Freshness(unittest.TestCase):
         main.client_for = refuse
         self.assertEqual(main.series_record(self.settings, self.rule), {})
 
-
-class Watch(unittest.TestCase):
-    """Asking Sonarr what changed, instead of re-reading everything to find out."""
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.settings = validate_settings({
-            'instances': [INSTANCE],
-            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A', 'keep_days': 30},
-                      {'id': 'r2', 'instance_id': 'i1', 'series_id': 2, 'path': '/tv/B', 'keep_days': 30}],
-        })
-        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
-        self.touched = set()
-        self.asked = []
-        watcher = self
-
-        class Stub:
-            def __init__(self, instance):
-                pass
-
-            def changes_since(self, since):
-                watcher.asked.append(since)
-                return set(watcher.touched)
-
-        self.original = main.Sonarr
-        main.Sonarr = Stub
-
-    def tearDown(self):
-        main.Sonarr = self.original
-        self.temp.cleanup()
-
-    def test_the_first_look_starts_a_cursor_rather_than_replaying_history(self):
-        health = {}
-        self.assertTrue(main.watch_sonarr(self.settings, health, min_interval=0))
-        self.assertTrue(health['watch']['i1']['cursor'])
-        self.assertEqual(self.asked, [], 'a library of years of history must not be replayed')
-        self.assertEqual(health.get('dirty'), [])
-
-    def test_only_the_rules_whose_series_changed_are_marked(self):
-        health = {}
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        self.touched = {2, 99}
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        self.assertEqual(health['dirty'], ['r2'])
-
-    def test_the_window_overlaps_so_nothing_falls_between_two_looks(self):
-        health = {}
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        first = health['watch']['i1']['cursor']
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        second = health['watch']['i1']['cursor']
-        self.assertGreaterEqual(second, first, 'the cursor must never slide backwards')
-        # Wound back far enough that a record written while the call was in flight is
-        # covered by the next window rather than falling between the two.
-        health['watch']['i1']['cursor'] = (dt.datetime.now(dt.timezone.utc)
-                                           - dt.timedelta(hours=1)).isoformat()
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        moved = dt.datetime.fromisoformat(health['watch']['i1']['cursor'])
-        self.assertGreater((dt.datetime.now(dt.timezone.utc) - moved).total_seconds(), 60)
-
-    def test_it_does_not_ask_again_within_the_interval(self):
-        health = {}
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        self.touched = {1}
-        self.assertFalse(main.watch_sonarr(self.settings, health, min_interval=3600))
-        self.assertEqual(health.get('dirty'), [])
-
-    def test_a_disabled_instance_is_not_polled(self):
-        self.settings['instances'][0]['enabled'] = False
-        health = {}
-        self.assertFalse(main.watch_sonarr(self.settings, health, min_interval=0))
-
-    def test_an_unreachable_sonarr_leaves_the_cursor_where_it_was(self):
-        health = {}
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        cursor = health['watch']['i1']['cursor']
-
-        class Broken:
-            def __init__(self, instance):
-                pass
-
-            def changes_since(self, since):
-                raise Rejected('unreachable')
-
-        main.Sonarr = Broken
-        main.watch_sonarr(self.settings, health, min_interval=0)
-        self.assertEqual(health['watch']['i1']['cursor'], cursor,
-                         'a failed look must not advance past changes it never saw')
-
-    def test_a_changed_series_is_stale_however_young_its_result_is(self):
-        health = {'rules': {'r1': {'checked_at': main.now_iso(),
-                                   'fingerprint': rule_fingerprint(self.settings['rules'][0], self.settings)},
-                            'r2': {'checked_at': main.now_iso(),
-                                   'fingerprint': rule_fingerprint(self.settings['rules'][1], self.settings)}},
-                  'dirty': ['r1']}
-        self.assertEqual(main.stale_rule_ids(self.settings, health), ['r1'])
-
-
-class HistoryQuery(unittest.TestCase):
-    """The change feed itself, against the shape Sonarr returns."""
-
-    def setUp(self):
-        self.client = Sonarr(INSTANCE)
-        self.queries = []
-
-        def fake(method, path, query=None, body=None):
-            self.queries.append((method, path, dict(query or {})))
-            if query.get('eventType') == 3:
-                return [{'seriesId': 4, 'eventType': 'downloadFolderImported'},
-                        {'seriesId': 4, 'eventType': 'downloadFolderImported'}]
-            return [{'seriesId': 9, 'eventType': 'episodeFileDeleted'}, {'noSeries': True}]
-
-        self.client._request = fake
-
-    def test_it_asks_only_about_what_changes_the_disk(self):
-        self.client.changes_since('2026-09-01T00:00:00')
-        events = [query['eventType'] for _, _, query in self.queries]
-        self.assertEqual(events, [3, 5], 'a grab or a rename changes nothing this plugin acts on')
-        self.assertEqual({path for _, path, _ in self.queries}, {'history/since'})
-
-    def test_it_returns_the_series_that_changed(self):
-        self.assertEqual(self.client.changes_since('2026-09-01T00:00:00'), {4, 9})
-
-    def test_a_record_without_a_series_is_ignored(self):
-        self.assertNotIn(None, self.client.changes_since('2026-09-01T00:00:00'))
-
-
 if __name__ == '__main__':
     unittest.main()
-
-
-class Heartbeat(unittest.TestCase):
-    """The per-minute tick's share of the work: ask, re-read what changed, announce it."""
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.settings = validate_settings({
-            'instances': [INSTANCE],
-            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
-                       'series_title': 'A', 'keep_days': 30},
-                      {'id': 'r2', 'instance_id': 'i1', 'series_id': 2, 'path': '/tv/B',
-                       'series_title': 'B', 'keep_days': 30}],
-        })
-        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
-        self.checked = []
-        self.notified = []
-        self.touched = set()
-        watcher = self
-
-        class Stub:
-            def __init__(self, instance):
-                pass
-
-            def changes_since(self, since):
-                return set(watcher.touched)
-
-        self.originals = (main.Sonarr, main.check_one_rule, main.notify)
-        main.Sonarr = Stub
-        main.check_one_rule = lambda settings, rule, *a, **k: self.checked.append(rule['id'])
-        main.notify = lambda settings, subject, description, importance='normal', event='errors': \
-            self.notified.append((subject, importance, event))
-
-    def tearDown(self):
-        main.Sonarr, main.check_one_rule, main.notify = self.originals
-        self.temp.cleanup()
-
-    def test_nothing_changed_means_nothing_is_re_read(self):
-        main.watch_and_recheck(self.settings, min_interval=0)   # first look, sets the cursor
-        self.assertEqual(main.watch_and_recheck(self.settings, min_interval=0), 0)
-        self.assertEqual(self.checked, [])
-
-    def test_only_the_series_sonarr_named_are_re_read(self):
-        main.watch_and_recheck(self.settings, min_interval=0)
-        self.touched = {2}
-        self.assertEqual(main.watch_and_recheck(self.settings, min_interval=0), 1)
-        self.assertEqual(self.checked, ['r2'])
-
-    def test_a_disabled_rule_is_left_alone_however_much_it_changed(self):
-        self.settings['rules'][1]['enabled'] = False
-        main.watch_and_recheck(self.settings, min_interval=0)
-        self.touched = {2}
-        main.watch_and_recheck(self.settings, min_interval=0)
-        self.assertEqual(self.checked, [])
-
-    def test_a_new_problem_is_announced(self):
-        """Otherwise the page is the only thing that ever knows, which defeats the point."""
-        import alerts as alert_module
-        before = [alert_module.make('unmatched', rule_id='r1', detail='was already wrong')]
-        after = before + [alert_module.make('sonarr-unreachable', instance_id='i1', detail='no answer')]
-        fresh = main.announce_alerts(self.settings, before, after)
-        self.assertEqual([alert['kind'] for alert in fresh], ['sonarr-unreachable'])
-        self.assertEqual(len(self.notified), 1)
-
-    def test_a_problem_that_was_already_there_is_not_announced_again(self):
-        import alerts as alert_module
-        standing = [alert_module.make('unmatched', rule_id='r1', detail='still wrong')]
-        self.assertEqual(main.announce_alerts(self.settings, standing, standing), [])
-        self.assertEqual(self.notified, [])
-
-    def test_a_notice_is_not_worth_a_notification(self):
-        import alerts as alert_module
-        after = [alert_module.make('ended-expired', rule_id='r1')]
-        self.assertEqual(main.announce_alerts(self.settings, [], after), [])
-        self.assertEqual(self.notified, [])
-
-    def test_asking_for_zero_means_now_not_the_default(self):
-        # `or` turns an explicit zero into the default, and zero is exactly what a caller
-        # passes when it means "ask now".
-        actions.action_watch(self.settings, {'min_interval': 0})
-        first = main.load_health(self.settings)['watch']['i1']['checked_at']
-        actions.action_watch(self.settings, {'min_interval': 0})
-        self.assertNotEqual(main.load_health(self.settings)['watch']['i1']['checked_at'], first)
-
-    def test_the_work_itself_is_never_announced(self):
-        """Retention is the job, not the news.
-
-        Nothing about episodes being scheduled for deletion, or monitoring being brought
-        into line with a keep window, is an alert kind at all — those live in the plan,
-        which is never notified. This pins the other half: only structural problems carry
-        the notify flag, so a kind added later cannot quietly start announcing the work.
-        """
-        import alerts as alert_module
-        announced = {kind for kind, spec in alert_module.KINDS.items() if spec.get('notify')}
-        self.assertEqual(announced, {'unmatched', 'sonarr-unreachable', 'no-recycle-bin'})
-        for spec in alert_module.KINDS.values():
-            self.assertIn('notify', spec, 'every kind must say whether it is worth a notification')
-
-    def test_an_ended_series_is_announced_once_not_twice(self):
-        # Sonarr reporting it ended is the news; the rule having nothing left to do is the
-        # consequence, and saying both would say it twice.
-        import alerts as alert_module
-        self.assertFalse(alert_module.KINDS['ended-expired']['notify'])
 
 
 class LiveWhileWatching(unittest.TestCase):
@@ -490,124 +274,114 @@ class LiveWhileWatching(unittest.TestCase):
         self.assertEqual(main.recompute_plans(self.settings, main.load_health(self.settings)), 0)
 
 
-class NewSeries(unittest.TestCase):
-    """Noticing a series added to Sonarr, which no cheap endpoint will tell you."""
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.settings = validate_settings({'instances': [INSTANCE], 'rules': []})
-        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
-        self.catalogue = [
-            {'series_id': 1, 'title': 'Old One', 'added': '2020-01-01T00:00:00Z'},
-            {'series_id': 2, 'title': 'Older', 'added': '2019-01-01T00:00:00Z'},
-        ]
-        self.notified = []
-        holder = self
-
-        class Stub:
-            def series(self):
-                return [dict(row) for row in holder.catalogue]
-
-        self.originals = (main.client_for, main.notify)
-        main.client_for = lambda *args, **kwargs: Stub()
-        main.notify = lambda settings, subject, description, importance='normal', event='errors': \
-            self.notified.append((subject, description, event))
-
-    def tearDown(self):
-        main.client_for, main.notify = self.originals
-        self.temp.cleanup()
-
-    def test_the_first_look_only_records_where_we_are(self):
-        """Announcing three thousand series as newly added would be true and useless."""
-        health = {}
-        self.assertEqual(main.watch_new_series(self.settings, health, min_hours=0), [])
-        self.assertEqual(self.notified, [])
-        self.assertEqual(health['series_seen']['i1']['latest_added'], '2020-01-01T00:00:00Z')
-
-    def test_a_series_added_since_is_announced(self):
-        health = {}
-        main.watch_new_series(self.settings, health, min_hours=0)
-        self.catalogue.append({'series_id': 3, 'title': 'Brand New', 'added': '2026-09-07T12:00:00Z'})
-        added = main.watch_new_series(self.settings, health, min_hours=0)
-        self.assertEqual([series['title'] for series in added], ['Brand New'])
-        self.assertEqual(len(self.notified), 1)
-        self.assertIn('Brand New', self.notified[0][1])
-        self.assertEqual(self.notified[0][2], 'series_added')
-
-    def test_the_same_series_is_not_announced_twice(self):
-        health = {}
-        main.watch_new_series(self.settings, health, min_hours=0)
-        self.catalogue.append({'series_id': 3, 'title': 'Brand New', 'added': '2026-09-07T12:00:00Z'})
-        main.watch_new_series(self.settings, health, min_hours=0)
-        self.notified.clear()
-        main.watch_new_series(self.settings, health, min_hours=0)
-        self.assertEqual(self.notified, [])
-
-    def test_the_library_is_not_pulled_on_every_tick(self):
-        health = {}
-        main.watch_new_series(self.settings, health, min_hours=0)
-        self.catalogue.append({'series_id': 3, 'title': 'Brand New', 'added': '2026-09-07T12:00:00Z'})
-        self.assertEqual(main.watch_new_series(self.settings, health, min_hours=6), [],
-                         '11.5 MiB is not a per-minute question')
-
-    def test_the_added_date_survives_the_mapping(self):
-        # It is stored in both caches, so the mapping carrying it means a schema bump.
-        client = Sonarr(INSTANCE)
-        client._request = lambda *a, **k: [
-            {'id': 4, 'title': 'X', 'sortTitle': 'x', 'added': '2026-09-01T00:00:00Z',
-             'path': '/tv/X', 'statistics': {}}]
-        self.assertEqual(client.series()[0]['added'], '2026-09-01T00:00:00Z')
-
-
-class Backstop(unittest.TestCase):
-    """The full read, spread across the ticks instead of scheduled at an hour."""
+class Sync(unittest.TestCase):
+    """One reading a day, and the only time the plugin reads Sonarr unasked."""
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.settings = validate_settings({
             'instances': [INSTANCE],
-            'rules': [{'id': f'r{n}', 'instance_id': 'i1', 'series_id': n, 'path': f'/tv/{n}',
-                       'keep_days': 30} for n in range(1, 5)],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                       'series_title': 'A', 'keep_days': 30}],
         })
         self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
-        self.checked = []
-        self.original = main.check_one_rule
-        main.check_one_rule = lambda settings, rule, *a, **k: self.checked.append((rule['id'], k.get('force')))
+        for rule in self.settings['rules']:
+            rule['match_status'] = 'matched'
+        self.library = [{'series_id': 1, 'title': 'A', 'added': '2020-01-01T00:00:00Z',
+                         'ended': False, 'status': 'continuing', 'path': '/tv/A',
+                         'episode_file_count': 5, 'sort_title': 'a'}]
+        self.episodes = [episode(n) for n in range(1, 6)]
+        self.notified = []
+        holder = self
+
+        class Stub:
+            def series(self):
+                return [dict(row) for row in holder.library]
+
+            def series_one(self, series_id):
+                for row in holder.library:
+                    if row['series_id'] == series_id:
+                        return dict(row)
+                raise Rejected('no such series')
+
+            def episodes(self, series_id, files_only=True):
+                return [dict(item) for item in holder.episodes]
+
+        self.originals = (main.client_for, main.Sonarr, main.notify, main.check_one_rule)
+        main.client_for = lambda *a, **k: Stub()
+        main.Sonarr = lambda instance: Stub()
+        main.notify = lambda settings, subject, description, importance='normal', event='errors': \
+            self.notified.append((subject, event))
+        main.check_one_rule = lambda *a, **k: None
 
     def tearDown(self):
-        main.check_one_rule = self.original
+        main.client_for, main.Sonarr, main.notify, main.check_one_rule = self.originals
         self.temp.cleanup()
 
-    def store(self, ages):
-        old = lambda hours: (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)).isoformat()
-        main.write_cache(self.settings, 'health.json',
-                         {'rules': {rule_id: {'read_at': old(hours)} for rule_id, hours in ages.items()}})
+    def test_the_first_sync_stores_everything_and_announces_nothing(self):
+        """Announcing three thousand series as newly added is true and useless."""
+        report = main.sync_from_sonarr(self.settings)
+        self.assertEqual(report['series_added'], [])
+        self.assertEqual(self.notified, [])
+        self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1)
+        self.assertEqual(len(main.episode_cache(self.settings, self.settings['rules'][0])[0]), 5)
 
-    def test_a_fresh_library_is_left_alone(self):
-        self.store({'r1': 1, 'r2': 2, 'r3': 3, 'r4': 4})
-        self.assertEqual(main.sweep_stale(self.settings), 0)
-        self.assertEqual(self.checked, [])
+    def test_it_reports_what_moved_since_the_last_one(self):
+        main.sync_from_sonarr(self.settings)
+        self.library.append({'series_id': 2, 'title': 'Brand New', 'added': '2026-09-08T00:00:00Z',
+                             'ended': False, 'status': 'continuing', 'path': '/tv/B',
+                             'episode_file_count': 0, 'sort_title': 'brand new'})
+        self.library[0]['ended'] = True
+        report = main.sync_from_sonarr(self.settings)
+        self.assertEqual(report['series_added'], ['Brand New'])
+        self.assertEqual(report['series_changed'], 1)
+        self.assertEqual([event for _, event in self.notified], ['series_added'])
 
-    def test_only_readings_past_the_ttl_are_re_read(self):
-        self.store({'r1': 1, 'r2': 30, 'r3': 3, 'r4': 40})
-        self.assertEqual(main.sweep_stale(self.settings), 2)
-        self.assertEqual(sorted(rule for rule, _ in self.checked), ['r2', 'r4'])
-        self.assertTrue(all(force for _, force in self.checked), 'the backstop must actually read')
+    def test_a_series_leaving_sonarr_is_counted(self):
+        main.sync_from_sonarr(self.settings)
+        self.library.clear()
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_removed'], 1)
 
-    def test_the_oldest_go_first_and_only_a_few_per_tick(self):
-        # Spread, not a spike: a library where everything aged out at once is covered over
-        # several minutes rather than in one five-in-the-morning sweep.
-        self.store({'r1': 30, 'r2': 90, 'r3': 60, 'r4': 40})
-        self.assertEqual(main.sweep_stale(self.settings, limit=2), 2)
-        self.assertEqual([rule for rule, _ in self.checked], ['r2', 'r3'])
+    def test_a_managed_series_that_did_not_move_is_not_reported(self):
+        main.sync_from_sonarr(self.settings)
+        self.assertEqual(main.sync_from_sonarr(self.settings)['episodes_changed'], [])
+        self.episodes[0]['monitored'] = not self.episodes[0]['monitored']
+        self.assertEqual(main.sync_from_sonarr(self.settings)['episodes_changed'], ['A'])
 
-    def test_a_series_never_read_is_the_most_overdue_there_is(self):
-        self.store({'r1': 30})
-        main.sweep_stale(self.settings, limit=1)
-        self.assertEqual([rule for rule, _ in self.checked], ['r2'])
+    def test_the_interval_decides_when_it_is_due(self):
+        self.assertTrue(main.sync_is_due(self.settings), 'nothing stored means overdue')
+        main.sync_from_sonarr(self.settings)
+        self.assertFalse(main.sync_is_due(self.settings))
+        stored = main.last_sync(self.settings)
+        stored['synced_at'] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=30)).isoformat()
+        main.write_cache(self.settings, 'sync.json', stored)
+        self.assertTrue(main.sync_is_due(self.settings))
 
-    def test_a_disabled_rule_is_never_swept(self):
-        self.settings['rules'][1]['enabled'] = False
-        self.store({'r1': 30, 'r2': 90, 'r3': 1, 'r4': 1})
-        main.sweep_stale(self.settings)
-        self.assertEqual([rule for rule, _ in self.checked], ['r1'])
+    def test_browsing_the_library_never_reaches_sonarr(self):
+        """The whole point: the picker, a keep window, a plan — all from the stored reading."""
+        main.sync_from_sonarr(self.settings)
+
+        def explode(*args, **kwargs):
+            raise AssertionError('the interface must not go to Sonarr between syncs')
+
+        main.client_for = explode
+        self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1)
+        self.assertEqual(main.series_record(self.settings, self.settings['rules'][0])['title'], 'A')
+        state = main.monitoring_for(self.settings, self.settings['rules'][0])
+        self.assertTrue(state['ok'])
+
+    def test_an_unreachable_instance_does_not_lose_what_is_stored(self):
+        main.sync_from_sonarr(self.settings)
+
+        class Broken:
+            def series(self):
+                raise Rejected('unreachable')
+
+            def episodes(self, series_id, files_only=True):
+                raise Rejected('unreachable')
+
+        main.client_for = lambda *a, **k: Broken()
+        main.Sonarr = lambda instance: Broken()
+        report = main.sync_from_sonarr(self.settings)
+        self.assertTrue(report['errors'])
+        self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1, 'yesterday beats nothing')

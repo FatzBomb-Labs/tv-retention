@@ -20,11 +20,6 @@ from core import Rejected, normalise
 TIMEOUT = 30
 USER_AGENT = 'TV-Delete/1.0 (Unraid plugin)'
 
-# Sonarr's history event types. Only the two that change what is on disk are asked for:
-# a grab or a rename tells this plugin nothing it acts on.
-IMPORTED = 3
-FILE_DELETED = 5
-
 # The fields the two mappings below produce. Declared rather than inferred, because both
 # caches store mapped objects and a field added without retiring them reads as absent
 # everywhere until each entry happens to expire — which is how the ended pill, the Sonarr
@@ -116,23 +111,6 @@ class Sonarr:
         if not isinstance(payload, dict) or not payload.get('id'):
             raise SonarrError(f'{self.name}: unexpected series response for {series_id}')
         return self._map_series(payload)
-
-    def changes_since(self, since: str) -> set:
-        """Series ids Sonarr has imported to or deleted from since a moment.
-
-        One small call in place of re-reading every series: over a day this library
-        touched eleven series out of three thousand, and two of the thirty-six under a
-        rule. Monitoring toggled by hand in Sonarr is not a history event, so this says
-        which series changed on disk, never that the others are wholly unchanged.
-        """
-        touched = set()
-        for event in (IMPORTED, FILE_DELETED):
-            payload = self._request('GET', 'history/since',
-                                    {'date': since, 'eventType': event})
-            for record in payload if isinstance(payload, list) else []:
-                if record.get('seriesId'):
-                    touched.add(int(record['seriesId']))
-        return touched
 
     def _map_series(self, entry: dict) -> dict:
         path = entry.get('path') or ''
