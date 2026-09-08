@@ -155,7 +155,7 @@ class ToVersionFive(unittest.TestCase):
     def test_everyone_lands_on_the_safe_mode(self):
         document = migrate({'settings_version': 4, 'retention': {'include_specials': True},
                             'rules': [{'id': 'r1', 'monitor_missing': True}]})
-        self.assertEqual(document['settings_version'], 5)
+        self.assertEqual(document['settings_version'], SETTINGS_VERSION)
         self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')
         self.assertTrue(document['retention']['include_specials'], 'other settings survive')
 
@@ -171,5 +171,25 @@ class ToVersionFive(unittest.TestCase):
 
     def test_the_whole_chain_still_arrives(self):
         document = migrate({'dry_run': True, 'schedule': {'cron': '0 4 * * *', 'enabled': True}})
-        self.assertEqual(document['settings_version'], 5)
+        self.assertEqual(document['settings_version'], SETTINGS_VERSION)
         self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')
+
+
+class ToVersionSix(unittest.TestCase):
+    """A log that only speaks when something breaks is an empty file."""
+
+    def test_the_old_default_becomes_the_new_one(self):
+        document = migrate({'settings_version': 5, 'logging': {'level': 'warning'}})
+        self.assertEqual(document['logging']['level'], 'info')
+
+    def test_a_level_chosen_on_purpose_is_left_alone(self):
+        for chosen in ('minimal', 'error', 'verbose'):
+            document = migrate({'settings_version': 5, 'logging': {'level': chosen}})
+            self.assertEqual(document['logging']['level'], chosen)
+
+    def test_ordinary_activity_is_visible_at_the_default_level(self):
+        # The bug in one assertion: at the old default, everything routine ranked above
+        # the threshold and was dropped, so weeks of checks wrote nothing.
+        from store import LOG_RANK
+        from core import DEFAULTS
+        self.assertLessEqual(LOG_RANK['info'], LOG_RANK[DEFAULTS['logging']['level']])

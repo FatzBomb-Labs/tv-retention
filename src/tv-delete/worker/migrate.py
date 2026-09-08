@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 5
+SETTINGS_VERSION = 6
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -72,8 +72,25 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v4(document))
     if version < 5:
         document.update(_to_v5(document))
+    if version < 6:
+        document.update(_to_v6(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v6(document: dict) -> dict:
+    """The log had a level for warnings and none for work.
+
+    Everything routine was logged at `verbose` and the default was `warning`, so a healthy
+    plugin wrote nothing at all: the Live Log stayed empty through weeks of checks, sweeps
+    and edits, which teaches nobody anything about a thing that is working. `info` is the
+    new default, and anyone left on the old default is moved onto it — the intent was
+    "ordinary activity", not "silence until something breaks".
+    """
+    logging = dict(document.get('logging') or {})
+    if logging.get('level', 'warning') == 'warning':
+        logging['level'] = 'info'
+    return {'logging': logging}
 
 
 def _to_v5(document: dict) -> dict:

@@ -433,3 +433,39 @@ class Interface(unittest.TestCase):
         self.assertLess(head.index('tvd-refresh-all'), head.index('tvd-run'))
         self.assertIn('.tvd-head-run', self.css)
         self.assertNotIn('tvd-head-plan', self.html)
+
+    def test_the_schedule_saves_itself(self):
+        """A switch that looks live and is not lost a schedule entirely.
+
+        It was set, it read as set on every later visit because the page renders from the
+        stored settings, and no run ever came — the value only left the page if you found
+        a Save button below the fold.
+        """
+        self.assertIn('async function saveScheduleNow()', self.js)
+        self.assertRegex(self.js, r"\$\(id\)\.addEventListener\('change', \(\) => guarded\('', saveScheduleNow\)\)")
+        self.assertNotIn('tvd-save-schedule', self.html)
+        self.assertNotIn('tvd-save-schedule', self.js)
+
+    def test_a_form_that_keeps_an_explicit_save_says_when_it_is_dirty(self):
+        self.assertIn('id="tvd-settings-dirty"', self.html)
+        self.assertIn('settingsDirty(true)', self.js)
+        self.assertIn('settingsDirty(false)', self.js)
+
+    def test_every_schedule_control_is_wired_to_save(self):
+        # A control added to the panel and not to the list would silently not persist,
+        # which is the whole bug repeating.
+        import re
+        wired = set(re.findall(r"'(tvd-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
+                               r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
+                               r"match-hour|match-minute|connectivity))'", self.js))
+        panel = self.html.split('id="tvd-panel-schedule"')[1].split('</section>')[0]
+        for identifier in re.findall(r'id="(tvd-[a-z-]+)"', panel):
+            if identifier in ('tvd-schedule-summary', 'tvd-match-summary') or 'field' in identifier:
+                continue
+            self.assertIn(identifier, wired, f'{identifier} is on the schedule panel but never saved')
+
+    def test_the_badge_is_as_tall_as_it_is_round(self):
+        # Height came from line-height while width came from padding, so it rendered as a
+        # squashed oval rather than a badge.
+        self.assertRegex(self.css, r'\.tvd-tab-badge \{[^}]*height: 18px')
+        self.assertRegex(self.css, r'\.tvd-tab-badge \{[^}]*min-width: 18px')

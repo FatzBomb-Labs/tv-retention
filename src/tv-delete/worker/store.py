@@ -238,7 +238,10 @@ def load_health(settings: dict) -> dict:
 # Rolling log
 # ---------------------------------------------------------------------------
 
-LOG_RANK = {'minimal': 0, 'error': 1, 'warning': 2, 'verbose': 3}
+# Five levels, ordered. `info` is what the plugin did — checks, sweeps, runs, saves — and
+# is the default, because a log that only speaks when something breaks is an empty file
+# that teaches nobody anything about a plugin that is working.
+LOG_RANK = {'minimal': 0, 'error': 1, 'warning': 2, 'info': 3, 'verbose': 4}
 
 
 def log_line(settings: dict, level: str, message: str) -> None:

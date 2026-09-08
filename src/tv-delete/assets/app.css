@@ -70,8 +70,13 @@
 #tv-delete .tvd-tabs button:hover { opacity: .9; background: var(--tvd-soft); }
 #tv-delete .tvd-tabs button.active { opacity: 1; font-weight: 600; background: var(--tvd-soft);
   border-bottom: 2px solid var(--tvd-accent); color: inherit; }
-.tvd-tab-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px;
-  font-size: 10px; line-height: 16px; text-align: center; background: var(--tvd-info); color: #fff; }
+/* A count, not a label: round at one digit, a stadium at two. Height is set explicitly —
+   leaving it to line-height made it shorter than it was wide, which reads as a squashed
+   oval rather than a badge. */
+.tvd-tab-badge { display: inline-grid; place-items: center; box-sizing: border-box;
+  width: auto; height: 18px; min-width: 18px; padding: 0 5px; margin-left: 5px;
+  border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1;
+  vertical-align: middle; background: var(--tvd-info); color: #fff; }
 .tvd-tab-badge.error { background: var(--tvd-bad); }
 .tvd-tab-badge.warning { background: var(--tvd-warn); }
 .tvd-tab-badge.notice { background: var(--tvd-notice); color: #1a1a1a; }
@@ -81,7 +86,8 @@
 .tvd-spacer { flex: 1; }
 .tvd-lede { max-width: 90ch; opacity: .8; margin-bottom: 8px; }
 .tvd-empty { opacity: .65; padding: 18px; border: 1px dashed var(--tvd-line); border-radius: 6px; text-align: center; }
-.tvd-actions { margin-top: 14px; }
+.tvd-actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; }
+.tvd-dirty { font-size: 12px; color: var(--tvd-warn); }
 .tvd-seg { display: inline-flex; border: 1px solid var(--tvd-line); border-radius: 6px; overflow: hidden; }
 #tv-delete .tvd-seg button { border: none; border-radius: 0; padding: 6px 12px; font-size: 12px; }
 #tv-delete .tvd-seg button.active { background: var(--tvd-soft); font-weight: 600; }
@@ -201,7 +207,7 @@
    the generic button rule above outranks a bare class — that is what turned these into
    grey rectangles with the number pushed off centre. */
 #tv-delete .tvd-dot-badge, #tv-delete button.tvd-dot-badge {
-  display: inline-grid; place-items: center; box-sizing: border-box;
+  display: inline-grid; place-items: center; box-sizing: border-box; align-self: center;
   width: 20px; height: 20px; min-width: 20px; flex: 0 0 20px;
   padding: 0; margin: 0; border-radius: 50%; border: 1px solid var(--tvd-line);
   font-size: 11px; font-weight: 700; line-height: 1; text-align: center;

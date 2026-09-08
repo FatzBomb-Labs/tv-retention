@@ -524,6 +524,8 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     """Evaluate every enabled rule, and delete unless previewing or in dry-run mode."""
     require_ready()
     settings = load_settings()
+    log_line(settings, 'info',
+             ('scheduled ' if scheduled else '') + ('preview' if preview else 'run') + ' started')
     # A manual run is always live; Test Mode governs the scheduler alone, and the preview
     # flag is the read-only plan behind "Show scheduled changes".
     test_mode = scheduled and bool((settings.get('schedule') or {}).get('test_mode', True))
@@ -767,6 +769,24 @@ def watch_sonarr(settings: dict, health: dict, min_interval: int = 30) -> bool:
     return moved
 
 
+def log_settings_change(settings: dict, previous: dict, updated: dict) -> None:
+    """Say what a save actually changed, so the log answers "when did this become true?"."""
+    for key in ('schedule', 'retention', 'logging', 'notifications', 'health', 'state_dir',
+                'log_retention_runs', 'instances', 'profiles', 'rules', 'tmdb'):
+        was, now = canonical_json(previous.get(key)), canonical_json(updated.get(key))
+        if was == now:
+            continue
+        if key == 'schedule':
+            log_line(settings, 'info', 'schedule saved: '
+                     + (schedules.describe(updated.get('schedule') or {})
+                        if (updated.get('schedule') or {}).get('enabled') else 'disabled'))
+        elif key in ('instances', 'profiles', 'rules'):
+            log_line(settings, 'info', f'{key} changed: {len(previous.get(key) or [])} '
+                                       f'-> {len(updated.get(key) or [])}')
+        else:
+            log_line(settings, 'info', f'{key} settings saved')
+
+
 def watch_and_recheck(settings: dict, min_interval: int = 30, limit: int = 25) -> int:
     """Ask what changed, re-read only that, and say so if it needs saying.
 
@@ -1007,6 +1027,14 @@ def check_one_rule(settings: dict, rule: dict, instance_state: dict = None, forc
         state['fingerprint'] = rule_fingerprint(rule, settings)
     if rule['id'] in dirty and not state.get('from_cache') and state.get('ok'):
         health['dirty'] = [known for known in dirty if known != rule['id']]
+    # The running commentary a person reads while something is happening. A read from
+    # Sonarr is worth a line; one served from the store is detail.
+    plan = state.get('plan') or {}
+    summary = (f'{plan.get("delete", 0)} to delete, {plan.get("monitor", 0)} to monitor, '
+               f'{plan.get("unmonitor", 0)} to unmonitor')
+    log_line(settings, 'verbose' if state.get('from_cache') else 'info',
+             f'checked {state.get("series_title")}: {summary}'
+             + (' (from the stored reading)' if state.get('from_cache') else ' (read from Sonarr)'))
     was = (health.get('rules') or {}).get(rule['id']) or {}
     # Said once, when Sonarr first reports it, rather than on every check thereafter.
     if state.get('ended') and not was.get('ended'):
@@ -1211,6 +1239,7 @@ def tick() -> int:
         watched = watch_and_recheck(settings, min_interval=45)
         if watched:
             actions.append(f'sonarr reported {watched} changed series')
+            log_line(settings, 'info', f'Sonarr reported {watched} changed series')
 
     # Series added to Sonarr, on a slow cadence because there is no cheap way to ask.
     with contextlib.suppress(Rejected, SonarrError):
@@ -1250,6 +1279,8 @@ def tick() -> int:
     save_job_state(settings, state)
     for message in actions:
         log_line(settings, 'verbose', f'tick: {message}')
+    if not actions:
+        log_line(settings, 'verbose', 'tick: nothing due')
     return 0
 
 

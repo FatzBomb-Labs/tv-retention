@@ -191,6 +191,7 @@ def action_settings(settings, request):
     updated = validate_settings(request.get('settings') or {}, previous=settings)
     save_settings(updated)
     main.write_cron(updated)
+    main.log_settings_change(updated, settings, updated)
     # A changed URL, key or mapping makes the cached series list wrong in a way no
     # timestamp would catch, so it is dropped rather than aged out.
     if canonical_json(settings.get('instances', [])) != canonical_json(updated.get('instances', [])):

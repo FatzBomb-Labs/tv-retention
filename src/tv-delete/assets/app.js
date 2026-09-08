@@ -1630,7 +1630,11 @@
     };
   }
 
-  $('tvd-save-schedule').addEventListener('click', () => guarded('', async () => {
+  // Every control here saves itself the moment it changes. A switch that looks live and is
+  // not is what lost a schedule: it was set, it read as set on every later visit, and no
+  // run ever came, because the value only left the page if you found the Save button.
+  // Programmatic assignment does not fire `change`, so rendering never triggers a save.
+  async function saveScheduleNow() {
     settings.schedule = collectSchedule();
     settings.health = Object.assign({}, settings.health, {
       series_match: Object.assign({}, (settings.health || {}).series_match, {
@@ -1641,8 +1645,14 @@
       }),
       connectivity_seconds: $('tvd-connectivity').value,
     });
-    await saveSettings('Schedule saved.');
-  }));
+    await saveSettings(null, true);
+    $('tvd-schedule-summary').textContent = snapshot.schedule_text || 'Off';
+  }
+
+  ['tvd-schedule-enabled', 'tvd-test-mode', 'tvd-freq', 'tvd-minute', 'tvd-hour', 'tvd-weekday',
+   'tvd-monthly-mode', 'tvd-monthly-day', 'tvd-monthly-weekday', 'tvd-cron',
+   'tvd-match-freq', 'tvd-match-hour', 'tvd-match-minute', 'tvd-connectivity'
+  ].forEach((id) => $(id).addEventListener('change', () => guarded('', saveScheduleNow)));
 
   // -- Sonarr instances --------------------------------------------------
   function renderInstances() {
@@ -1837,7 +1847,19 @@
     if (message) notice(message, 'ok');
   }
 
-  $('tvd-save').addEventListener('click', () => guarded('', () => saveSettings('Settings saved.')));
+  // This panel keeps an explicit Save — it holds text you type, and saving a half-typed
+  // path on every keystroke would be worse. What it must not do is let a change leave the
+  // page unsaved without saying so.
+  const settingsDirty = (on) => { $('tvd-settings-dirty').hidden = !on; };
+  $('tvd-panel-settings').addEventListener('change', (event) => {
+    if (event.target.closest('#tvd-instances')) return;   // instance cards save themselves
+    settingsDirty(true);
+  });
+  $('tvd-panel-settings').addEventListener('input', () => settingsDirty(true));
+  $('tvd-save').addEventListener('click', () => guarded('', async () => {
+    await saveSettings('Settings saved.');
+    settingsDirty(false);
+  }));
   $('tvd-browse-state').addEventListener('click', () => {
     browseFolder($('tvd-state-dir').value || '/mnt/user/appdata', (picked) => { $('tvd-state-dir').value = picked; });
   });

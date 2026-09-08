@@ -161,7 +161,7 @@
       </select>
     </label>
   </div>
-  <div class="tvd-actions"><button type="button" id="tvd-save-schedule" class="tvd-primary">Save schedule</button></div>
+  <p class="tvd-lede"><small>Changes here save as you make them.</small></p>
 </section>
 
 <!-- ------------------------------------------------------------------ -->
@@ -223,10 +223,11 @@
     <div class="tvd-inline-row">
       <span class="tvd-inline-label">Detail</span>
       <select id="tvd-log-level">
-        <option value="minimal">Minimal</option>
+        <option value="minimal">Minimal — only what stops work</option>
         <option value="error">Errors</option>
-        <option value="warning">Warnings</option>
-        <option value="verbose">Verbose</option>
+        <option value="warning">Warnings and errors</option>
+        <option value="info">Normal — what the plugin did</option>
+        <option value="verbose">Verbose — every series, every check</option>
       </select>
     </div>
     <small>Shown live on the Live Log tab. A test run marks every line <span class="tvd-mono">[TEST MODE]</span>.</small>
@@ -235,7 +236,8 @@
   <h2 class="tvd-h2">Notifications</h2>
   <div class="tvd-card tvd-notify-grid" id="tvd-notifications"></div>
 
-  <div class="tvd-actions"><button type="button" id="tvd-save" class="tvd-primary">Save settings</button></div>
+  <div class="tvd-actions"><button type="button" id="tvd-save" class="tvd-primary">Save settings</button>
+    <span id="tvd-settings-dirty" class="tvd-dirty" hidden>Unsaved changes</span></div>
 </section>
 
 <!-- ------------------------------------------------------------------ -->

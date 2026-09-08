@@ -19,7 +19,7 @@ from pathlib import Path
 import schedules
 
 VERSION = '2026.09.06'
-SETTINGS_VERSION = 5
+SETTINGS_VERSION = 6
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -88,7 +88,7 @@ DEFAULTS = {
         'health_problems': True,
         'errors': True,
     },
-    'logging': {'level': 'warning', 'max_bytes': 2 * 1024 * 1024},
+    'logging': {'level': 'info', 'max_bytes': 2 * 1024 * 1024},
     # Run journals, logs and caches live on the array, not on the flash device.
     'state_dir': '/mnt/user/appdata/tv-delete',
     'log_retention_runs': 50,
@@ -228,7 +228,7 @@ def validate_library_path(value, field='Folder') -> str:
     return path
 
 
-LOG_LEVELS = ['minimal', 'error', 'warning', 'verbose']
+LOG_LEVELS = ['minimal', 'error', 'warning', 'info', 'verbose']
 
 
 def validate_schedule(raw, field='Schedule') -> dict:
@@ -491,7 +491,7 @@ def validate_settings(raw, previous=None) -> dict:
     if tmdb_key and not re.match(r'^[A-Za-z0-9._\-]{16,128}$', tmdb_key):
         raise Rejected('TMDB API key looks malformed')
 
-    level = _text(logging_raw.get('level'), 'Log level', 16) or 'warning'
+    level = _text(logging_raw.get('level'), 'Log level', 16) or 'info'
     if level not in LOG_LEVELS:
         raise Rejected(f'Log level must be one of: {", ".join(LOG_LEVELS)}')
 
