@@ -1650,7 +1650,7 @@
       series,
       existing: !!existing,
       draftKey,
-      build: (body) => {
+      build: (body, top) => {
       // The navigator already said which series this is, so there is no picker and no
       // instance to choose: the series carries its own. A rule *is* its binding to one
       // series, so pointing it at another is delete and add, not an edit.
@@ -1730,7 +1730,6 @@
               target.enabled = rule.enabled = on;
               await saveSettings(null, true);
               sayState();
-              notice(`${rule.series_title} ${on ? 'enabled' : 'disabled'}.`, 'ok');
             } catch (error) {
               // Nothing was written, so nothing should look as though it was.
               target.enabled = rule.enabled = !on;
@@ -1747,26 +1746,29 @@
       // them: it is a fact about this series, and it was the thing being scrolled past.
       const planLines = el('div', { className: 'tvr-identity-plan', hidden: true });
       const readLine = el('div', { className: 'tvr-identity-read', hidden: true });
-      if (existing) {
-        const state = monitoring[rule.id] || {};
-        const plan = state.plan;
+      const sayPlan = (plan) => {
+        if (!existing) return;
         planLines.hidden = false;
-        if (plan && (plan.delete || plan.monitor || plan.unmonitor || plan.remove)) {
-          planLines.append(changeLines(plan, (kind) => guarded('', async () => {
-            const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
-            changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
-          })));
-        } else {
-          planLines.append(el('div', { className: 'tvr-plan-quiet',
-                                       textContent: plan ? 'Nothing scheduled for the next run'
-                                                         : 'Not read from Sonarr yet' }));
-        }
+        planLines.replaceChildren(
+          plan && (plan.delete || plan.monitor || plan.unmonitor)
+            ? changeLines(plan, (kind) => guarded('', async () => {
+                const data = await api('preview', { rule_ids: [rule.id] },
+                                       'Working out what would change…');
+                changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
+              }))
+            : el('div', { className: 'tvr-plan-quiet',
+                          textContent: plan ? 'Nothing scheduled for the next run'
+                                            : 'Not read from Sonarr yet' }));
+      };
+      if (existing) {
+        const reading = monitoring[rule.id] || {};
+        sayPlan(reading.plan);
         const reread = el('button', { type: 'button', className: 'tvr-linky',
                                       textContent: 'Re-read from Sonarr' });
         reread.addEventListener('click', () => queueChecks([rule.id], true));
         readLine.hidden = false;
-        readLine.append(el('span', { textContent: state.read_at || state.checked_at
-                                       ? `Sonarr read ${ago(state.read_at || state.checked_at)}` : '' }),
+        readLine.append(el('span', { textContent: reading.read_at || reading.checked_at
+                                       ? `Sonarr read ${ago(reading.read_at || reading.checked_at)}` : '' }),
                         reread);
       }
       const identity = el('div', { className: 'tvr-identity' }, [
@@ -1809,7 +1811,7 @@
       const specials = options(el('select'), [['', `[Default] ${globalSpecials}`], ['no', 'Exclude specials'],
                                               ['yes', 'Include specials']],
         rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : ''));
-      const monitoring = options(el('select'), [['', `[Default] ${globalMonitoring}`],
+      const monitorMode = options(el('select'), [['', `[Default] ${globalMonitoring}`],
                                                 ['unmonitor-only', 'Unmonitor only'],
                                                 ['full-sync', 'Full sync']],
                                  rule.monitoring || '');
@@ -1874,6 +1876,7 @@
           }, '', true);
           sayCounts(counts.known ? counts : null);
           sayNext(counts.known ? counts : null);
+          if (counts.plan) sayPlan(counts.plan);
           if (!counts.known) {
             monitorCount.textContent = unmonitorCount.textContent = '';
             return;
@@ -1907,18 +1910,18 @@
       // The window's own contents are always worth showing; whether they are worth
       // changing is the operator's business, not a rule about widening.
       const updateScopeRow = () => { if (monitorNew.input.checked && tree) loadTree(); };
-      [monitoring, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
+      [monitorMode, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
        conditions.combine, specials].forEach((input) => {
         input.addEventListener('change', () => { updateScopeRow(); refreshCounts(); });
         input.addEventListener('input', refreshCounts);
       });
       setTimeout(() => { updateScopeRow(); refreshCounts(); }, 0);
 
-      body.append(identity);
+      top.append(identity);
       // The banner names what this form does, under the series it does it to. Enabling a
       // series is not one of the things it does, which is why the switch sits above it.
-      body.append(el('div', { className: 'tvr-form-banner',
-                              textContent: existing ? 'Edit series' : 'Add series' }));
+      top.append(el('div', { className: 'tvr-form-banner',
+                             textContent: existing ? 'Edit series' : 'Add series' }));
       if (existing) {
         const alertsHere = seriesAlerts(rule.id);
         if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
@@ -1928,7 +1931,7 @@
           ? 'Presets are managed under Media management.' : 'No presets yet — create one to reuse values.'),
         conditions.node,
         field('Season 0 / specials', specials),
-        field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
+        field('Monitoring', monitorMode, 'Unmonitor only never asks Sonarr to fetch anything.'),
         scopeRow, unmonitorNote);
       const formState = () => JSON.stringify({ profile_id: presetSelect.value,
                                         keep_days: conditions.days.value,
@@ -1936,7 +1939,7 @@
                                         keep_seasons: conditions.seasons.value,
                                         combine: conditions.combine.value,
                                         include_specials: specials.value,
-                                        monitoring: monitoring.value,
+                                        monitoring: monitorMode.value,
                                         enabled: existing ? undefined : enabled.input.checked,
                                         once: monitorNew.input.checked });
       // What Update compares against: the rule as saved, captured before any half-typed
@@ -1953,7 +1956,7 @@
           conditions.seasons.value = values.keep_seasons || '';
           conditions.combine.value = values.combine || 'earliest';
           specials.value = values.include_specials || '';
-          monitoring.value = values.monitoring || '';
+          monitorMode.value = values.monitoring || '';
           if (!existing && values.enabled === false) enabled.input.checked = false;
           applyPreset();
           sayState();
@@ -1961,7 +1964,7 @@
           drafts.delete(draftKey);      // unreadable is not worth carrying
         }
       }
-      return { presetSelect, conditions, specials, monitoring, monitorNew,
+      return { presetSelect, conditions, specials, monitoring: monitorMode, monitorNew,
                before, enabled, draftKey, saved,
                tree: () => (monitorNew.input.checked ? tree : null),
                // A rule needs somewhere to keep from: a preset, or at least one value.
@@ -2075,9 +2078,12 @@
       head.append(el('h3', { textContent: 'Series details' }),
                   el('span', { className: 'tvr-spacer' }), close);
       pane.append(head);
+      // Fixed: the series, and what the next run would do to it. Only the settings below
+      // scroll, so neither can be scrolled out from under the other.
+      const top = el('div', { className: 'tvr-details-top' });
       const body = el('div', { className: 'tvr-details-body' });
-      pane.append(body);
-      const context = editing.build(body);
+      pane.append(top, body);
+      const context = editing.build(body, top);
       editing.context = context;
       const actions = el('div', { className: 'tvr-actions' });
       const primary = el('button', { type: 'button', className: 'tvr-primary',

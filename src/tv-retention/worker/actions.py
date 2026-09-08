@@ -296,6 +296,7 @@ def action_scope_counts(settings, request):
     """
     draft = request.get('draft') or {}
     rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    saved = rule
     if rule:
         try:
             episodes, _, _, _ = main.episodes_for(settings, rule, offline=True)
@@ -339,7 +340,23 @@ def action_scope_counts(settings, request):
         'episodes_monitored': sum(1 for episode in episodes if episode.get('monitored')),
         'episodes_on_disk': sum(1 for episode in episodes if episode.get('has_file')),
         'next_episode': next_episode(episodes),
+        # What the next run would do to the *draft*, so the panel's next-run lines move as
+        # the keep window is typed rather than describing the rule as it was last saved.
+        # The same decision the run makes, from the same stored episodes: nothing here
+        # touches Sonarr, and nothing is written.
+        'plan': draft_plan(settings, saved, overrides),
     }
+
+
+def draft_plan(settings: dict, rule, overrides: dict):
+    """The saved rule's plan, re-decided with the editor's values in place.
+
+    None for a series being added: it has no rule yet, so there is no next run to describe.
+    """
+    if not rule:
+        return None
+    state = main.monitoring_for(settings, dict(rule, **overrides), offline=True)
+    return state.get('plan') if state.get('ok') else None
 
 
 def action_stats(settings, request):

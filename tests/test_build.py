@@ -865,10 +865,40 @@ class Interface(unittest.TestCase):
         same pane went from adding to editing.
         """
         self.assertIn("el('h3', { textContent: 'Series details' })", self.js)
-        self.assertIn("className: 'tvr-form-banner',\n                              textContent: "
-                      "existing ? 'Edit series' : 'Add series'", self.js)
-        body = self.js.split('body.append(identity);')[1].split('body.append(\n')[0]
-        self.assertIn('tvr-form-banner', body)
+        top = self.js.split('top.append(identity);')[1].split('body.append(\n')[0]
+        self.assertIn('tvr-form-banner', top)
+        self.assertIn("existing ? 'Edit series' : 'Add series'", top)
+
+    def test_the_form_does_not_shadow_the_map_of_readings(self):
+        """`monitoring` is the module's readings by rule id, and was also the control.
+
+        Inside the form the control won, so reading `monitoring[rule.id]` above its own
+        declaration was a dead-zone reference: the panel threw before appending anything
+        and every connected series opened to an empty pane, while a new one was fine —
+        because only a saved rule has a reading to look up.
+        """
+        form = self.js.split('function ruleForm')[1].split('\n  // -- the details pane')[0]
+        self.assertNotIn('const monitoring =', form)
+        self.assertIn('const monitorMode = options(', form)
+        self.assertIn('const reading = monitoring[rule.id] || {};', form)
+
+    def test_only_the_settings_scroll(self):
+        """The series and its plan are what the settings are being changed *about*.
+
+        Scrolled away to reach a keep value, the plan they move was never on screen while
+        it moved — and the pane's own heading went with them.
+        """
+        self.assertIn('const context = editing.build(body, top);', self.js)
+        block = self.css.split('.tvr-series-shell.open .tvr-details {')[1].split('}')[0]
+        self.assertIn('grid-template-rows: auto auto minmax(0, 1fr) auto', block)
+        self.assertIn('overflow: hidden', block)
+        self.assertIn('.tvr-series-shell.open .tvr-details-body { overflow-y: auto', self.css)
+
+    def test_the_next_run_lines_follow_the_window_being_typed(self):
+        # Answered against the draft by the call that already counts the scope, so the
+        # lines move with the keep value rather than describing the last save.
+        self.assertIn('if (counts.plan) sayPlan(counts.plan);', self.js)
+        self.assertIn('planLines.replaceChildren(', self.js)
 
     def test_an_unsaved_edit_survives_a_look_at_another_series(self):
         """Clicking a second poster to check something is browsing, not abandoning.

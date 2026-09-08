@@ -670,12 +670,24 @@
 #tvr-view-series-all { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 #tvr-view-series-all .tvr-series-shell { flex: 1; min-height: 0; }
 .tvr-series-list { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
-.tvr-series-shell.open .tvr-details { position: static; height: 100%; max-height: none; }
+/* Four bands, and only one of them moves. The pane stops being the scroller — the
+   settings are — so the series, what the next run would do to it, and the buttons that
+   commit it all stay where they were put. `minmax(0, 1fr)` because a grid row will
+   otherwise take its size from its contents and refuse to shrink, which is the version of
+   this that scrolls the whole pane anyway. */
+.tvr-series-shell.open .tvr-details { position: static; height: 100%; max-height: none;
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
+.tvr-details-top { padding: 8px 10px 0; display: grid; gap: 8px; }
+.tvr-series-shell.open .tvr-details-body { overflow-y: auto; overscroll-behavior: contain;
+  min-height: 0; }
 @media (max-width: 1250px) {
   #tvr-view-series-all { height: auto; display: block; }
   #tvr-view-series-all .tvr-series-shell { min-height: 0; }
   .tvr-series-list { height: auto; overflow: visible; }
-  .tvr-series-shell.open .tvr-details { height: auto; }
+  /* One column, one scroller: the window. Bands that hold themselves still inside a pane
+     that is no longer taller than its contents would only be pinning nothing. */
+  .tvr-series-shell.open .tvr-details { height: auto; display: block; overflow: visible; }
+  .tvr-series-shell.open .tvr-details-body { overflow: visible; }
 }
 
 /* What a one-time action would actually touch, said in the colour of a fact rather than a
