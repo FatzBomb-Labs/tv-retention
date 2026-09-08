@@ -1502,7 +1502,7 @@
       id: '', enabled: true,
       instance_id: (preselect && preselect.instance_id) || (settings.instances[0] || {}).id || '',
       series_id: null, series_title: '', tvdb_id: null, path: '',
-      profile_id: existing ? '' : ((settings.profiles || [])[0] || {}).id || '',
+      profile_id: '',
       keep_days: '', keep_episodes: '', keep_seasons: '', combine: 'earliest',
       include_specials: null,
     }, existing || {});
@@ -1551,10 +1551,13 @@
         ]),
       ]);
 
+      // Custom first, and what a new series starts on. A preset is a decision to share
+      // values with other series, which is not what adding one usually is; offering the
+      // first preset by default made that decision for you and quietly.
       const presetSelect = el('select');
+      presetSelect.append(el('option', { value: '', textContent: 'Custom — values for this series only' }));
       (settings.profiles || []).forEach((preset) => presetSelect.append(
         el('option', { value: preset.id, textContent: `${preset.name} — ${presetSummary(preset).join(', ')}` })));
-      presetSelect.append(el('option', { value: '', textContent: 'Custom — values for this series only' }));
       presetSelect.value = rule.profile_id || '';
       const conditions = conditionFields(rule);
       const applyPreset = () => { conditions.node.hidden = !!presetSelect.value; };

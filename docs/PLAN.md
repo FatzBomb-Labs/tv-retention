@@ -23,11 +23,13 @@ explanation always being present in small type under the control.
 
 ## Open questions
 
-**Should every series require a preset?** Argued for: one source of truth, no per-series
-values drifting apart. Argued against: it forces a preset into existence for every one-off,
-and "Keep 30 days (Firefly only)" is a preset that lies about being shared. Current
-proposal — keep Custom, make a preset the default choice, and put **New preset** in the
-series editor so making one is never a detour. Not settled.
+**Settled:** every series does *not* require a preset. Custom is the first option and what
+a new series starts on. A preset is a decision to share values with other series, and
+adding one is usually not that — defaulting to the first preset made that decision quietly,
+with the values coming from somewhere the form never mentioned.
+
+Still worth doing: **New preset** from inside the series editor, so promoting one series'
+values into a shared preset is not a detour through another section.
 
 ## Wanted, not yet designed
 

@@ -732,3 +732,15 @@ class Interface(unittest.TestCase):
     def test_the_list_scrolls_rather_than_the_column_around_it(self):
         self.assertRegex(self.css, r'\.tvr-series-list \{ height: 100%; overflow-y: auto')
         self.assertRegex(self.css, r'#tvr-view-series-all \{ height: 100%; display: flex')
+
+    def test_a_new_series_starts_on_custom(self):
+        """A preset is a decision to share values with other series.
+
+        Adding one is usually not that, and defaulting to the first preset made the
+        decision quietly — the values came from somewhere the form never mentioned.
+        """
+        block = self.js.split("const presetSelect = el('select');")[1].split('presetSelect.value')[0]
+        self.assertLess(block.index('Custom — values for this series only'),
+                        block.index('settings.profiles'),
+                        'Custom is not the first option')
+        self.assertIn("profile_id: '',", self.js)
