@@ -608,3 +608,23 @@
 .tvr-identity-title { font-weight: 600; font-size: 14px; }
 .tvr-identity .tvr-mono { font-size: 10px; opacity: .55; overflow-wrap: anywhere; }
 @media (max-width: 1250px) { .tvr-series-shell.open { grid-template-columns: 1fr; } }
+
+/* Three columns that scroll independently, under a header that does not scroll at all.
+   The height is fixed to the window so each pane has something to scroll *within*; without
+   that, "overflow: auto" has nothing to overflow and the whole page moves instead. */
+.tvr-topbar { position: sticky; top: 0; z-index: 30; }
+.tvr-shell { height: calc(100vh - 210px); min-height: 460px; overflow: hidden; }
+.tvr-side { height: 100%; max-height: none; position: static; }
+.tvr-main { height: 100%; overflow-y: auto; overscroll-behavior: contain; }
+.tvr-series-shell { align-items: start; }
+/* Sticky inside the scrolling content, so the panel stays put while the list moves, and
+   scrolls on its own once its own contents are taller than the window. */
+.tvr-details { position: sticky; top: 0; max-height: 100%; overflow-y: auto;
+  overscroll-behavior: contain; }
+.tvr-panel-plan { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 8px 10px;
+  display: grid; gap: 4px; justify-items: start; }
+@media (max-width: 1250px) {
+  .tvr-shell { height: auto; min-height: 0; overflow: visible; }
+  .tvr-side, .tvr-main { height: auto; overflow: visible; }
+  .tvr-details { position: static; max-height: none; }
+}

@@ -1042,11 +1042,20 @@
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
       if (rule && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+        // Building a selection: no editor, because the next click may make it a mass edit.
         editing = null;
         if (selected.has(rule.id)) selected.delete(rule.id); else selected.add(rule.id);
       } else if (rule) {
-        editing = null;
-        selected = selected.has(rule.id) && selected.size === 1 ? new Set() : new Set([rule.id]);
+        // One series, one panel: opening it *is* opening its settings. A read-only card
+        // with an Edit button was a step that only ever had one answer.
+        if (selected.has(rule.id) && selected.size === 1 && editing) {
+          selected = new Set();
+          editing = null;
+        } else {
+          selected = new Set([rule.id]);
+          openEditor(rule);
+          return;
+        }
       } else {
         // Nothing to select on a series without a rule: opening it *is* adding it.
         selected = new Set();
@@ -1575,15 +1584,37 @@
        conditions.combine].forEach((input) => input.addEventListener('change', updateScopeRow));
       setTimeout(updateScopeRow, 0);
 
+      body.append(identity);
+      // What the next run would do to this series, above the settings that decide it.
+      if (existing) {
+        const state = monitoring[rule.id] || {};
+        const plan = state.plan;
+        const alertsHere = seriesAlerts(rule.id);
+        if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { hideOpen: true }));
+        const box = el('div', { className: 'tvr-panel-plan' });
+        box.append(el('div', { className: 'tvr-once-title', textContent: 'Next run' }));
+        if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
+          box.append(changeLines(plan, (kind) => guarded('', async () => {
+            const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
+            changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
+          })));
+        } else {
+          box.append(el('div', { className: 'tvr-plan-quiet',
+                                 textContent: plan ? 'Nothing scheduled.' : 'Not read yet.' }));
+        }
+        const reread = el('button', { type: 'button', className: 'tvr-small',
+                                      textContent: 'Re-read from Sonarr' });
+        reread.addEventListener('click', () => queueChecks([rule.id], true));
+        box.append(reread);
+        body.append(box);
+      }
       body.append(
-        identity,
         field('Retention', presetSelect, (settings.profiles || []).length
           ? 'Presets are managed under Media management.' : 'No presets yet — create one to reuse values.'),
         conditions.node,
         field('Season 0 / specials', specials),
         field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
-        scopeRow,
-      );
+        scopeRow);
       return { presetSelect, conditions, specials, monitoring, monitorNew, unmonitorOut,
                before, enabled,
                // A rule needs somewhere to keep from: a preset, or at least one value.
@@ -1718,68 +1749,10 @@
       return;
     }
 
-    if (chosen.length === 1) { renderOneDetail(pane, head, close, chosen[0]); return; }
+    // One selected and nothing open means the editor was closed: show it again rather than
+    // a read-only copy of the same facts.
+    if (chosen.length === 1) { openEditor(chosen[0]); return; }
     renderMassEdit(pane, head, close, chosen);
-  }
-
-  // One series: what it is, what the next run would do to it, and the way in to change it.
-  function renderOneDetail(pane, head, close, rule) {
-    const series = seriesFacts(rule);
-    head.append(el('h3', { textContent: rule.series_title || rule.path }),
-                el('span', { className: 'tvr-spacer' }), close);
-    pane.append(head);
-    const body = el('div', { className: 'tvr-details-body' });
-
-    if (series && series.poster) {
-      body.append(el('div', { className: 'tvr-poster tvr-poster-wide' }, [
-        el('img', { loading: 'lazy', alt: '',
-                    src: `${API}?poster=${rule.series_id}&instance=${encodeURIComponent(rule.instance_id)}`
-                         + `&csrf_token=${encodeURIComponent(CSRF)}` })]));
-    }
-    if (series) {
-      const facts = [series.year, series.network, series.certification,
-                     series.season_count ? plural(series.season_count, 'season') : '',
-                     series.total_episode_count
-                       ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
-                     series.size_on_disk ? bytes(series.size_on_disk) : ''].filter(Boolean);
-      body.append(el('div', { className: 'tvr-details-facts', textContent: facts.join(' · ') }));
-      if (series.next_airing) {
-        body.append(el('div', { className: 'tvr-details-facts',
-                                textContent: `Next airs ${when(series.next_airing)}` }));
-      }
-      if (series.overview) body.append(el('p', { className: 'tvr-details-overview', textContent: series.overview }));
-    }
-
-    const state = monitoring[rule.id] || {};
-    const plan = state.plan;
-    body.append(el('h4', { className: 'tvr-h3', textContent: 'Retention' }));
-    const preset = presetFor(rule);
-    body.append(el('div', { className: 'tvr-details-facts',
-                            textContent: preset ? preset.name : ruleSummary(rule).join(' · ') || 'no keep window' }));
-    body.append(el('h4', { className: 'tvr-h3', textContent: 'Next run' }));
-    if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
-      body.append(changeLines(plan, (kind) => guarded('', async () => {
-        const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
-        changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
-      })));
-    } else {
-      body.append(el('div', { className: 'tvr-plan-quiet',
-                              textContent: plan ? 'Nothing scheduled.' : 'Not read yet.' }));
-    }
-    const alertsHere = seriesAlerts(rule.id);
-    if (alertsHere.length) {
-      body.append(el('h4', { className: 'tvr-h3', textContent: 'Needs attention' }));
-      body.append(seriesAlertCard(rule, alertsHere, { hideOpen: true }));
-    }
-    pane.append(body);
-
-    const actions = el('div', { className: 'tvr-actions' });
-    const refresh = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Re-read from Sonarr' });
-    refresh.addEventListener('click', () => queueChecks([rule.id], true));
-    actions.append(refresh);
-    const link = sonarrLink(rule);
-    if (link) actions.append(el('span', { className: 'tvr-spacer' }), link);
-    pane.append(actions);
   }
 
   // Several at once. Only the fields where "the same for all of them" is a sensible thing
@@ -1843,12 +1816,6 @@
     pane.append(actions);
   }
 
-  // Sonarr's own record for a rule's series, from the stored reading.
-  function seriesFacts(rule) {
-    const list = library || [];
-    return list.find((entry) => entry && entry.series_id === rule.series_id
-                                && entry.instance_id === rule.instance_id) || null;
-  }
 
   // A rule's keep window, as the one-time pass needs to remember it.
   function scopeOf(rule) {

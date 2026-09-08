@@ -647,3 +647,22 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-poster-row img \{ object-fit: contain')
         # And connected is a whole border in poster view, not a bar down one side.
         self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-rule\.ok \{ border-color: var\(--tvr-good\)')
+
+    def test_opening_a_series_opens_its_settings(self):
+        """A read-only card with an Edit button was a step that only ever had one answer.
+
+        Removing the button without moving the settings left a connected series with no
+        way in at all, which is the regression this pins.
+        """
+        self.assertIn('openEditor(rule);', self.js)
+        self.assertNotIn('renderOneDetail', self.js)
+        self.assertIn('if (chosen.length === 1) { openEditor(chosen[0]); return; }', self.js)
+
+    def test_each_column_scrolls_within_something(self):
+        # overflow:auto with nothing to overflow moves the whole page instead, which is why
+        # the sidebar did not keep its own scrollbar.
+        self.assertRegex(self.css, r'\.tvr-shell \{ height: calc\(100vh')
+        for selector in (r'\.tvr-side \{ height: 100%', r'\.tvr-main \{ height: 100%; overflow-y: auto',
+                         r'\.tvr-details \{ position: sticky; top: 0; max-height: 100%; overflow-y: auto'):
+            self.assertRegex(self.css, selector)
+        self.assertRegex(self.css, r'\.tvr-topbar \{ position: sticky; top: 0')
