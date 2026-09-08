@@ -277,11 +277,13 @@
     <li>Anything belonging to a series that is blocked by an error.</li>
     <li>Media files Sonarr does not know about — they are reported instead.</li>
     <li>Specials, unless you include them.</li>
-    <li>Files modified inside the minimum age window.</li>
-    <li>Everything, while Preview is on, or when a guard stops the run.</li>
+    <li>Episodes that have not aired yet, whatever the rule says about the old ones.</li>
+    <li>Everything, on a scheduled run while Test Mode is on.</li>
   </ul>
+  <h2 class="tvd-h2">Monitoring</h2>
+  <p class="tvd-lede"><strong>Unmonitor only</strong> never asks Sonarr to fetch anything: it unmonitors what it deletes, and whatever falls outside the keep window. <strong>Full sync</strong> also monitors everything inside the window, including episodes with no file — which asks Sonarr to download them. Deleting a file always unmonitors it in both modes; anything else would have Sonarr fetch it back and the next run delete it again.</p>
   <h2 class="tvd-h2">Air dates</h2>
-  <p class="tvd-lede">Sonarr's air date is used first, then TMDB if a key is set, then the file's modification time. The source of each date is shown in every preview, so it is clear when a decision rests on a timestamp rather than a real air date.</p>
+  <p class="tvd-lede">Sonarr's air date is used first, then TMDB if a key is set, then an estimate from the episodes either side, then the date Sonarr first acquired the episode. The source of each date is shown against every episode, so it is clear when a decision rests on an estimate rather than a real air date.</p>
 </section>
 
 <dialog id="tvd-dialog" class="tvd-dialog"><form method="dialog" id="tvd-dialog-form"><div id="tvd-dialog-body"></div>

@@ -984,19 +984,12 @@
   const ALERT_TAG = {
     'unmatched': 'No Sonarr match',
     'folder-missing': 'Folder missing',
-    'path-changed': 'Series moved',
-    'monitored-outside-frame': 'Monitored outside window',
-    'unmonitored-inside-frame': 'Unmonitored inside window',
     'unknown-files': 'Unknown files',
     'ended-expired': 'Series ended',
     'sonarr-unreachable': 'Sonarr unreachable',
-    'run-aborted': 'Run stopped',
   };
   const ACTION_LABEL = {
-    'monitor-in-frame': 'Monitor inside the window',
-    'unmonitor-out-frame': 'Unmonitor outside the window',
     'rematch': 'Re-check against Sonarr',
-    'accept-path': 'Accept the new folder',
     'remove-rule': 'Remove from TV Delete',
     'open-instance': 'Open Sonarr settings',
     'test-instance': 'Test the connection',
@@ -1864,7 +1857,6 @@
   // -- run results and history -------------------------------------------
   function showResult(result, title) {
     dialog(`${title}: ${result.dry_run ? 'nothing was changed' : `${result.deleted} files deleted`}`, (body) => {
-      if (result.aborted) body.append(el('div', { className: 'tvd-warning', textContent: result.aborted }));
       (result.blocked || []).forEach((message) => body.append(el('div', { className: 'tvd-warning', textContent: message })));
       body.append(el('p', { textContent:
         `${result.planned} file(s) across ${result.rules.length} series in ${result.duration_seconds}s.`

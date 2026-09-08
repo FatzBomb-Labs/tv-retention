@@ -240,38 +240,6 @@ def action_monitoring(settings, request):
     return {'monitoring': [main.monitoring_for(settings, rule) for rule in rules]}
 
 
-def action_monitor_apply(settings, request):
-    """Bring one rule's monitoring into line with its keep frame.
-
-    Two explicit, opposite corrections, never run on a schedule. "monitor-in-frame" arms
-    the episodes the rule would keep; "unmonitor-out-frame" disarms the ones it would
-    remove, so Sonarr stops fetching what the next run would delete again.
-    """
-    mode = str(request.get('mode') or '')
-    if mode not in ('monitor-in-frame', 'unmonitor-out-frame'):
-        raise Rejected('Unknown monitoring action')
-    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
-    if not rule:
-        raise Rejected('That rule no longer exists.')
-    status = main.monitoring_for(settings, rule, force=True)
-    if not status.get('ok'):
-        raise Rejected(status.get('error') or 'This rule is not matched to a Sonarr series.')
-
-    targets = status['in_frame_unmonitored'] if mode == 'monitor-in-frame' else status['out_frame_monitored']
-    ids = [entry['episode_id'] for entry in targets if entry.get('episode_id')]
-    if not ids:
-        return {'changed': 0, 'monitoring': status,
-                'ok_message': 'Nothing to change; monitoring already matches the keep frame.'}
-    client = main.client_for(settings, rule['instance_id'])
-    client.set_monitored(ids, mode == 'monitor-in-frame')
-
-    verb = 'monitored' if mode == 'monitor-in-frame' else 'unmonitored'
-    return {'changed': len(ids), 'monitoring': main.monitoring_for(settings, rule, force=True),
-            'ok_message': f'{len(ids)} episode(s) {verb} in Sonarr.'}
-
-
-
-
 def action_log(settings, request):
     """A slice of the rolling log, addressed by byte offset so polling stays cheap."""
     offset = _whole_or(request.get('offset'), 0)
@@ -300,8 +268,6 @@ def action_alert_action(settings, request):
     kind = str(request.get('kind') or '')
     rule_id = str(request.get('rule_id') or '')
     rule = next((r for r in settings.get('rules', []) if r['id'] == rule_id), None)
-    if kind in ('monitor-in-frame', 'unmonitor-out-frame'):
-        return action_monitor_apply(settings, {'rule_id': rule_id, 'mode': kind})
     if kind == 'rematch':
         report = main.bind_rules(settings, force=True)
         settings = load_settings()
@@ -309,19 +275,12 @@ def action_alert_action(settings, request):
             rule = next((r for r in settings.get('rules', []) if r['id'] == rule_id), rule)
             main.check_one_rule(settings, rule)
         return {'report': report, 'settings': redact(settings)}
-    if kind == 'accept-path':
-        if not rule:
-            raise Rejected('That rule no longer exists.')
-        if settings.get('preview', True):
-            raise Rejected('Preview mode is on, so nothing is changed.')
-        main.bind_rules(settings, force=True)
-        settings = load_settings()
-        return {'settings': redact(settings)}
+    # No mode gates these. Test Mode governs the scheduler, and a fix asked for by hand is
+    # always live — the check that stood here read a setting removed three versions ago,
+    # defaulted to "preview is on", and refused every quick action ever since.
     if kind == 'remove-rule':
         if not rule:
             raise Rejected('That rule no longer exists.')
-        if settings.get('preview', True):
-            raise Rejected('Preview mode is on, so nothing is changed.')
         settings['rules'] = [r for r in settings.get('rules', []) if r['id'] != rule_id]
         save_settings(settings)
         health = load_health(settings)
@@ -431,7 +390,6 @@ ACTIONS = {
     'test-instance': action_test_instance,
     'series': action_series,
     'monitoring': action_monitoring,
-    'monitor-apply': action_monitor_apply,
     'browse': action_browse,
     'match': action_match,
     'preview': action_preview,

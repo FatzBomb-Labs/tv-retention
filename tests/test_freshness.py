@@ -384,9 +384,9 @@ class Heartbeat(unittest.TestCase):
         """Otherwise the page is the only thing that ever knows, which defeats the point."""
         import alerts as alert_module
         before = [alert_module.make('unmatched', rule_id='r1', detail='was already wrong')]
-        after = before + [alert_module.make('path-changed', rule_id='r2', detail='moved')]
+        after = before + [alert_module.make('sonarr-unreachable', instance_id='i1', detail='no answer')]
         fresh = main.announce_alerts(self.settings, before, after)
-        self.assertEqual([alert['kind'] for alert in fresh], ['path-changed'])
+        self.assertEqual([alert['kind'] for alert in fresh], ['sonarr-unreachable'])
         self.assertEqual(len(self.notified), 1)
 
     def test_a_problem_that_was_already_there_is_not_announced_again(self):
@@ -419,8 +419,7 @@ class Heartbeat(unittest.TestCase):
         """
         import alerts as alert_module
         announced = {kind for kind, spec in alert_module.KINDS.items() if spec.get('notify')}
-        self.assertEqual(announced, {'unmatched', 'path-changed', 'sonarr-unreachable',
-                                     'no-recycle-bin', 'run-aborted'})
+        self.assertEqual(announced, {'unmatched', 'sonarr-unreachable', 'no-recycle-bin'})
         for spec in alert_module.KINDS.values():
             self.assertIn('notify', spec, 'every kind must say whether it is worth a notification')
 

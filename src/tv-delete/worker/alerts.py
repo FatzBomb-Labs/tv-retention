@@ -36,13 +36,6 @@ KINDS = {
                 'run until it does.',
         'action': 'rematch', 'notify': True,
     },
-    'path-changed': {
-        'severity': WARNING, 'blocking': False, 'scope': 'series',
-        'title': 'Sonarr has moved this series',
-        'help': 'The series resolves by id, but Sonarr now reports a different folder. '
-                'Accepting stores the new path.',
-        'action': 'accept-path', 'notify': True,
-    },
     'ended-expired': {
         'severity': NOTICE, 'blocking': False, 'scope': 'series',
         'title': 'Ended, and nothing is left inside the keep window',
@@ -64,12 +57,6 @@ KINDS = {
                 'recoverable for a while, including the ones this plugin asks for. It applies '
                 'to everything Sonarr deletes, not only to TV Delete.',
         'action': 'enable-recycle-bin', 'notify': True,
-    },
-    'run-aborted': {
-        'severity': ERROR, 'blocking': False, 'scope': 'system',
-        'title': 'A run was stopped by a guard',
-        'help': 'The plan exceeded a safety limit and nothing was deleted.',
-        'action': '', 'notify': True,
     },
 }
 

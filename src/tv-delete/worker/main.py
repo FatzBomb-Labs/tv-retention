@@ -567,12 +567,6 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                             'preset': '', 'note': ''})
     total = sum(len(result['deleted']) for result in results)
 
-    cap = None
-    aborted = ''
-    if cap is not None and total > cap:
-        aborted = (f'Guard stopped this run: {total} files were selected, above the '
-                   f'limit of {cap} per run. Review the plan, then raise the limit if it is correct.')
-
     summary = {
         'id': new_id(),
         'started': started,
@@ -581,7 +575,6 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         'preview': preview,
         'test_mode': test_mode,
         'dry_run': dry_run,
-        'aborted': aborted,
         'rules': results,
         'planned': total,
         'removals': removals,
@@ -592,7 +585,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         'duration_seconds': 0,
     }
 
-    if not preview and not dry_run and not aborted:
+    if not preview and not dry_run:
         # Second pass: the plan is re-derived immediately before acting, so a file that
         # changed between planning and execution is judged on its current state.
         executed = []
@@ -628,7 +621,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
             'id': summary['id'], 'started': summary['started'], 'finished': summary['finished'],
             'scheduled': scheduled, 'dry_run': dry_run, 'planned': summary['planned'],
             'deleted': summary['deleted'], 'freed_bytes': summary['freed_bytes'],
-            'aborted': summary['aborted'], 'errors': summary['errors'][:10],
+            'errors': summary['errors'][:10],
         }]
         state['last_run'] = summary
         save_state(settings, state)
@@ -637,9 +630,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                  ('[TEST MODE] ' if test_mode else '')
                  + f'run finished: {summary["planned"]} planned, {summary["deleted"]} deleted, '
                  + f'{summary["freed_bytes"] // 1024 // 1024} MiB')
-        if aborted:
-            notify(settings, 'TV Delete stopped by a guard', aborted, 'warning', event='errors')
-        elif summary['errors']:
+        if summary['errors']:
             notify(settings, 'TV Delete finished with errors', '; '.join(summary['errors'])[:400],
                    'warning', event='errors')
         elif test_mode:
@@ -1368,7 +1359,7 @@ def cli() -> int:
         verb = 'would delete' if result['dry_run'] else 'deleted'
         print(f'TV Delete {verb} {result["planned"] if result["dry_run"] else result["deleted"]} files '
               f'across {len(result["rules"])} rules in {result["duration_seconds"]}s')
-        for message in result['errors'] + result['blocked'] + ([result['aborted']] if result['aborted'] else []):
+        for message in result['errors'] + result['blocked']:
             print(f'  ! {message}')
         return 0
     if args.command == 'tick':
