@@ -341,6 +341,28 @@ class Interface(unittest.TestCase):
         self.assertNotIn('tvr-mono', block)
         self.assertNotIn('rule.path', block)
 
+    def test_the_library_asks_its_question_on_one_line(self):
+        """Heading, search, sort, two filters and the layout are one question.
+
+        Each of them was answering it from a row of its own, which cost two lines of a
+        page whose subject is a list. The captions went with them: a search box says what
+        it is by being one, and every sort option names an order.
+        """
+        head = self.html.split('<div class="tvr-view-head tvr-series-head">')[1].split('</div>\n')[0]
+        for inside in ('tvr-library-title', 'tvr-search', 'tvr-sort', 'tvr-hide-ended',
+                       'tvr-only-alerts', 'tvr-layout-list'):
+            self.assertIn(inside, head)
+        self.assertNotIn('tvr-series-toolbar', self.html)
+        self.assertNotIn('tvr-series-toolbar', self.css)
+        # Short on the switch, and the whole rule in the tooltip: "Hide ended without a
+        # rule" explained on the control what the control could explain on hover.
+        self.assertIn('>Hide ended</span>', self.html)
+        self.assertIn('>Alerts only</span>', self.html)
+        self.assertIn('One that has a rule stays, and one with an alert always stays.', self.html)
+        # It wraps rather than squeezing: two rows on a narrow window is the honest
+        # answer, not a search box six characters wide.
+        self.assertIn('.tvr-series-head { flex-wrap: wrap', self.css)
+
     def test_the_webgui_defaults_this_page_has_to_undo_are_undone(self):
         """Unraid styles every button and text input through `:where()` selectors.
 

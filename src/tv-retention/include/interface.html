@@ -79,17 +79,14 @@
   <!-- One library, three filters. A series Sonarr knows about is here whether it has a
        rule or not; the check says which, and clicking either opens the pane. -->
   <section id="tvr-view-series-all" class="tvr-view">
-    <div class="tvr-view-head">
+    <!-- One row. A heading, a search box, a sort and two switches are all one question —
+         which series am I looking at — and each of them said so on a line of its own. The
+         captions go with them: a search box says what it is by being one, and every sort
+         option names an order. -->
+    <div class="tvr-view-head tvr-series-head">
       <h2 id="tvr-library-title">All series</h2>
-      <span class="tvr-spacer"></span>
-      <div class="tvr-seg" role="group" aria-label="Layout">
-        <button type="button" id="tvr-layout-list" class="active" title="List"><i class="fa fa-bars"></i></button>
-        <button type="button" id="tvr-layout-grid" title="Posters"><i class="fa fa-th"></i></button>
-      </div>
-    </div>
-    <div class="tvr-toolbar tvr-series-toolbar">
-      <label class="tvr-field tvr-grow"><span>Search</span><input id="tvr-search" type="search" placeholder="Series name…"></label>
-      <label class="tvr-field"><span>Sort</span><select id="tvr-sort">
+      <input id="tvr-search" type="search" placeholder="Search series…" aria-label="Search series">
+      <select id="tvr-sort" title="Sort order" aria-label="Sort order">
         <option value="attention">Needs attention</option>
         <option value="title">Title</option>
         <option value="title-desc">Title, Z–A</option>
@@ -97,9 +94,14 @@
         <option value="size">Largest on disk</option>
         <option value="episodes">Most episodes</option>
         <option value="keep">Keep window, shortest first</option>
-      </select></label>
-      <label class="tvr-switch"><input type="checkbox" id="tvr-hide-ended" checked><span class="tvr-slider"></span><span class="tvr-switch-text">Hide ended without a rule</span></label>
-      <label class="tvr-switch" id="tvr-only-alerts-wrap" hidden><input type="checkbox" id="tvr-only-alerts"><span class="tvr-slider"></span><span class="tvr-switch-text">Only ones needing attention</span></label>
+      </select>
+      <label class="tvr-switch" title="Hide series that have ended and have no retention rule. One that has a rule stays, and one with an alert always stays."><input type="checkbox" id="tvr-hide-ended" checked><span class="tvr-slider"></span><span class="tvr-switch-text">Hide ended</span></label>
+      <label class="tvr-switch" id="tvr-only-alerts-wrap" hidden title="Show only series with something that needs addressing"><input type="checkbox" id="tvr-only-alerts"><span class="tvr-slider"></span><span class="tvr-switch-text">Alerts only</span></label>
+      <span class="tvr-spacer"></span>
+      <div class="tvr-seg" role="group" aria-label="Layout">
+        <button type="button" id="tvr-layout-list" class="active" title="List"><i class="fa fa-bars"></i></button>
+        <button type="button" id="tvr-layout-grid" title="Posters"><i class="fa fa-th"></i></button>
+      </div>
     </div>
     <button type="button" id="tvr-series-rollup" class="tvr-rollup" hidden></button>
     <div id="tvr-series-shell" class="tvr-series-shell">

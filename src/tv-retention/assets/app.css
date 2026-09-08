@@ -294,12 +294,13 @@
   color: #fff; font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
 #tv-retention button.tvr-action:hover { filter: brightness(1.1); background: var(--tvr-action); }
 
-/* Search, sort and filter as one labelled row, with the primary action hard right. */
-.tvr-series-toolbar { align-items: flex-end; }
-.tvr-series-toolbar .tvr-field { flex: 0 1 auto; gap: 3px; }
-.tvr-series-toolbar .tvr-field > span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  opacity: .6; font-weight: 600; }
-.tvr-series-toolbar input[type=search] { min-width: 240px; }
+/* Heading, search, sort, filters and layout on one line — they are one question, and each
+   of them was answering it from a row of its own. Wraps rather than squeezes on a narrow
+   window: two rows there is the honest answer, not a search box six characters wide. */
+.tvr-series-head { flex-wrap: wrap; row-gap: 6px; }
+.tvr-series-head h2 { margin-right: 4px; }
+.tvr-series-head input[type=search] { width: auto; flex: 1 1 190px; max-width: 300px; }
+.tvr-series-head select { flex: 0 0 auto; }
 
 /* Retention sits with the identity, spaced from the instance. A preset is one blue pill
    because the values live in the preset; only a custom rule spells them out. */
@@ -478,26 +479,26 @@
    and a long series list no longer drags the navigation off the top of the screen. */
 .tvr-side { display: block; position: sticky; top: 0; align-self: start;
   max-height: calc(100vh - 60px); overflow-y: auto; overscroll-behavior: contain;
-  padding: 6px 5px 10px; background: var(--tvr-panel);
+  padding: 4px 4px 8px; background: var(--tvr-panel);
   border-right: 1px solid var(--tvr-line); border-radius: 0 0 0 6px; }
 .tvr-side::-webkit-scrollbar { width: 6px; }
 .tvr-side::-webkit-scrollbar-thumb { background: var(--tvr-line); border-radius: 3px; }
-.tvr-side-group { display: grid; gap: 0; margin-bottom: 7px; }
+.tvr-side-group { display: grid; gap: 0; margin-bottom: 5px; }
 #tv-retention button.tvr-side-head { display: flex; align-items: center; gap: 6px; width: 100%;
   text-align: left; border: none; background: none; border-radius: 0; padding: 3px 8px 1px;
   font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; opacity: .55;
   font-weight: 700; }
 #tv-retention button.tvr-side-head:hover { opacity: .8; background: none; }
 #tv-retention button.tvr-side-item { display: flex; align-items: center; gap: 8px; width: 100%;
-  text-align: left; border: none; background: none; border-radius: 3px; padding: 2px 9px;
-  font-size: 12px; line-height: 1.45; opacity: .8; border-left: 2px solid transparent; }
+  text-align: left; border: none; background: none; border-radius: 3px; padding: 1px 8px;
+  font-size: 12px; line-height: 1.4; opacity: .8; border-left: 2px solid transparent; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
 #tv-retention button.tvr-side-item.active { background: var(--tvr-soft); opacity: 1;
   font-weight: 600; border-left-color: var(--tvr-accent); }
 .tvr-side-count { margin-left: auto; font-size: 11px; opacity: .5; }
 
 .tvr-main { min-width: 0; padding: 10px 13px 16px; }
-.tvr-view-head { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.tvr-view-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tvr-view-head h2 { font-size: 16px; margin: 0; }
 #tv-retention .tvr-h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   opacity: .6; margin: 12px 0 4px; font-weight: 700; }
