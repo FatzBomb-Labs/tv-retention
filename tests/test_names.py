@@ -16,7 +16,7 @@ from pathlib import Path
 
 import context  # noqa: F401
 
-WORKER = Path(__file__).resolve().parents[1] / 'src' / 'tv-delete' / 'worker'
+WORKER = Path(__file__).resolve().parents[1] / 'src' / 'tv-retention' / 'worker'
 BUILTINS = set(dir(builtins))
 
 

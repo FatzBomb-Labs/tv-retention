@@ -1,4 +1,4 @@
-# TV Delete
+# TV Retention
 
 An Unraid plugin that keeps TV libraries at a chosen size. For each show you set how much
 to keep — a number of **days**, **episodes**, **seasons**, or any combination — and the
@@ -52,13 +52,13 @@ recycle bin, its extra-file handling and its empty-folder cleanup all apply as t
 ## Installing
 
 Unraid → **Plugins** → **Install Plugin**, and give it the path to
-[`install/tv-delete.plg`](install/tv-delete.plg). The manifest carries the package inside
+[`install/tv-retention.plg`](install/tv-retention.plg). The manifest carries the package inside
 it, so that one file is the whole installer — no repository or internet access is needed.
 
 To install from a local copy, put the `.plg` somewhere on the server (for example
 `/boot/config/plugins/`) and pass that path instead.
 
-The plugin appears at **Tools → TV Delete**. Removing it leaves your settings, run journals
+The plugin appears at **Tools → TV Retention**. Removing it leaves your settings, run journals
 and history in place, so reinstalling picks up where you left off.
 
 Requirements: Unraid 7.0 or newer, and at least one reachable Sonarr v3/v4 instance.
@@ -71,7 +71,7 @@ Requirements: Unraid 7.0 or newer, and at least one reachable Sonarr v3/v4 insta
 2. **Series** → **Add series**, and pick the show from Sonarr.
 3. Open **Show scheduled changes** in the header. Read what the next run would delete, and
    why, before anything is scheduled.
-4. When that looks right, set a schedule on the **Schedule** tab. **Test Mode** is on for a
+4. When that looks right, set a schedule at the top of **Settings**. **Test Mode** is on for a
    new install, so the first scheduled runs report exactly what they would do and change
    nothing. Turn it off once you have watched one go through.
 
@@ -177,7 +177,7 @@ Nothing a series card offers happens immediately. Removals and the one-time moni
 are queued and applied by the next run, so undo costs nothing until then. A run applies them
 in order: queued removals, then monitoring, then retention deletion.
 
-**Removing a series from TV Delete** asks what Sonarr should do about it:
+**Removing a series from TV Retention** asks what Sonarr should do about it:
 
 | Action | Sonarr |
 |---|---|
@@ -243,7 +243,7 @@ deleting it, which leaves its rules in place and stops them being processed.
 
 If Sonarr has **no recycle bin**, its deletions — including the ones this plugin asks for —
 are permanent. That raises a warning with a one-click fix, because it applies to everything
-Sonarr deletes, not only to TV Delete.
+Sonarr deletes, not only to TV Retention.
 
 ## Air dates and TMDB
 
@@ -293,8 +293,8 @@ as soon as it answers, and exactly one is ever queued.
 
 | Path | Contents |
 |---|---|
-| `/boot/config/plugins/tv-delete/settings.json` | All settings, including API keys. Survives reboots and reinstalls. |
-| `/boot/config/plugins/tv-delete/schedule.cron` | The generated cron entry. |
+| `/boot/config/plugins/tv-retention/settings.json` | All settings, including API keys. Survives reboots and reinstalls. |
+| `/boot/config/plugins/tv-retention/schedule.cron` | The generated cron entry. |
 | `<state folder>/state.json` | Run history and the last run report. |
 | `<state folder>/journal.jsonl` | Append-only audit trail. |
 | `<state folder>/health.json` | Cached per-series results, alerts, and the change-feed cursor. |
@@ -304,7 +304,7 @@ as soon as it answers, and exactly one is ever queued.
 | `<state folder>/tmdb-cache.json` | Cached TMDB air dates. |
 
 The **app storage folder** is set on the Settings tab. On a fresh install it defaults to a
-`tv-delete` folder inside the appdata share this server has configured for Docker
+`tv-retention` folder inside the appdata share this server has configured for Docker
 (`DOCKER_APP_CONFIG_PATH` in `docker.cfg`, `/mnt/user/appdata` here), deliberately off the
 flash device. If the array is down it falls back to the flash config folder.
 
@@ -314,12 +314,12 @@ mask, and echoing the mask back means "keep the stored key".
 ## Architecture
 
 ```
-src/tv-delete/
-  TVDelete.page          Unraid Tools page; loads the interface and the assets
+src/tv-retention/
+  TVRetention.page          Unraid Tools page; loads the interface and the assets
   include/api.php        Authenticated bridge: CSRF check, then one JSON call to the worker
   include/interface.html Markup for the eight tabs
   assets/app.js          UI logic; holds no authority, re-validates nothing itself
-  assets/app.css         Styling, scoped to #tv-delete
+  assets/app.css         Styling, scoped to #tv-retention
   worker/core.py         Settings validation and the retention decision. Pure.
   worker/store.py        The filesystem: settings, caches, the log, the progress marker
   worker/sonarr.py       Sonarr v3 client and the rule/series matcher
@@ -349,7 +349,7 @@ a test fails if the mapping produces a key the list does not name.
 
 ```bash
 python3 -m unittest discover -s tests -v   # 306 tests
-python3 tools/build.py                     # writes dist/ and install/tv-delete.plg
+python3 tools/build.py                     # writes dist/ and install/tv-retention.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```
 

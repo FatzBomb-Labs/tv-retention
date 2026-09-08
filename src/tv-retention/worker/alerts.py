@@ -55,7 +55,7 @@ KINDS = {
         'title': 'Sonarr has no recycle bin',
         'help': 'Sonarr deletes files outright. Giving it a recycle bin makes every deletion '
                 'recoverable for a while, including the ones this plugin asks for. It applies '
-                'to everything Sonarr deletes, not only to TV Delete.',
+                'to everything Sonarr deletes, not only to TV Retention.',
         'action': 'enable-recycle-bin', 'notify': True,
     },
 }

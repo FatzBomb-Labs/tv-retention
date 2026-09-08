@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure logic for TV Delete: settings validation, retention evaluation, filesystem helpers.
+"""Pure logic for TV Retention: settings validation, retention evaluation, filesystem helpers.
 
 Nothing in this module performs network access or deletes anything on its own. The
 retention decision is deliberately separated from execution so it can be unit tested
@@ -86,7 +86,7 @@ DEFAULTS = {
     },
     'logging': {'level': 'info', 'max_bytes': 2 * 1024 * 1024},
     # Run journals, logs and caches live on the array, not on the flash device.
-    'state_dir': '/mnt/user/appdata/tv-delete',
+    'state_dir': '/mnt/user/appdata/tv-retention',
     'log_retention_runs': 50,
 }
 

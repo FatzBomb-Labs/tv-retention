@@ -28,11 +28,11 @@ from sonarr import MAPPING_SCHEMA
 # Sonarr's mapping produces. Either moving retires both caches.
 SCHEMA = f'{CACHE_SCHEMA}.{MAPPING_SCHEMA}'
 
-NAME = 'tv-delete'
-CONFIG = Path(os.environ.get('TVD_CONFIG', f'/boot/config/plugins/{NAME}/settings.json'))
-CRON = Path(os.environ.get('TVD_CRON', f'/boot/config/plugins/{NAME}/schedule.cron'))
-RUNTIME = Path(os.environ.get('TVD_RUNTIME', f'/var/run/{NAME}'))
-DEVELOPMENT = os.environ.get('TVD_DEVELOPMENT') == '1'
+NAME = 'tv-retention'
+CONFIG = Path(os.environ.get('TVR_CONFIG', f'/boot/config/plugins/{NAME}/settings.json'))
+CRON = Path(os.environ.get('TVR_CRON', f'/boot/config/plugins/{NAME}/schedule.cron'))
+RUNTIME = Path(os.environ.get('TVR_RUNTIME', f'/var/run/{NAME}'))
+DEVELOPMENT = os.environ.get('TVR_DEVELOPMENT') == '1'
 UPDATE_CRON = '/usr/local/sbin/update_cron'
 NOTIFY = '/usr/local/emhttp/webGui/scripts/notify'
 
@@ -83,7 +83,7 @@ def load_settings() -> dict:
     try:
         return validate_settings(merged, previous=merged)
     except Rejected as error:
-        print(f'tv-delete: stored settings did not validate ({error})', file=sys.stderr)
+        print(f'tv-retention: stored settings did not validate ({error})', file=sys.stderr)
         return merged
 
 
@@ -258,7 +258,7 @@ def log_line(settings: dict, level: str, message: str) -> None:
     prefix = ''
     line = f'{stamp} [{level.upper()}] {prefix}{message}\n'
     try:
-        path = state_dir(settings) / 'tv-delete.log'
+        path = state_dir(settings) / 'tv-retention.log'
         limit = int((settings.get('logging') or {}).get('max_bytes', 2 * 1024 * 1024))
         if path.exists() and path.stat().st_size + len(line) > limit:
             path.replace(path.with_suffix('.log.1'))
@@ -270,7 +270,7 @@ def log_line(settings: dict, level: str, message: str) -> None:
 
 def read_log(settings: dict, offset: int = 0, limit: int = 65536) -> dict:
     """A slice of the log for the viewer, addressed by byte offset so polling is cheap."""
-    path = state_dir(settings) / 'tv-delete.log'
+    path = state_dir(settings) / 'tv-retention.log'
     try:
         size = path.stat().st_size
     except OSError:

@@ -789,6 +789,6 @@
   },
   "notify": true,
   "allow_series_deletion": false,
-  "state_dir": "/mnt/user/appdata/tv-delete",
+  "state_dir": "/mnt/user/appdata/tv-retention",
   "log_retention_runs": 50
 }

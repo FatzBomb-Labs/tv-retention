@@ -3,8 +3,8 @@
 
 Produces two things:
 
-  dist/tv-delete-<version>-noarch-1.txz   the Slackware package emhttp installs
-  install/tv-delete.plg                   a self-contained plugin manifest with the
+  dist/tv-retention-<version>-noarch-1.txz   the Slackware package emhttp installs
+  install/tv-retention.plg                   a self-contained plugin manifest with the
                                           package embedded, so the WebGUI's
                                           "Install Plugin" field needs one file only
 
@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-NAME = 'tv-delete'
+NAME = 'tv-retention'
 VERSION = (ROOT / 'VERSION').read_text().strip()
 PACKAGE = f'{NAME}-{VERSION}-noarch-1.txz'
 SOURCE = ROOT / 'src' / NAME
@@ -60,7 +60,7 @@ def build_package() -> str:
             info.mode = 0o755 if relative.parts[0] == 'event' or path.suffix == '.sh' else 0o644
             archive.addfile(info, io.BytesIO(data))
         # Slackware expects an 11-line slack-desc; the first line names the package.
-        description = (f'{NAME}: TV Delete (Unraid plugin)\n'
+        description = (f'{NAME}: TV Retention (Unraid plugin)\n'
                        f'{NAME}:\n'
                        f'{NAME}: Retention for TV libraries. Keeps a chosen number of days,\n'
                        f'{NAME}: episodes, or seasons per show and removes the rest through\n'
@@ -77,7 +77,7 @@ def build_manifest(checksum: str) -> Path:
     # The name is an identifier, not a label: Unraid uses it as the plugin directory when
     # it looks up the icon and the README that the Plugins page shows as the description.
     plugin = ET.Element('PLUGIN', dict(name=NAME, author='FatzServer', version=VERSION,
-                                       launch='Tools/TVDelete', icon='trash',
+                                       launch='Tools/TVRetention', icon='trash',
                                        category='stable', min='7.0.0'))
     ET.SubElement(plugin, 'CHANGES').text = CHANGES
 
@@ -97,7 +97,7 @@ chmod 755 /usr/local/emhttp/plugins/{NAME}/event/*
 # Republish the schedule from the saved settings; a fresh install has none, and an
 # upgrade keeps whatever the operator had configured.
 /usr/bin/python3 /usr/local/emhttp/plugins/{NAME}/worker/main.py resume || true
-echo 'TV Delete installed. Open Tools > TV Delete. Dry run is ON and no schedule is set.'
+echo 'TV Retention installed. Open Tools > TV Retention. Dry run is ON and no schedule is set.'
 '''
 
     remove = ET.SubElement(plugin, 'FILE', Run='/bin/bash', Method='remove')
@@ -108,7 +108,7 @@ set -eu
 if [ -f {BOOT}/schedule.cron ]; then unlink {BOOT}/schedule.cron; fi
 /usr/local/sbin/update_cron
 removepkg {NAME}
-echo 'TV Delete removed. Settings and run journals were preserved.'
+echo 'TV Retention removed. Settings and run journals were preserved.'
 '''
 
     ET.indent(plugin)

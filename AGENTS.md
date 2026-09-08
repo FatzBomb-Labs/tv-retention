@@ -1,4 +1,4 @@
-# TV Delete
+# TV Retention
 
 An Unraid Tools plugin that applies per-show retention to a TV library and deletes
 through Sonarr. See [README.md](README.md) for architecture and usage.
@@ -69,10 +69,10 @@ Sonarr and decides things, plus the tick and the CLI.
 - Test the Sonarr mapping from a Sonarr-shaped payload, not from the shape a consumer
   wants: a consumer reading a key the mapping never set is invisible to the latter.
 - Test against isolated fixtures. Live checks against Sonarr must be read-only, run from
-  a `/tmp` staging directory with `TVD_CONFIG` pointed away from `/boot`.
+  a `/tmp` staging directory with `TVR_CONFIG` pointed away from `/boot`.
 
 ## Deployment
 
-This is an uninstalled development release. `install/tv-delete.plg` is the self-contained
+This is an uninstalled development release. `install/tv-retention.plg` is the self-contained
 installer. Work through [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) on the target system
 before turning dry run off.

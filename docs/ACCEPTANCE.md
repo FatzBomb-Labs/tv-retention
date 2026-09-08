@@ -5,20 +5,20 @@ read-only or reversible.
 
 ## 1. Install
 
-- [ ] Plugins → Install Plugin → path to `install/tv-delete.plg`. Installation reports
+- [ ] Plugins → Install Plugin → path to `install/tv-retention.plg`. Installation reports
       the SHA256 check passing.
-- [ ] **Tools → TV Delete** loads, shows the version, and reports *Dry run is on*.
+- [ ] **Tools → TV Retention** loads, shows the version, and reports *Dry run is on*.
 - [ ] After an upgrade, the page loads the new script without a manual cache clear. The
       asset URLs carry a content hash, so a stale script cannot survive a reinstall — that
       failure presented as every show and setting having vanished.
-- [ ] The Plugins page row shows the **TV Delete** description and a trash icon that opens
+- [ ] The Plugins page row shows the **TV Retention** description and a trash icon that opens
       the page when clicked. Verify the icon is actually **visible**, not merely present:
       an icon name with no glyph behind it renders as an empty, zero-sized element, so the
       link is there but there is nothing to click.
 - [ ] The Tools tile shows the same icon. Both come from the same name.
-- [ ] The Name column reads `tv-delete`, which is Unraid's plugin directory identifier,
+- [ ] The Name column reads `tv-retention`, which is Unraid's plugin directory identifier,
       not a label.
-- [ ] `ls /boot/config/plugins/tv-delete/` shows the package; there is no
+- [ ] `ls /boot/config/plugins/tv-retention/` shows the package; there is no
       `schedule.cron` yet.
 
 ## 2. Sonarr instances
@@ -104,7 +104,7 @@ read-only or reversible.
 
 ## 9. Schedule
 
-- [ ] Enable a daily schedule. Confirm `/boot/config/plugins/tv-delete/schedule.cron`
+- [ ] Enable a daily schedule. Confirm `/boot/config/plugins/tv-retention/schedule.cron`
       exists and `crontab -l` contains the entry.
 - [ ] Wait for one scheduled run (or temporarily set it a few minutes ahead). Confirm it
       appears in history marked *schedule*, and that an Unraid notification arrived.

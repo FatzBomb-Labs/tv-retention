@@ -1,0 +1,419 @@
+/* TV Retention. Scoped to #tv-retention so nothing leaks into the Unraid WebGUI, and colours
+   are inherited from the active Unraid theme wherever possible. */
+#tv-retention { --tvr-line: rgba(128,128,128,.32); --tvr-soft: rgba(128,128,128,.10);
+  --tvr-warn: #d9822b; --tvr-bad: #c0392b; --tvr-good: #2e9e5b; --tvr-accent: #ff8c2b;
+  --tvr-notice: #c9a227; --tvr-info: #6a7f97; --tvr-action: #3d7ebf;
+  max-width: 1180px; font-size: 13px; line-height: 1.35; }
+#tv-retention * { box-sizing: border-box; }
+/* An author display rule outranks the browser's [hidden] { display: none }, so any element
+   this page hides in script needs the attribute to win explicitly. */
+#tv-retention [hidden] { display: none !important; }
+#tv-retention h1 { font-size: 22px; margin: 0 0 2px; }
+#tv-retention .tvr-h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em;
+  margin: 22px 0 8px; opacity: .75; }
+/* The heading owns the left edge and what belongs to it sits inside — so a settings page
+   reads as sections rather than as one column of equal cards. */
+.tvr-panel .tvr-h2 + .tvr-card, .tvr-panel .tvr-h2 + .tvr-instances,
+.tvr-panel .tvr-h2 + .tvr-card + .tvr-actions, .tvr-panel .tvr-instances + .tvr-actions,
+.tvr-panel .tvr-h2 + .tvr-card + .tvr-card { margin-left: 14px; }
+#tv-retention .tvr-card-title { font-size: 13px; margin: 10px 0 2px; }
+#tv-retention p { margin: 4px 0; }
+
+.tvr-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--tvr-line); }
+.tvr-head p { max-width: 70ch; opacity: .8; }
+.tvr-eyebrow { font-size: 10px; letter-spacing: .18em; opacity: .6; }
+.tvr-version { font-size: 11px; opacity: .55; font-weight: normal; }
+.tvr-head-actions { display: flex; gap: 10px; align-items: center; }
+
+/* Longhands, not `font: inherit`: the shorthand also sets line-height, at a specificity
+   (#id + element) that no class rule can beat, so every button-shaped line in a dense
+   list silently reverted to the page's paragraph spacing. */
+#tv-retention button { font-family: inherit; font-size: inherit; font-weight: inherit;
+  font-style: inherit; padding: 7px 14px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--tvr-line); background: transparent; color: inherit; }
+#tv-retention button:hover:not([disabled]) { background: var(--tvr-soft); }
+#tv-retention button.tvr-primary { background: var(--tvr-accent); border-color: var(--tvr-accent);
+  color: #1a1a1a; font-weight: 600; }
+#tv-retention button.tvr-primary:hover:not([disabled]) { filter: brightness(1.08); }
+#tv-retention button.tvr-danger { border-color: var(--tvr-bad); color: var(--tvr-bad); }
+#tv-retention button[disabled] { opacity: .45; cursor: not-allowed; }
+#tv-retention input, #tv-retention select, #tv-retention textarea { font: inherit; padding: 6px 8px;
+  border: 1px solid var(--tvr-line); border-radius: 4px; background: transparent; color: inherit; max-width: 100%; }
+#tv-retention input[disabled] { opacity: .45; }
+
+/* Switches. One implementation, so a toggle reads the same on a card, in a dialog and in
+   the header. The track carries the state; the caption names it. */
+.tvr-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  user-select: none; white-space: nowrap; }
+.tvr-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.tvr-slider { position: relative; width: 34px; height: 18px; border-radius: 999px; flex: 0 0 34px;
+  background: var(--tvr-soft); border: 1px solid var(--tvr-line); transition: background .15s, border-color .15s; }
+.tvr-slider::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: currentColor; opacity: .65; transition: transform .15s, opacity .15s; }
+.tvr-switch input:checked + .tvr-slider { background: rgba(46,158,91,.25); border-color: var(--tvr-good); }
+.tvr-switch input:checked + .tvr-slider::after { transform: translateX(16px); opacity: 1; color: var(--tvr-good); }
+.tvr-switch input:focus-visible + .tvr-slider { outline: 2px solid var(--tvr-accent); outline-offset: 2px; }
+.tvr-switch input:disabled + .tvr-slider { opacity: .4; cursor: progress; }
+.tvr-switch-text { font-size: 12px; }
+.tvr-row-switch { display: flex; margin: 6px 0 0; }
+.tvr-preview-switch { padding: 6px 12px; border: 1px solid var(--tvr-line); border-radius: 999px; }
+.tvr-preview-switch.on { border-color: var(--tvr-accent); background: rgba(255,140,43,.12); }
+.tvr-card-switch { margin-left: auto; }
+
+.tvr-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 14px 0; }
+.tvr-stats > div { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 10px 12px; }
+.tvr-stats span { font-size: 10px; letter-spacing: .12em; opacity: .6; display: block; }
+.tvr-stats strong { font-size: 19px; display: block; margin: 2px 0; }
+.tvr-stats small { opacity: .6; }
+
+.tvr-tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--tvr-line); margin-bottom: 14px; }
+/* Written under #tv-retention: the generic button rule outranks a bare `.tvr-tabs button`,
+   which is why the active underline was lost inside a full box border. */
+#tv-retention .tvr-tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 4px 4px 0 0;
+  padding: 8px 14px; opacity: .65; background: transparent; }
+#tv-retention .tvr-tabs button:hover { opacity: .9; background: var(--tvr-soft); }
+#tv-retention .tvr-tabs button.active { opacity: 1; font-weight: 600; background: var(--tvr-soft);
+  border-bottom: 2px solid var(--tvr-accent); color: inherit; }
+/* A count, not a label: round at one digit, a stadium at two. Height is set explicitly —
+   leaving it to line-height made it shorter than it was wide, which reads as a squashed
+   oval rather than a badge. */
+.tvr-tab-badge { display: inline-grid; place-items: center; box-sizing: border-box;
+  width: auto; height: 18px; min-width: 18px; padding: 0 5px; margin-left: 5px;
+  border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1;
+  vertical-align: middle; background: var(--tvr-info); color: #fff; }
+.tvr-tab-badge.error { background: var(--tvr-bad); }
+.tvr-tab-badge.warning { background: var(--tvr-warn); }
+.tvr-tab-badge.notice { background: var(--tvr-notice); color: #1a1a1a; }
+
+.tvr-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.tvr-toolbar input[type=search] { min-width: 220px; }
+.tvr-spacer { flex: 1; }
+.tvr-lede { max-width: 90ch; opacity: .8; margin-bottom: 8px; }
+.tvr-empty { opacity: .65; padding: 18px; border: 1px dashed var(--tvr-line); border-radius: 6px; text-align: center; }
+.tvr-actions { margin-top: 14px; display: flex; gap: 10px; align-items: center; }
+.tvr-dirty { font-size: 12px; color: var(--tvr-warn); }
+.tvr-seg { display: inline-flex; border: 1px solid var(--tvr-line); border-radius: 6px; overflow: hidden; }
+#tv-retention .tvr-seg button { border: none; border-radius: 0; padding: 6px 12px; font-size: 12px; }
+#tv-retention .tvr-seg button.active { background: var(--tvr-soft); font-weight: 600; }
+
+.tvr-card { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 14px; display: grid; gap: 10px; margin-bottom: 12px; }
+.tvr-card-head { display: flex; align-items: center; gap: 10px; }
+.tvr-card-head .tvr-card-title { margin: 0; flex: 1; }
+.tvr-field { display: grid; gap: 4px; }
+.tvr-field > span { font-weight: 600; }
+.tvr-field small, .tvr-switch + small { opacity: .65; display: block; font-weight: normal; }
+.tvr-grow { flex: 1 1 320px; }
+.tvr-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.tvr-row .tvr-field { flex: 0 1 180px; }
+.tvr-inline { align-items: flex-end; }
+/* Switch, explanation, value — the shape every safety option shares. */
+.tvr-three { display: grid; grid-template-columns: 46px 1fr 140px; gap: 12px; align-items: center;
+  padding: 10px 0; border-top: 1px solid var(--tvr-line); }
+.tvr-three:first-child { border-top: none; }
+.tvr-three small { display: block; opacity: .65; }
+.tvr-cell-switch { justify-content: center; }
+
+.tvr-rules, .tvr-instances { display: grid; gap: 6px; }
+.tvr-rule { border: 1px solid var(--tvr-line); border-left-width: 4px; border-radius: 6px; padding: 8px 12px; }
+.tvr-rule.ok { border-left-color: var(--tvr-good); }
+.tvr-rule.blocked { border-left-color: var(--tvr-bad); }
+.tvr-rule.disabled { opacity: .58; border-left-color: var(--tvr-line); }
+.tvr-rule-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tvr-rule-title { font-size: 15px; font-weight: 600; }
+.tvr-rule-path { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; opacity: .7; word-break: break-all; }
+.tvr-rule-body { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.tvr-rule-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.tvr-busy-row { opacity: .82; }
+.tvr-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tvr-line); font-size: 11px; }
+.tvr-chip.on { border-color: var(--tvr-accent); }
+.tvr-badge { font-size: 10px; letter-spacing: .08em; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; }
+.tvr-badge.ok, .tvr-badge.quiet { background: var(--tvr-soft); opacity: .8; }
+.tvr-badge.error { background: rgba(192,57,43,.16); color: var(--tvr-bad); }
+.tvr-badge.warning { background: rgba(217,130,43,.16); color: var(--tvr-warn); }
+.tvr-badge.notice { background: rgba(201,162,39,.16); color: var(--tvr-notice); }
+.tvr-badge.checking { background: var(--tvr-soft); opacity: .7; }
+
+
+
+.tvr-instance { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 8px 12px; background: var(--tvr-soft); }
+.tvr-instance-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tvr-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; background: var(--tvr-good); }
+.tvr-dot.bad { background: var(--tvr-bad); }
+
+.tvr-roots { display: grid; gap: 6px; }
+.tvr-roots-head, .tvr-root-row { display: grid; grid-template-columns: 1fr 1.4fr 70px; gap: 10px; align-items: center; }
+.tvr-roots-head { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .6; margin-top: 8px; }
+.tvr-root-row { padding: 4px 0; border-top: 1px solid var(--tvr-line); }
+.tvr-root-path { display: flex; gap: 4px; }
+.tvr-root-path input { flex: 1; }
+#tv-retention .tvr-root-path button { padding: 6px 10px; }
+.tvr-result { font-size: 12px; opacity: .8; }
+.tvr-result.ok { color: var(--tvr-good); }
+.tvr-result.bad { color: var(--tvr-bad); }
+
+.tvr-warning, .tvr-banner { border: 1px solid var(--tvr-warn); border-radius: 6px; padding: 10px 12px; margin: 10px 0;
+  background: rgba(217,130,43,.10); }
+#tvr-checking { display: flex; align-items: center; gap: 8px; }
+#tvr-notice { border-radius: 6px; padding: 10px 12px; margin: 10px 0; border: 1px solid var(--tvr-line); }
+#tvr-notice.ok { border-color: var(--tvr-good); background: rgba(46,158,91,.10); }
+#tvr-notice.bad { border-color: var(--tvr-bad); background: rgba(192,57,43,.10); }
+.tvr-error { color: var(--tvr-bad); margin-top: 6px; }
+
+.tvr-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.tvr-table th, .tvr-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--tvr-line); vertical-align: top; }
+.tvr-table th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
+.tvr-scroll { overflow-x: auto; }
+.tvr-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; word-break: break-all; }
+.tvr-list { margin: 6px 0 0 18px; }
+
+.tvr-log { height: 60vh; overflow: auto; margin: 0; padding: 10px 12px; border: 1px solid var(--tvr-line);
+  border-radius: 6px; background: rgba(0,0,0,.22); font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+
+.tvr-combo { position: relative; }
+.tvr-combo input { width: 100%; }
+.tvr-combo-list { position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 70;
+  max-height: 320px; overflow-y: auto; display: flex; flex-direction: column;
+  border: 1px solid var(--tvr-line); border-radius: 6px;
+  background: var(--background-color, #1c1c1c); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+#tv-retention .tvr-combo-list button { display: flex; flex-direction: column; align-items: flex-start;
+  gap: 1px; text-align: left; border: none; border-radius: 0; padding: 6px 10px; font-size: 12.5px; }
+#tv-retention .tvr-combo-list button:hover:not([disabled]),
+#tv-retention .tvr-combo-list button:focus { background: var(--tvr-soft); outline: none; }
+.tvr-combo-note { opacity: .6; font-size: 11px; }
+.tvr-combo-blocked { color: var(--tvr-warn); font-size: 11px; }
+.tvr-combo-empty { padding: 8px 10px; opacity: .6; }
+
+.tvr-dialog { border: 1px solid var(--tvr-line); border-radius: 8px; padding: 0; width: min(820px, 94vw);
+  color: inherit; background: var(--background-color, #1c1c1c); }
+.tvr-dialog::backdrop { background: rgba(0,0,0,.55); }
+#tvr-dialog-body { padding: 16px 18px; display: grid; gap: 8px; max-height: 74vh; overflow: auto; }
+.tvr-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin: 0; padding: 12px 18px;
+  border-top: 1px solid var(--tvr-line); }
+.tvr-dialog h3 { margin: 0; font-size: 16px; }
+
+.tvr-busy { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 9999; }
+.tvr-busy-box { display: flex; gap: 10px; align-items: center; padding: 14px 20px; border-radius: 8px;
+  border: 1px solid var(--tvr-line); background: var(--background-color, #1c1c1c); }
+.tvr-spinner { width: 16px; height: 16px; border: 2px solid var(--tvr-line); border-top-color: var(--tvr-accent);
+  border-radius: 50%; animation: tvr-spin .8s linear infinite; flex: 0 0 16px; }
+@keyframes tvr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tvr-spinner { animation: none; } .tvr-slider, .tvr-slider::after { transition: none; } }
+@media (max-width: 700px) {
+  .tvr-three { grid-template-columns: 46px 1fr; }
+  .tvr-three > :last-child { grid-column: 2; }
+  .tvr-roots-head { display: none; }
+  .tvr-root-row { grid-template-columns: 1fr; }
+}
+
+
+/* Counts are circles, not sentences. Every property is written under #tv-retention because
+   the generic button rule above outranks a bare class — that is what turned these into
+   grey rectangles with the number pushed off centre. */
+#tv-retention .tvr-dot-badge, #tv-retention button.tvr-dot-badge {
+  display: inline-grid; place-items: center; box-sizing: border-box; align-self: center;
+  width: 20px; height: 20px; min-width: 20px; flex: 0 0 20px;
+  padding: 0; margin: 0; border-radius: 50%; border: 1px solid var(--tvr-line);
+  font-size: 11px; font-weight: 700; line-height: 1; text-align: center;
+  background: var(--tvr-soft); color: inherit; }
+#tv-retention button.tvr-dot-badge { cursor: pointer; }
+#tv-retention button.tvr-dot-badge:hover { filter: brightness(1.2); background: var(--tvr-soft); }
+#tv-retention .tvr-dot-badge.clear, #tv-retention .tvr-dot-badge.unknown,
+#tv-retention .tvr-dot-badge.checking, #tv-retention .tvr-dot-badge.tvr-static {
+  width: 10px; height: 10px; min-width: 10px; flex-basis: 10px; font-size: 0; }
+#tv-retention .tvr-dot-badge.clear { border-color: var(--tvr-good); background: var(--tvr-good); opacity: .5; }
+#tv-retention .tvr-dot-badge.unknown { opacity: .4; }
+#tv-retention .tvr-dot-badge.checking { border-color: var(--tvr-accent); background: var(--tvr-accent);
+  animation: tvr-pulse 1.2s ease-in-out infinite; }
+#tv-retention .tvr-dot-badge.error { border-color: var(--tvr-bad); background: var(--tvr-bad); color: #fff; }
+#tv-retention .tvr-dot-badge.warning { border-color: var(--tvr-warn); background: var(--tvr-warn); color: #1a1a1a; }
+#tv-retention .tvr-dot-badge.notice { border-color: var(--tvr-notice); background: var(--tvr-notice); color: #1a1a1a; }
+#tv-retention .tvr-dot-badge.blocked { box-shadow: 0 0 0 2px rgba(192,57,43,.35); }
+@keyframes tvr-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { #tv-retention .tvr-dot-badge.checking { animation: none; } }
+
+/* One card per series. Severity is the left edge and the badge; the card itself stays the
+   same colour as everything else on the page. */
+.tvr-alert-card { border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-line);
+  border-radius: 6px; padding: 12px 14px; display: grid; gap: 10px; }
+.tvr-alert-card.error { border-left-color: var(--tvr-bad); }
+.tvr-alert-card.warning { border-left-color: var(--tvr-warn); }
+.tvr-alert-card.notice { border-left-color: var(--tvr-notice); }
+.tvr-alert-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tvr-alert-item { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--tvr-line); }
+.tvr-alert-card-head + .tvr-alert-item { border-top: none; padding-top: 0; }
+.tvr-alert-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tvr-alert-detail { opacity: .85; }
+.tvr-alert-help { margin: 0; opacity: .7; font-size: 12px; border-left: 2px solid var(--tvr-line); padding-left: 8px; }
+.tvr-alert-age { margin-left: auto; font-size: 11px; opacity: .5; white-space: nowrap; }
+.tvr-alert-files { display: grid; gap: 2px; padding: 6px 8px; border-radius: 4px; background: var(--tvr-soft); }
+.tvr-alert-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* Only two things carry severity: this mark, and the left edge of the card. Everything
+   else stays the page colour, so a list of warnings is readable rather than orange. */
+.tvr-alert-kind { font-weight: 600; }
+.tvr-alert-count { font-size: 11px; opacity: .6; }
+.tvr-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid var(--tvr-line); opacity: .8; }
+.tvr-tag.blocking { border-color: var(--tvr-bad); color: var(--tvr-bad); opacity: 1; }
+
+#tv-retention button.tvr-small { padding: 4px 10px; font-size: 12px; border-radius: 4px; }
+#tv-retention button.tvr-link { border: none; padding: 2px 0; font-size: 12px; text-decoration: underline;
+  opacity: .65; background: none; border-radius: 0; }
+#tv-retention button.tvr-link:hover { opacity: 1; background: none; }
+.tvr-status { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 12px;
+  border-radius: 6px; border: 1px solid var(--tvr-line); border-left-width: 3px; }
+.tvr-status.ok { border-left-color: var(--tvr-good); }
+.tvr-status.bad { border-left-color: var(--tvr-bad); }
+#tv-retention button.tvr-hint { width: 17px; height: 17px; min-width: 17px; padding: 0; border-radius: 50%;
+  font-size: 10px; line-height: 1; opacity: .55; flex: 0 0 17px; display: inline-grid; place-items: center; }
+#tv-retention button.tvr-hint:hover { opacity: 1; }
+.tvr-three-label { display: flex; align-items: center; gap: 6px; }
+.tvr-notify-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.tvr-notify-row { padding: 4px 0; }
+.tvr-danger-box { border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-bad);
+  border-radius: 6px; padding: 10px 12px; }
+
+/* Folder rows in the picker: a plain list of names, aligned, with no glyph in front. An
+   emoji renders at whatever size and baseline the platform chooses, which is why the
+   symbols that used to sit in these labels are gone. */
+#tv-retention button.tvr-folder { text-align: left; border-radius: 4px; }
+#tv-retention .tvr-result { font-size: 12px; opacity: .8; }
+#tv-retention .tvr-result.ok { color: var(--tvr-good); }
+#tv-retention .tvr-result.bad { color: var(--tvr-bad); }
+
+/* An action, not more prose. Orange is the page's own accent and reads as decoration
+   next to an orange warning, so a fix is blue and says what it will do. */
+#tv-retention button.tvr-action { background: var(--tvr-action); border-color: var(--tvr-action);
+  color: #fff; font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
+#tv-retention button.tvr-action:hover { filter: brightness(1.1); background: var(--tvr-action); }
+
+/* Search, sort and filter as one labelled row, with the primary action hard right. */
+.tvr-series-toolbar { align-items: flex-end; }
+.tvr-series-toolbar .tvr-field { flex: 0 1 auto; gap: 3px; }
+.tvr-series-toolbar .tvr-field > span { font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  opacity: .6; font-weight: 600; }
+.tvr-series-toolbar input[type=search] { min-width: 240px; }
+
+/* Retention sits with the identity, spaced from the instance. A preset is one blue pill
+   because the values live in the preset; only a custom rule spells them out. */
+.tvr-retention { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: 14px; }
+.tvr-chip.preset { border-color: var(--tvr-action); color: var(--tvr-action); }
+
+/* What the next run would do, per series and in the header. Colour names the verb. */
+.tvr-plan-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tvr-plan-quiet { font-size: 12px; opacity: .6; }
+.tvr-change-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--tvr-line); }
+.tvr-change-tag.delete { border-color: var(--tvr-bad); color: var(--tvr-bad); }
+.tvr-change-tag.unmonitor { border-color: var(--tvr-warn); color: var(--tvr-warn); }
+.tvr-change-tag.monitor { border-color: var(--tvr-good); color: var(--tvr-good); }
+.tvr-changes { display: grid; gap: 0; line-height: 1.25; }
+.tvr-change { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: baseline;
+  font-size: 12px; padding: 1px 0; border-top: 1px solid var(--tvr-line); }
+.tvr-change:first-child { border-top: none; }
+.tvr-change-verb { font-weight: 600; }
+.tvr-change.delete .tvr-change-verb { color: var(--tvr-bad); }
+.tvr-change.unmonitor .tvr-change-verb { color: var(--tvr-warn); }
+.tvr-change.monitor .tvr-change-verb { color: var(--tvr-good); }
+.tvr-change-why { grid-column: 2; font-size: 11px; opacity: .55; }
+
+#tv-retention button.tvr-icon-button { padding: 4px 7px; border-radius: 4px; opacity: .65; line-height: 1; }
+#tv-retention button.tvr-icon-button:hover { opacity: 1; }
+.tvr-uptodate { font-size: 12px; opacity: .7; }
+#tv-retention button.tvr-rollup { display: block; width: 100%; text-align: left; padding: 10px 12px;
+  border-radius: 6px; border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-warn);
+  margin-bottom: 12px; }
+.tvr-editor-foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--tvr-line); }
+@media (max-width: 700px) { .tvr-change { grid-template-columns: 1fr; } .tvr-retention { margin-left: 0; } }
+
+/* A series waiting to be removed. Red frame, its intent in three plain lines, and an undo
+   that costs nothing — because nothing has happened yet. */
+.tvr-rule.queued { border-left-color: var(--tvr-bad); opacity: .95; }
+.tvr-queued-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
+  border-radius: 50%; background: var(--tvr-bad); color: #fff; font-weight: 700; font-size: 13px; line-height: 1; }
+.tvr-queued-lines { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 12px; opacity: .85; }
+.tvr-queued-danger { color: var(--tvr-bad); font-weight: 600; }
+
+/* Scheduled changes as a short list of sentences rather than a row of badges: at most
+   three lines, each naming a verb and a count. */
+.tvr-plan-list { display: grid; gap: 2px; }
+.tvr-plan { font-size: 12px; }
+/* On a series card the lines are supporting detail, not the headline. */
+.tvr-rule .tvr-plan-list, .tvr-rule .tvr-plan-quiet { font-size: 11px; }
+#tv-retention .tvr-rule button.tvr-plan, #tv-retention .tvr-rule button.tvr-plan-total,
+.tvr-rule .tvr-plan { font-size: 11px; }
+.tvr-plan.delete { color: var(--tvr-bad); }
+.tvr-plan.unmonitor { color: var(--tvr-warn); }
+.tvr-plan.monitor { color: var(--tvr-good); }
+.tvr-plan-summary { padding: 6px 10px; border: 1px solid var(--tvr-line); border-radius: 6px; }
+/* A series and what happens to it read as one block: the title on the left, everything it
+   causes indented under it against a rule, and the whole list a size down so a long plan
+   stays scannable. */
+.tvr-change-series { padding: 4px 0; border-top: 1px solid var(--tvr-line); display: grid; gap: 0; }
+.tvr-change-series > strong { font-size: 13px; }
+.tvr-change-series > .tvr-changes, .tvr-change-series > .tvr-error, .tvr-change-series > small {
+  margin-left: 14px; padding-left: 10px; border-left: 2px solid var(--tvr-line); }
+.tvr-change-series .tvr-change { font-size: 11px; padding: 1px 0; }
+.tvr-change-series .tvr-change-why { font-size: 10px; }
+.tvr-change-series .tvr-plan { font-size: 11px; }
+
+/* The list of affected series beside the detail, so who is touched can be read without
+   scrolling through what happens to each of them. */
+.tvr-change-view { display: grid; grid-template-columns: 190px 1fr; gap: 14px; align-items: start; }
+.tvr-change-view.solo { grid-template-columns: 1fr; }
+.tvr-change-view.solo .tvr-change-nav { display: none; }
+.tvr-change-nav { position: sticky; top: 0; display: grid; gap: 0; align-self: start;
+  max-height: 62vh; overflow: auto; }
+#tv-retention button.tvr-change-jump { display: flex; gap: 6px; align-items: baseline; width: 100%;
+  text-align: left; padding: 0 6px; border: none; background: none; border-radius: 3px;
+  font-size: 11px; line-height: 1.5; border-left: 2px solid transparent; }
+#tv-retention button.tvr-change-jump:hover { background: rgba(127,127,127,.14); }
+#tv-retention button.tvr-change-jump.active { background: rgba(127,127,127,.2); }
+#tv-retention button.tvr-change-jump.delete { border-left-color: var(--tvr-bad); }
+#tv-retention button.tvr-change-jump.unmonitor { border-left-color: var(--tvr-warn); }
+#tv-retention button.tvr-change-jump.monitor { border-left-color: var(--tvr-good); }
+.tvr-change-jump-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvr-change-jump-count { opacity: .55; }
+
+/* One label, one control, one action — the shape a single setting should have. */
+.tvr-inline-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tvr-inline-row input, .tvr-inline-row select { flex: 1 1 240px; }
+.tvr-inline-label { font-weight: 600; flex: 0 0 auto; min-width: 130px; }
+.tvr-instance-line .tvr-spacer { flex: 1; }
+
+
+/* Severity as a dot, with no character to be sized by the font. */
+.tvr-sev { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%;
+  background: var(--tvr-line); }
+.tvr-sev.error { background: var(--tvr-bad); }
+.tvr-sev.warning { background: var(--tvr-warn); }
+.tvr-sev.notice { background: var(--tvr-notice); }
+.tvr-alert-line { align-items: center; }
+#tv-retention .tvr-sonarr-link { opacity: .5; font-size: 11px; text-decoration: none; color: inherit; }
+#tv-retention .tvr-sonarr-link:hover { opacity: 1; }
+
+/* Scheduled changes: single-spaced lines under the run button, every one of them right
+   aligned, with the refresh control beside the button it belongs to. Each line opens
+   what it names. */
+.tvr-head-actions { flex-direction: column; align-items: flex-end; gap: 6px; }
+.tvr-head-run { display: flex; align-items: center; gap: 8px; }
+.tvr-plan-header { display: grid; gap: 0; justify-items: end; text-align: right; }
+.tvr-plan-list { display: grid; gap: 0; }
+.tvr-plan-header .tvr-plan-list { justify-items: end; }
+.tvr-plan, .tvr-plan-quiet, .tvr-plan-total { line-height: 1.25; }
+#tv-retention button.tvr-plan-total { border: none; background: none; padding: 0; font-weight: 600;
+  text-decoration: underline; border-radius: 0; line-height: 1.25; text-align: right; }
+#tv-retention button.tvr-plan { border: none; background: none; padding: 0; font-size: 12px;
+  text-align: inherit; text-decoration: underline; border-radius: 0; }
+#tv-retention button.tvr-plan:hover { background: none; filter: brightness(1.15); }
+#tv-retention button.tvr-plan.delete { color: var(--tvr-bad); }
+#tv-retention button.tvr-plan.unmonitor { color: var(--tvr-warn); }
+#tv-retention button.tvr-plan.monitor { color: var(--tvr-good); }
+
+/* Icon buttons are square: the generic button padding made them oblong. */
+#tv-retention button.tvr-icon-button { width: 28px; height: 28px; min-width: 28px; padding: 0;
+  display: inline-grid; place-items: center; border-radius: 4px; opacity: .6; flex: 0 0 28px; }
+#tv-retention button.tvr-icon-button:hover { opacity: 1; }
+#tv-retention button.tvr-icon-large { width: 34px; height: 34px; min-width: 34px; flex-basis: 34px;
+  font-size: 15px; }

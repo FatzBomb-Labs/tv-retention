@@ -410,7 +410,7 @@ def dispatch(request: dict) -> dict:
     except Rejected as error:
         return {'ok': False, 'error': str(error)}
     except Exception as error:  # noqa: BLE001 - the UI must never see a traceback
-        print(f'tv-delete rpc failure: {error!r}', file=sys.stderr)
+        print(f'tv-retention rpc failure: {error!r}', file=sys.stderr)
         return {'ok': False, 'error': f'Unexpected backend error: {error}'}
 
 

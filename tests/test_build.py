@@ -17,8 +17,8 @@ class Build(unittest.TestCase):
         subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True,
                        stdout=subprocess.DEVNULL)
         cls.version = (ROOT / 'VERSION').read_text().strip()
-        cls.package = ROOT / 'dist' / f'tv-delete-{cls.version}-noarch-1.txz'
-        cls.manifest = ROOT / 'install' / 'tv-delete.plg'
+        cls.package = ROOT / 'dist' / f'tv-retention-{cls.version}-noarch-1.txz'
+        cls.manifest = ROOT / 'install' / 'tv-retention.plg'
 
     def test_artifacts_exist(self):
         self.assertTrue(self.package.is_file())
@@ -27,14 +27,14 @@ class Build(unittest.TestCase):
     def test_package_installs_under_the_plugin_path(self):
         with tarfile.open(self.package) as archive:
             names = archive.getnames()
-        self.assertIn('usr/local/emhttp/plugins/tv-delete/worker/main.py', names)
-        self.assertIn('usr/local/emhttp/plugins/tv-delete/TVDelete.page', names)
+        self.assertIn('usr/local/emhttp/plugins/tv-retention/worker/main.py', names)
+        self.assertIn('usr/local/emhttp/plugins/tv-retention/TVRetention.page', names)
         self.assertIn('install/slack-desc', names)
         self.assertFalse([name for name in names if '__pycache__' in name])
 
     def test_event_scripts_are_executable(self):
         with tarfile.open(self.package) as archive:
-            member = archive.getmember('usr/local/emhttp/plugins/tv-delete/event/disks_mounted')
+            member = archive.getmember('usr/local/emhttp/plugins/tv-retention/event/disks_mounted')
         self.assertEqual(member.mode, 0o755)
 
     def test_manifest_declares_the_package_checksum(self):
@@ -44,13 +44,13 @@ class Build(unittest.TestCase):
 
     def test_manifest_launches_the_tools_page(self):
         root = ET.parse(self.manifest).getroot()
-        self.assertEqual(root.get('launch'), 'Tools/TVDelete')
+        self.assertEqual(root.get('launch'), 'Tools/TVRetention')
         self.assertEqual(root.get('version'), self.version)
 
     def test_removal_preserves_settings(self):
         text = self.manifest.read_text()
-        self.assertIn('removepkg tv-delete', text)
-        self.assertNotIn('rm -rf /boot/config/plugins/tv-delete', text)
+        self.assertIn('removepkg tv-retention', text)
+        self.assertNotIn('rm -rf /boot/config/plugins/tv-retention', text)
 
     def test_rebuild_is_reproducible(self):
         first = hashlib.sha256(self.package.read_bytes()).hexdigest()
@@ -68,13 +68,13 @@ class Interface(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        source = ROOT / 'src' / 'tv-delete'
+        source = ROOT / 'src' / 'tv-retention'
         cls.css = (source / 'assets' / 'app.css').read_text()
         cls.js = (source / 'assets' / 'app.js').read_text()
         cls.html = (source / 'include' / 'interface.html').read_text()
 
     def test_the_hidden_attribute_is_forced_to_win(self):
-        self.assertRegex(self.css, r'#tv-delete \[hidden\][^{]*\{[^}]*display:\s*none\s*!important')
+        self.assertRegex(self.css, r'#tv-retention \[hidden\][^{]*\{[^}]*display:\s*none\s*!important')
 
     def test_every_element_the_script_hides_exists_in_the_markup(self):
         import re
@@ -82,7 +82,7 @@ class Interface(unittest.TestCase):
             self.assertIn(f'id="{identifier}"', self.html, f'{identifier} is toggled but not in the markup')
 
     def test_the_busy_overlay_starts_hidden(self):
-        self.assertRegex(self.html, r'id="tvd-busy"[^>]*hidden')
+        self.assertRegex(self.html, r'id="tvr-busy"[^>]*hidden')
 
     def test_the_cache_key_comes_from_asset_contents(self):
         """A timestamp-based key is worthless here.
@@ -92,7 +92,7 @@ class Interface(unittest.TestCase):
         browser keeps serving the previous script from cache. That presented as the whole
         configuration vanishing, since a stale script cannot render the new data.
         """
-        page = (ROOT / 'src' / 'tv-delete' / 'TVDelete.page').read_text()
+        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
         self.assertIn('md5_file', page)
         self.assertNotIn('filemtime', page)
         self.assertIn('app.js?v=', page)
@@ -101,14 +101,14 @@ class Interface(unittest.TestCase):
     def test_the_package_ships_reproducible_timestamps(self):
         # The reason the key cannot use mtime; asserted so the two stay consistent.
         version = (ROOT / 'VERSION').read_text().strip()
-        with tarfile.open(ROOT / 'dist' / f'tv-delete-{version}-noarch-1.txz') as archive:
+        with tarfile.open(ROOT / 'dist' / f'tv-retention-{version}-noarch-1.txz') as archive:
             self.assertTrue(all(member.mtime == 0 for member in archive.getmembers()))
 
     def test_the_package_ships_a_version_file(self):
         version = (ROOT / 'VERSION').read_text().strip()
-        package = ROOT / 'dist' / f'tv-delete-{version}-noarch-1.txz'
+        package = ROOT / 'dist' / f'tv-retention-{version}-noarch-1.txz'
         with tarfile.open(package) as archive:
-            self.assertIn('usr/local/emhttp/plugins/tv-delete/VERSION', archive.getnames())
+            self.assertIn('usr/local/emhttp/plugins/tv-retention/VERSION', archive.getnames())
 
     def test_every_element_the_script_addresses_exists_in_the_markup(self):
         import re
@@ -125,14 +125,14 @@ class Interface(unittest.TestCase):
     def test_the_package_ships_a_readme_for_the_plugins_page(self):
         # Unraid renders plugins/<name>/README.md as the description on the Plugins page,
         # falling back to the bare slug when it is absent.
-        with tarfile.open(ROOT / 'dist' / f'tv-delete-{(ROOT / "VERSION").read_text().strip()}-noarch-1.txz') as archive:
-            self.assertIn('usr/local/emhttp/plugins/tv-delete/README.md', archive.getnames())
-        readme = (ROOT / 'src' / 'tv-delete' / 'README.md').read_text()
-        self.assertTrue(readme.lstrip().startswith('**TV Delete**'), 'the description must lead with the display name')
+        with tarfile.open(ROOT / 'dist' / f'tv-retention-{(ROOT / "VERSION").read_text().strip()}-noarch-1.txz') as archive:
+            self.assertIn('usr/local/emhttp/plugins/tv-retention/README.md', archive.getnames())
+        readme = (ROOT / 'src' / 'tv-retention' / 'README.md').read_text()
+        self.assertTrue(readme.lstrip().startswith('**TV Retention**'), 'the description must lead with the display name')
 
     def test_the_manifest_declares_an_icon(self):
         import xml.etree.ElementTree as ElementTree
-        root = ElementTree.parse(ROOT / 'install' / 'tv-delete.plg').getroot()
+        root = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot()
         self.assertTrue(root.get('icon'))
 
     def test_the_picker_refuses_unselectable_series(self):
@@ -149,7 +149,7 @@ class Interface(unittest.TestCase):
     def test_the_script_is_not_prefixed_by_a_stray_fragment(self):
         # A build-time edit once prepended a fragment above the opening comment, which
         # broke the whole file. The header is cheap to assert and would have caught it.
-        self.assertTrue(self.js.lstrip().startswith('/* TV Delete web UI.'))
+        self.assertTrue(self.js.lstrip().startswith('/* TV Retention web UI.'))
         self.assertEqual(self.js.count("function render() {"), 1)
 
     def test_braces_and_parentheses_balance(self):
@@ -159,8 +159,8 @@ class Interface(unittest.TestCase):
 
     def test_the_manual_check_button_is_gone(self):
         # The pill reads from the cache; the operator should never have to ask it to look.
-        self.assertNotIn('tvd-check-monitoring', self.js)
-        self.assertNotIn('tvd-check-monitoring', self.html)
+        self.assertNotIn('tvr-check-monitoring', self.js)
+        self.assertNotIn('tvr-check-monitoring', self.html)
 
     def test_checks_never_block_the_page(self):
         # Background reads pass quiet, so the busy overlay is not raised for them.
@@ -181,7 +181,7 @@ class Interface(unittest.TestCase):
 
     def test_the_tick_asks_what_changed_whether_or_not_anyone_is_looking(self):
         # A problem the page discovers first is a notification that never fired.
-        worker = ROOT / 'src' / 'tv-delete' / 'worker'
+        worker = ROOT / 'src' / 'tv-retention' / 'worker'
         tick = (worker / 'main.py').read_text().split('def tick()')[1].split('\ndef ')[0]
         self.assertIn('watch_and_recheck', tick)
         self.assertIn("'watch': action_watch", (worker / 'actions.py').read_text())
@@ -216,16 +216,16 @@ class Interface(unittest.TestCase):
         self.assertIn('DEFAULT_TIMEOUT', declared, 'the test must be seeing real constants')
 
     def test_blocking_problems_are_visibly_different_from_advisory_ones(self):
-        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
-        self.assertIn('.tvd-dot-badge.error', css)
-        self.assertIn('.tvd-dot-badge.warning', css)
-        self.assertIn('.tvd-dot-badge.blocked', css)
+        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        self.assertIn('.tvr-dot-badge.error', css)
+        self.assertIn('.tvr-dot-badge.warning', css)
+        self.assertIn('.tvr-dot-badge.blocked', css)
         self.assertIn('blocked', self.js)
 
     def test_the_series_badge_is_a_count_left_of_the_title(self):
         # A circle carrying a number, before the name — not a pill competing with it.
-        self.assertRegex(self.js, r'alertBadge\(rule\),\s*\n\s*el\(.span., \{ className: .tvd-rule-title')
-        self.assertIn('tvd-dot-badge', self.js)
+        self.assertRegex(self.js, r'alertBadge\(rule\),\s*\n\s*el\(.span., \{ className: .tvr-rule-title')
+        self.assertIn('tvr-dot-badge', self.js)
 
     def test_removing_a_series_is_queued_and_asks_for_the_right_word(self):
         """Two different consequences, two different words, and neither happens at once.
@@ -247,9 +247,9 @@ class Interface(unittest.TestCase):
     def test_test_mode_governs_the_scheduler_only(self):
         # A manual run is always live, so the confirmation has to say so when Test Mode is
         # on — that is exactly when someone would assume otherwise.
-        self.assertIn('tvd-test-mode', self.js)
+        self.assertIn('tvr-test-mode', self.js)
         self.assertRegex(self.js, r'Test mode is active on the scheduler')
-        self.assertNotIn("$('tvd-preview')", self.js)
+        self.assertNotIn("$('tvr-preview')", self.js)
 
     def test_the_run_button_hides_only_on_a_complete_answer(self):
         # Hiding it on a stale or partial reading would be a promise the cache cannot keep.
@@ -266,8 +266,8 @@ class Interface(unittest.TestCase):
         is required to be a plain FA name. tools/check-on-host.sh confirms the glyph exists.
         """
         import xml.etree.ElementTree as ElementTree
-        manifest_icon = ElementTree.parse(ROOT / 'install' / 'tv-delete.plg').getroot().get('icon')
-        page = (ROOT / 'src' / 'tv-delete' / 'TVDelete.page').read_text()
+        manifest_icon = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot().get('icon')
+        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
         page_icon = next(line.split('=', 1)[1].strip().strip('"')
                          for line in page.splitlines() if line.startswith('Icon='))
         self.assertEqual(manifest_icon, page_icon, 'the Tools tile and Plugins row must agree')
@@ -279,32 +279,32 @@ class Interface(unittest.TestCase):
     def test_a_series_can_be_enabled_from_its_card(self):
         # The most frequent change to a rule should not require opening the editor.
         self.assertIn("function enableToggle", self.js)
-        self.assertIn("tvd-switch", (ROOT / "src" / "tv-delete" / "assets" / "app.css").read_text())
+        self.assertIn("tvr-switch", (ROOT / "src" / "tv-retention" / "assets" / "app.css").read_text())
 
     def test_a_refused_toggle_is_reverted(self):
         # Leaving the switch showing a state the backend rejected would be a lie.
         self.assertRegex(self.js, r'target\.enabled = !wanted')
 
     def test_badge_styling_outranks_the_generic_button_rule(self):
-        """`#tv-delete button` outranks a bare class, which is not obvious and bit once.
+        """`#tv-retention button` outranks a bare class, which is not obvious and bit once.
 
         The badge is a button, so every property that shapes it — padding, radius, size —
-        has to be written under #tv-delete or the generic rule wins and it renders as a
+        has to be written under #tv-retention or the generic rule wins and it renders as a
         grey rectangle with the number pushed off centre.
         """
-        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
         import re
-        shaping = re.search(r'#tv-delete \.tvd-dot-badge[^{]*\{([^}]*)\}', css)
-        self.assertIsNotNone(shaping, 'the badge must be styled under #tv-delete')
+        shaping = re.search(r'#tv-retention \.tvr-dot-badge[^{]*\{([^}]*)\}', css)
+        self.assertIsNotNone(shaping, 'the badge must be styled under #tv-retention')
         for property_name in ('padding', 'border-radius', 'width', 'height'):
             self.assertIn(property_name, shaping.group(1))
-        # A bare `.tvd-dot-badge {` rule would silently lose to the generic button rule.
-        self.assertNotRegex(css, r'(?m)^\.tvd-dot-badge\s*\{')
+        # A bare `.tvr-dot-badge {` rule would silently lose to the generic button rule.
+        self.assertNotRegex(css, r'(?m)^\.tvr-dot-badge\s*\{')
 
     def test_severity_is_carried_by_the_frame_not_a_colour_wash(self):
-        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
         import re
-        for match in re.finditer(r'\.tvd-alert-card\.(error|warning|notice)[^{]*\{([^}]*)\}', css):
+        for match in re.finditer(r'\.tvr-alert-card\.(error|warning|notice)[^{]*\{([^}]*)\}', css):
             self.assertNotIn('background', match.group(2),
                              'an alert card must not be tinted end to end')
 
@@ -320,7 +320,7 @@ class Interface(unittest.TestCase):
         A bare "!" in a badge and an emoji before every folder name were sized by the font
         rather than by the rule meant to shape them, which is what made those rows look
         wrong. Words, or a count, behave predictably. The "?" hint is exempt: it is a
-        control with its own size, radius and font-size written under #tv-delete.
+        control with its own size, radius and font-size written under #tv-retention.
         """
         # The severity marks are exempt: geometric characters with no emoji presentation,
         # in a span with an explicit width and font-size.
@@ -334,37 +334,37 @@ class Interface(unittest.TestCase):
         self.assertIn('byInstance', self.js)
 
     def test_tab_styling_outranks_the_generic_button_rule(self):
-        """Same trap as the badge: a bare `.tvd-tabs button` loses to `#tv-delete button`.
+        """Same trap as the badge: a bare `.tvr-tabs button` loses to `#tv-retention button`.
 
         The active underline was drawn on an element that also had the generic 1px box
         border, so nothing looked selected.
         """
-        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
-        self.assertNotRegex(css, r'(?m)^\.tvd-tabs button')
-        self.assertRegex(css, r'#tv-delete \.tvd-tabs button\.active[^{]*\{[^}]*border-bottom')
+        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        self.assertNotRegex(css, r'(?m)^\.tvr-tabs button')
+        self.assertRegex(css, r'#tv-retention \.tvr-tabs button\.active[^{]*\{[^}]*border-bottom')
 
     def test_a_fix_is_presented_as_an_action(self):
         self.assertIn('Quick action: ', self.js)
-        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
-        self.assertRegex(css, r'#tv-delete button\.tvd-action[^{]*\{[^}]*--tvd-action')
+        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        self.assertRegex(css, r'#tv-retention button\.tvr-action[^{]*\{[^}]*--tvr-action')
 
     def test_only_the_mark_and_the_card_edge_carry_severity(self):
-        css = (ROOT / 'src' / 'tv-delete' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
         import re
         # A tag tinted per severity is what made a page of warnings read as solid orange.
         for severity in ('error', 'warning', 'notice'):
-            self.assertNotRegex(css, rf'\.tvd-tag\.{severity}\s*\{{')
-        self.assertRegex(css, r'\.tvd-sev\.warning\s*\{[^}]*background')
+            self.assertNotRegex(css, rf'\.tvr-tag\.{severity}\s*\{{')
+        self.assertRegex(css, r'\.tvr-sev\.warning\s*\{[^}]*background')
 
     def test_delete_lives_in_the_editor_action_row(self):
         # Bottom left, beside Cancel and Save — not on the card, where it invites a slip.
-        self.assertIn("tvd-dialog-extra", self.js)
+        self.assertIn("tvr-dialog-extra", self.js)
         self.assertRegex(self.js, r"textContent: 'Delete…'")
-        self.assertIn('tvd-dialog-extra', self.html)
+        self.assertIn('tvr-dialog-extra', self.html)
 
     def test_the_card_offers_no_destructive_button(self):
         import re
-        card = re.search(r"const actions = el\('div', \{ className: 'tvd-rule-actions' \}\);(.*?)"
+        card = re.search(r"const actions = el\('div', \{ className: 'tvr-rule-actions' \}\);(.*?)"
                          r"body\.append\(actions\)", self.js, re.S)
         self.assertIsNotNone(card)
         for word in ('Remove', 'Delete'):
@@ -394,14 +394,14 @@ class Interface(unittest.TestCase):
     def test_series_problems_are_counted_on_the_series_tab_only(self):
         # The roll-up sits on the tab that acts on it, and the Alerts tab counts only
         # what is wrong with the installation.
-        panels = self.html.split('id="tvd-panel-')
+        panels = self.html.split('id="tvr-panel-')
         series_panel = next(part for part in panels if part.startswith('series"'))
         alerts_panel = next(part for part in panels if part.startswith('alerts"'))
-        self.assertIn('id="tvd-series-rollup"', series_panel)
+        self.assertIn('id="tvr-series-rollup"', series_panel)
         self.assertNotIn('rollup', alerts_panel)
-        self.assertIn('id="tvd-series-badge"', self.html)
-        self.assertIn("setBadge($('tvd-series-badge'), seriesList)", self.js)
-        self.assertIn("setBadge($('tvd-tab-badge'), systemAlerts)", self.js)
+        self.assertIn('id="tvr-series-badge"', self.html)
+        self.assertIn("setBadge($('tvr-series-badge'), seriesList)", self.js)
+        self.assertIn("setBadge($('tvr-tab-badge'), systemAlerts)", self.js)
 
     def test_a_sweep_clears_each_plan_but_keeps_the_series(self):
         # The series are not what is being re-read; their plans are. A plan left standing
@@ -410,29 +410,29 @@ class Interface(unittest.TestCase):
         self.assertIn('bulkChecking', self.js)
         self.assertIn('if (isChecking(rule.id) || bulkChecking) {', self.js)
         self.assertIn('bulkChecking = false;', self.js)
-        self.assertNotRegex(self.js, r'if \(bulkChecking\) \{\s*\n\s*\$\(.tvd-rules-empty.\)')
+        self.assertNotRegex(self.js, r'if \(bulkChecking\) \{\s*\n\s*\$\(.tvr-rules-empty.\)')
 
     def test_buttons_do_not_inherit_the_font_shorthand(self):
         """`font: inherit` also sets line-height, and outranks any class that sets it.
 
-        At `#tv-delete button` it is (1,0,1), so every dense list built from buttons —
+        At `#tv-retention button` it is (1,0,1), so every dense list built from buttons —
         the scheduled-change lines, the series jump list — silently reverted to the
         page's paragraph spacing however tight the component's own rule was.
         """
-        self.assertNotRegex(self.css, r'#tv-delete button \{[^}]*font:\s*inherit')
-        self.assertRegex(self.css, r'#tv-delete button \{[^}]*font-family:\s*inherit')
+        self.assertNotRegex(self.css, r'#tv-retention button \{[^}]*font:\s*inherit')
+        self.assertRegex(self.css, r'#tv-retention button \{[^}]*font-family:\s*inherit')
 
     def test_the_change_view_offers_a_list_of_the_series_it_covers(self):
-        self.assertIn('tvd-change-nav', self.js)
+        self.assertIn('tvr-change-nav', self.js)
         self.assertIn('scrollIntoView', self.js)
-        self.assertIn('.tvd-change-view', self.css)
-        self.assertIn('.tvd-change-jump', self.css)
+        self.assertIn('.tvr-change-view', self.css)
+        self.assertIn('.tvr-change-jump', self.css)
 
     def test_the_refresh_control_sits_beside_the_run_button(self):
         head = self.html.split('</header>')[0]
-        self.assertLess(head.index('tvd-refresh-all'), head.index('tvd-run'))
-        self.assertIn('.tvd-head-run', self.css)
-        self.assertNotIn('tvd-head-plan', self.html)
+        self.assertLess(head.index('tvr-refresh-all'), head.index('tvr-run'))
+        self.assertIn('.tvr-head-run', self.css)
+        self.assertNotIn('tvr-head-plan', self.html)
 
     def test_the_schedule_saves_itself(self):
         """A switch that looks live and is not lost a schedule entirely.
@@ -443,11 +443,11 @@ class Interface(unittest.TestCase):
         """
         self.assertIn('async function saveScheduleNow()', self.js)
         self.assertRegex(self.js, r"\$\(id\)\.addEventListener\('change', \(\) => guarded\('', saveScheduleNow\)\)")
-        self.assertNotIn('tvd-save-schedule', self.html)
-        self.assertNotIn('tvd-save-schedule', self.js)
+        self.assertNotIn('tvr-save-schedule', self.html)
+        self.assertNotIn('tvr-save-schedule', self.js)
 
     def test_a_form_that_keeps_an_explicit_save_says_when_it_is_dirty(self):
-        self.assertIn('id="tvd-settings-dirty"', self.html)
+        self.assertIn('id="tvr-settings-dirty"', self.html)
         self.assertIn('settingsDirty(true)', self.js)
         self.assertIn('settingsDirty(false)', self.js)
 
@@ -455,17 +455,17 @@ class Interface(unittest.TestCase):
         # A control added to the panel and not to the list would silently not persist,
         # which is the whole bug repeating.
         import re
-        wired = set(re.findall(r"'(tvd-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
+        wired = set(re.findall(r"'(tvr-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
                                r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
                                r"match-hour|match-minute|connectivity))'", self.js))
-        panel = self.html.split('<h2 class="tvd-h2">Schedule</h2>')[1].split('<h2')[0]
-        for identifier in re.findall(r'id="(tvd-[a-z-]+)"', panel):
-            if identifier in ('tvd-schedule-summary', 'tvd-match-summary') or 'field' in identifier:
+        panel = self.html.split('<h2 class="tvr-h2">Schedule</h2>')[1].split('<h2')[0]
+        for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
+            if identifier in ('tvr-schedule-summary', 'tvr-match-summary') or 'field' in identifier:
                 continue
             self.assertIn(identifier, wired, f'{identifier} is on the schedule panel but never saved')
 
     def test_the_badge_is_as_tall_as_it_is_round(self):
         # Height came from line-height while width came from padding, so it rendered as a
         # squashed oval rather than a badge.
-        self.assertRegex(self.css, r'\.tvd-tab-badge \{[^}]*height: 18px')
-        self.assertRegex(self.css, r'\.tvd-tab-badge \{[^}]*min-width: 18px')
+        self.assertRegex(self.css, r'\.tvr-tab-badge \{[^}]*height: 18px')
+        self.assertRegex(self.css, r'\.tvr-tab-badge \{[^}]*min-width: 18px')

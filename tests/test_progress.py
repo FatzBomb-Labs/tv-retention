@@ -13,9 +13,9 @@ class Progress(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        os.environ['TVD_CONFIG'] = str(Path(self.temp.name) / 'settings.json')
-        os.environ['TVD_RUNTIME'] = str(Path(self.temp.name) / 'run')
-        os.environ['TVD_DEVELOPMENT'] = '1'
+        os.environ['TVR_CONFIG'] = str(Path(self.temp.name) / 'settings.json')
+        os.environ['TVR_RUNTIME'] = str(Path(self.temp.name) / 'run')
+        os.environ['TVR_DEVELOPMENT'] = '1'
         import main, store
         self.main = main
         store.CONFIG = Path(self.temp.name) / 'settings.json'

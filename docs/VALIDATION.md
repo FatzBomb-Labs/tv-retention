@@ -5,7 +5,7 @@ Last run: 2026-09-07, from the Webtop development container against FatzServer
 
 ## Live, read-only, against 3022 series and 36 rules
 
-Staged under `/tmp` with `TVD_CONFIG` pointed away from `/boot`, and every Sonarr call
+Staged under `/tmp` with `TVR_CONFIG` pointed away from `/boot`, and every Sonarr call
 asserted to be a GET.
 
 | Measurement | Result |
@@ -28,9 +28,9 @@ asserted to be a GET.
 |---|---|
 | `python3 -m unittest discover -s tests` | 300 tests, all pass |
 | `python3 tools/build.py` | package and manifest built, rebuild is byte-identical |
-| `php -l src/tv-delete/include/api.php` | no syntax errors |
-| `php -l` on the PHP section of `TVDelete.page` | no syntax errors |
-| `node --check src/tv-delete/assets/app.js` | no syntax errors |
+| `php -l src/tv-retention/include/api.php` | no syntax errors |
+| `php -l` on the PHP section of `TVRetention.page` | no syntax errors |
+| `node --check src/tv-retention/assets/app.js` | no syntax errors |
 
 Coverage by area:
 
@@ -65,7 +65,7 @@ Coverage by area:
 ## Live, read-only
 
 Against the running `Sonarr-Series` container (`/tv` → `/mnt/user/media/TV`), from a
-`/tmp` staging directory with `TVD_CONFIG` pointed at `/tmp`. GET requests only; no
+`/tmp` staging directory with `TVR_CONFIG` pointed at `/tmp`. GET requests only; no
 deletion and no `/boot` write. The re-monitor check used a temporary state folder under
 appdata, seeded with a synthetic ledger, and removed afterwards.
 

@@ -38,7 +38,7 @@ $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
 // A fixed environment: nothing from the request can redirect the worker's paths.
 $env = ['PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG' => 'C.UTF-8'];
 $proc = proc_open($command, $descriptors, $pipes, null, $env);
-if (!is_resource($proc)) fail_request(503, 'Could not start the TV Delete backend.');
+if (!is_resource($proc)) fail_request(503, 'Could not start the TV Retention backend.');
 
 fwrite($pipes[0], $payload);
 fclose($pipes[0]);
@@ -50,8 +50,8 @@ proc_close($proc);
 
 $result = json_decode($output, true);
 if (!is_array($result) || !array_key_exists('ok', $result)) {
-    error_log('TV Delete backend failure: ' . substr((string)$errors, 0, 2000));
-    fail_request(500, 'The TV Delete backend failed. Check the system log for details.');
+    error_log('TV Retention backend failure: ' . substr((string)$errors, 0, 2000));
+    fail_request(500, 'The TV Retention backend failed. Check the system log for details.');
 }
 if (!$result['ok']) http_response_code(409);
 echo json_encode($result, JSON_INVALID_UTF8_SUBSTITUTE);
