@@ -36,8 +36,12 @@ Sonarr and decides things, plus the tick and the CLI.
   invariant.
 - Deleting an episode file always unmonitors it. That is an invariant, not a setting:
   anything else builds a fetch-and-delete loop.
-- Nothing a series card offers happens immediately: removals and monitoring fixes queue,
-  and only a run applies them. Undo is therefore always available until then.
+- Nothing destructive a series card offers happens immediately: removals queue, and only a
+  run applies them, so undo is always available until then. The two one-time monitoring
+  passes are the exception and are applied on save, because they only move Sonarr's
+  monitored flags — reversible in a click, and deleting nothing. Queueing the unmonitor
+  half in particular would be pointless: a run already unmonitors what is outside the
+  window, so the downloads it prevents are the ones that would happen before the run.
 - The plugin never deletes a series. It asks Sonarr to, so Sonarr's recycle bin and its
   bookkeeping apply. The plugin removes individual episode files, through Sonarr's API.
 - Test Mode governs the scheduler only: a scheduled run does everything except write. A

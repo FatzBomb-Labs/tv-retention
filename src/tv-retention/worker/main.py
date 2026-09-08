@@ -276,40 +276,67 @@ def monitoring_mode(settings: dict, rule: dict) -> str:
     return mode if mode in MONITORING_MODES else 'unmonitor-only'
 
 
-def pending_monitor_pass(settings: dict, rule: dict, state: dict) -> list:
-    """The episodes a queued one-time pass would monitor, or nothing.
-
-    Worked out where the episodes are in hand and carried on the state, so the run and the
-    plan agree about it without either having to fetch anything.
-    """
-    if not (rule.get('queue') or {}).get('monitor_new'):
-        return []
-    return list(state.get('newly_scoped_rows') or [])
-
-
-def newly_scoped_rows(settings: dict, rule: dict, episodes: list, state: dict) -> list:
+def newly_scoped_rows(settings: dict, rule: dict, episodes: list, previous_scope) -> list:
     """Unmonitored episodes a save brought into the keep window that were outside it.
 
     A rule widened from thirty days to ninety did not ask for the ninety days it always
-    had; it asked for the sixty it just gained. The old window is compared with the new
-    one rather than a list of episode ids being stored, because episodes move — one
-    arriving between the save and the run belongs to whichever window it lands in.
+    had; it asked for the sixty it just gained. The two windows are compared rather than a
+    list of ids being kept, because episodes move, and one that arrives belongs to
+    whichever window it lands in.
 
-    A series just added has no old window at all, so everything inside its keep window
-    counts as newly scoped, which is what adding a series means.
+    A series just added has no old window at all, so everything inside its keep window is
+    newly scoped, which is what adding a series means.
     """
-    queued = (rule.get('queue') or {}).get('monitor_new')
-    if not queued:
-        return []
-    inside = state.get('in_frame_unmonitored') or []
-    before = queued.get('from')
-    if not before:
-        return list(inside)
+    frame = keep_frame(episodes, effective_rule(rule, settings.get('profiles')), settings)
+    inside = [episode for episode in frame['in_frame'] if not episode.get('monitored')]
+    if not previous_scope:
+        return inside
     previous = dict(effective_rule(rule, settings.get('profiles')))
-    previous.update(before)
+    previous.update(previous_scope)
     was = {episode.get('episode_id')
            for episode in keep_frame(episodes, previous, settings)['in_frame']}
     return [row for row in inside if row.get('episode_id') not in was]
+
+
+def scope_pass(settings: dict, rule: dict, monitor_new: bool = False,
+               unmonitor_outside: bool = False, previous_scope=None) -> dict:
+    """Two one-time corrections, applied now rather than at the next run.
+
+    Both are asked for explicitly, on a save, and neither deletes anything — they move
+    Sonarr's monitored flags, which is reversible in a click and is the least destructive
+    thing this plugin does.
+
+    Waiting for the run is what makes the second one pointless. Every run already
+    unmonitors what falls outside the window; the harm this prevents happens *between* the
+    save and the run, when Sonarr is still fetching episodes the next run would delete. A
+    queued version of it would arrive exactly too late to matter.
+
+    Decided from the stored reading, so it costs one write to Sonarr and no reads.
+    """
+    episodes, series, read_at, from_cache = episodes_for(settings, rule, offline=True)
+    active = effective_rule(rule, settings.get('profiles'))
+    frame = keep_frame(episodes, active, settings)
+    result = {'monitored': [], 'unmonitored': [], 'read_at': read_at}
+
+    if monitor_new:
+        result['monitored'] = newly_scoped_rows(settings, rule, episodes, previous_scope)
+    if unmonitor_outside:
+        result['unmonitored'] = [episode for episode in frame['out_frame'] if episode.get('monitored')]
+
+    client = client_for(settings, rule['instance_id'])
+    for key, wanted in (('monitored', True), ('unmonitored', False)):
+        ids = [row['episode_id'] for row in result[key] if row.get('episode_id')]
+        if ids:
+            client.set_monitored(ids, wanted)
+    if result['monitored'] and (settings.get('retention') or {}).get('search_after_monitor'):
+        missing = [row['episode_id'] for row in result['monitored'] if not row.get('has_file')]
+        if missing:
+            with contextlib.suppress(SonarrError):
+                client.search_episodes(missing)
+    log_line(settings, 'info',
+             f'{rule.get("series_title") or rule["path"]}: one-time pass monitored '
+             f'{len(result["monitored"])}, unmonitored {len(result["unmonitored"])}')
+    return {'monitored': len(result['monitored']), 'unmonitored': len(result['unmonitored'])}
 
 
 def rule_flag(settings: dict, rule: dict, name: str, default=True) -> bool:
@@ -396,16 +423,14 @@ def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool)
     including the episodes with no file: those are never deleted, so nothing else would
     ever unmonitor them, and Sonarr would go on fetching what the next run removes.
 
-    Monitoring happens under full sync, or once when a widened rule was saved with the
-    one-time pass ticked. That pass is consumed here, whether or not it had anything to do.
+    Monitoring happens only under full sync. The one-time passes a save can ask for are
+    applied at that moment, not here — waiting for a run is what made one of them useless.
     """
     targets = monitoring_targets(settings, state, rule)
-    once = pending_monitor_pass(settings, rule, state)
-    monitor = list(dict.fromkeys(targets['monitor'] + [row['episode_id'] for row in once]))
-    monitor_list = targets['monitor_list'] + [row for row in once
-                                              if row.get('episode_id') not in set(targets['monitor'])]
+    monitor = list(targets['monitor'])
+    monitor_list = list(targets['monitor_list'])
     result = {'monitored': len(monitor), 'unmonitored': len(targets['unmonitor']),
-              'searched': 0, 'error': '', 'newly_scoped': len(once),
+              'searched': 0, 'error': '', 'newly_scoped': 0,
               'monitor_list': monitor_list,
               'unmonitor_list': list(state.get('out_frame_monitored') or [])}
     if dry_run:
@@ -1253,7 +1278,6 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
     # always current, and saying so about the data behind it would be a lie.
     state['read_at'] = read_at
     state['from_cache'] = from_cache
-    state['newly_scoped_rows'] = newly_scoped_rows(settings, rule, episodes, state)
     if series:
         state.update(describe_lifecycle(state, series))
 
@@ -1263,11 +1287,10 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
     deleting = {item.get('episode_id') for item in would_delete}
     outside = state.get('out_frame_monitored') or []
     targets = monitoring_targets(settings, state, rule)
-    once = pending_monitor_pass(settings, rule, state)
     # Deleting always unmonitors, and the run also unmonitors everything else outside the
     # window; both are counted here because both are changes someone would want to see.
     unmonitor = {row.get('episode_id') for row in outside} | deleting
-    monitor = {row['episode_id'] for row in targets['monitor_list'] + once if row.get('episode_id')}
+    monitor = {row['episode_id'] for row in targets['monitor_list'] if row.get('episode_id')}
     state['plan'] = {
         'delete': len(would_delete),
         'delete_bytes': sum(int(item.get('size') or 0) for item in would_delete),
@@ -1275,7 +1298,6 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
         'unmonitor': len([row for row in outside if row.get('episode_id') in unmonitor]),
         'unmonitor_missing': targets['unmonitor_missing'],
         'monitor': len(monitor),
-        'newly_scoped': len(once),
         'mode': monitoring_mode(settings, rule),
         'computed_at': now_iso(),
     }

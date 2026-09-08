@@ -356,17 +356,10 @@ QUEUED_FIXES = ['monitor-in-frame', 'unmonitor-out-frame']
 def validate_queue(raw) -> dict:
     """A rule's pending intent. Nothing here has happened yet; a run is what applies it."""
     raw = raw if isinstance(raw, dict) else {}
-    queue = {'removal': None, 'fixes': [], 'monitor_new': None}
-    # A one-time pass over the episodes a save brought into scope. It carries the window
-    # as it was, so "newly scoped" stays answerable later: at apply time the two windows
-    # are compared, rather than trusting a list of episode ids that has since moved.
-    once = raw.get('monitor_new')
-    if isinstance(once, dict):
-        before = once.get('from')
-        queue['monitor_new'] = {
-            'from': validate_conditions(before) if isinstance(before, dict) else None,
-            'created_at': _text(once.get('created_at'), 'Queued at', 40) or '',
-        }
+    # The one-time monitoring passes are not queued: they are applied when the save asks
+    # for them. Waiting for a run made the unmonitor half useless, because a run already
+    # unmonitors what is outside the window — the harm it prevents happens before then.
+    queue = {'removal': None, 'fixes': []}
     removal = raw.get('removal')
     if isinstance(removal, dict) and removal.get('action'):
         action = _text(removal.get('action'), 'Removal action', 32)

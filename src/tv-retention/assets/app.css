@@ -417,3 +417,11 @@
 #tv-retention button.tvr-icon-button:hover { opacity: 1; }
 #tv-retention button.tvr-icon-large { width: 34px; height: 34px; min-width: 34px; flex-basis: 34px;
   font-size: 15px; }
+
+/* One-time actions, set apart from the settings above them: these happen once, when you
+   press Save, and never again. A block that looks like the rest of the form would be read
+   as another preference. */
+.tvr-once { border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-action);
+  border-radius: 6px; padding: 8px 10px; display: grid; gap: 2px; }
+.tvr-once-title { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .6; }
+.tvr-once small { opacity: .65; margin: 0 0 4px 42px; }

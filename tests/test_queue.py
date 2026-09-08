@@ -132,5 +132,5 @@ class LoadNormalises(unittest.TestCase):
             finally:
                 store.CONFIG = original
             self.assertIn('queue', rule)
-            self.assertEqual(rule['queue'], {'removal': None, 'fixes': [], 'monitor_new': None})
+            self.assertEqual(rule['queue'], {'removal': None, 'fixes': []})
             self.assertIn('monitoring', rule)

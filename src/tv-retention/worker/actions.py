@@ -151,6 +151,24 @@ def action_watch(settings, request):
             'plan': plan_summary(settings, health)}
 
 
+def action_scope_pass(settings, request):
+    """Apply one or both one-time monitoring passes for a rule, now.
+
+    Asked for on a save, and applied then rather than queued: a run already unmonitors
+    what falls outside the window, so a queued version of that half would arrive after the
+    downloads it exists to prevent.
+    """
+    rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
+    if not rule:
+        raise Rejected('That series is no longer here.')
+    if rule.get('match_status') != 'matched':
+        raise Rejected('This series is not matched to Sonarr, so its monitoring cannot be set.')
+    return main.scope_pass(settings, rule,
+                           monitor_new=bool(request.get('monitor_new')),
+                           unmonitor_outside=bool(request.get('unmonitor_outside')),
+                           previous_scope=request.get('previous_scope') or None)
+
+
 def action_health(settings, request):
     """Refresh the cached health, on demand or because the page found it stale."""
     return {'health': trim_health(main.run_health_check(scheduled=False, force=bool(request.get('force'))))}
@@ -394,6 +412,7 @@ ACTIONS = {
     'check-rule': action_check_rule,
     'watch': action_watch,
     'sync': action_sync,
+    'scope-pass': action_scope_pass,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

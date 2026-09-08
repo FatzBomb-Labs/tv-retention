@@ -1388,15 +1388,37 @@
                                  rule.monitoring || '');
       // A one-time pass, not a setting: it applies once, to the episodes this save brings
       // into the window, and is meaningless under full sync where it happens continuously.
+      // Two one-time actions, not settings. They happen when you press Save and never
+      // again, which is why each says so and says what it will do to Sonarr.
       const before = existing ? scopeOf(rule) : null;
-      const monitorNew = toggle('Monitor the episodes this brings into scope', false, null,
-                                { className: 'tvr-row-switch' });
-      const scopeRow = el('div', { className: 'tvr-row', hidden: true }, [monitorNew.node]);
+      const monitorNew = toggle('Once, on save: monitor the episodes this newly covers',
+                                false, null, { className: 'tvr-row-switch' });
+      const unmonitorOut = toggle('Once, on save: unmonitor everything outside the keep window',
+                                  false, null, { className: 'tvr-row-switch' });
+      const scopeRow = el('div', { className: 'tvr-once' }, [
+        el('div', { className: 'tvr-once-title', textContent: 'One-time actions' }),
+        monitorNew.node,
+        el('small', { textContent: 'Asks Sonarr to download any of them it does not have. '
+                                   + 'Leave this off and nothing is fetched — the window simply '
+                                   + 'covers them from now on.' }),
+        unmonitorOut.node,
+        el('small', { textContent: 'Stops Sonarr fetching episodes the next run would delete. '
+                                   + 'A run does this too, so this only closes the gap between '
+                                   + 'saving and the next run.' }),
+      ]);
       const updateScopeRow = () => {
         const mode = monitoring.value || (settings.retention || {}).monitoring || 'unmonitor-only';
         const widens = !existing || widensScope(before, draftScope());
-        scopeRow.hidden = mode === 'full-sync' || !widens;
-        if (scopeRow.hidden) monitorNew.input.checked = false;
+        monitorNew.node.hidden = mode === 'full-sync' || !widens;
+        if (monitorNew.node.hidden) monitorNew.input.checked = false;
+        // Nothing to unmonitor outside a window that has only grown.
+        const narrows = !existing || !widens;
+        unmonitorOut.node.hidden = mode === 'full-sync' || (existing && widens && !narrows);
+        if (unmonitorOut.node.hidden) unmonitorOut.input.checked = false;
+        scopeRow.hidden = monitorNew.node.hidden && unmonitorOut.node.hidden;
+        [...scopeRow.querySelectorAll('small')].forEach((note, index) => {
+          note.hidden = index === 0 ? monitorNew.node.hidden : unmonitorOut.node.hidden;
+        });
       };
       const draftScope = () => ({
         profile_id: presetSelect.value || '',
@@ -1439,7 +1461,7 @@
         $('tvr-dialog-extra').replaceChildren(remove);
       }
       return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions,
-               specials, monitoring, monitorNew, before, enabled };
+               specials, monitoring, monitorNew, unmonitorOut, before, enabled };
     }, async (context) => {
       const chosen = context.getSeries();
       const draft = {
@@ -1455,12 +1477,6 @@
         monitoring: context.monitoring.value,
         queue: rule.queue || undefined,
       };
-      if (context.monitorNew.input.checked) {
-        // The window as it was travels with the request, so "newly scoped" is still
-        // answerable at run time: episodes move, a remembered list of ids does not.
-        draft.queue = Object.assign({}, draft.queue,
-                                    { monitor_new: { from: context.before, created_at: new Date().toISOString() } });
-      }
       if (chosen) {
         if (!chosen.selectable) throw new Error(`${chosen.title} cannot be used: ${chosen.reason}.`);
         Object.assign(draft, { series_id: chosen.series_id, series_title: chosen.title,
@@ -1478,8 +1494,23 @@
       snapshot.settings = settings;
       render();
       const saved = settings.rules[settings.rules.length - 1];
+      let done = '';
+      // Applied now, against the saved rule, because the unmonitor half exists to stop
+      // downloads that would otherwise happen before the next run.
+      if (saved && (context.monitorNew.input.checked || context.unmonitorOut.input.checked)) {
+        const pass = await api('scope-pass', {
+          rule_id: saved.id,
+          monitor_new: context.monitorNew.input.checked,
+          unmonitor_outside: context.unmonitorOut.input.checked,
+          previous_scope: context.before,
+        }, 'Setting monitoring in Sonarr…');
+        const parts = [];
+        if (pass.monitored) parts.push(`${plural(pass.monitored, 'episode')} monitored`);
+        if (pass.unmonitored) parts.push(`${plural(pass.unmonitored, 'episode')} unmonitored`);
+        done = parts.length ? ` ${parts.join(', ')} in Sonarr.` : ' Nothing needed changing in Sonarr.';
+      }
       if (saved) queueChecks([saved.id]);
-      notice('Series saved.', 'ok');
+      notice(`Series saved.${done}`, 'ok');
     });
   }
 

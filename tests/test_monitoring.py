@@ -193,7 +193,7 @@ class MonitoringTargets(unittest.TestCase):
 
 
 class OneTimePass(unittest.TestCase):
-    """Monitoring the episodes a save brought into scope, once, because someone asked."""
+    """Two corrections asked for on a save, applied then rather than queued."""
 
     def setUp(self):
         import main
@@ -201,53 +201,108 @@ class OneTimePass(unittest.TestCase):
         self.settings = {'retention': {'monitoring': 'unmonitor-only'}, 'profiles': []}
         self.episodes = [
             {'episode_id': n, 'season': 1, 'episode': n, 'title': f'E{n}', 'has_file': True,
-             'monitored': False, 'size': 1, 'path': f'/tv/S01E{n:02d}.mkv',
+             'monitored': monitored, 'size': 1, 'path': f'/tv/S01E{n:02d}.mkv',
              'air_date': (dt.date.today() - dt.timedelta(days=days)).isoformat(),
              'air_source': 'sonarr', 'date_added': ''}
-            for n, days in ((1, 5), (2, 40), (3, 200))
+            for n, days, monitored in ((1, 5, False), (2, 40, False), (3, 200, True))
         ]
 
-    def rule(self, days, queued=None):
-        rule = {'id': 'r1', 'keep_days': days, 'keep_episodes': None, 'keep_seasons': None,
-                'combine': 'earliest', 'include_specials': None, 'queue': {'monitor_new': queued}}
-        return rule
+    def rule(self, days):
+        return {'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                'keep_days': days, 'keep_episodes': None, 'keep_seasons': None,
+                'combine': 'earliest', 'include_specials': None, 'match_status': 'matched'}
 
-    def state_for(self, rule):
-        from core import classify_monitoring
-        return classify_monitoring(self.episodes, rule, self.settings)
+    def scope(self, days):
+        return {'keep_days': days, 'keep_episodes': None, 'keep_seasons': None,
+                'combine': 'earliest'}
 
     def test_widening_offers_only_what_the_widening_added(self):
         """A rule widened to ninety days did not ask for the thirty it always had."""
-        rule = self.rule(90, {'from': {'keep_days': 30, 'keep_episodes': None,
-                                       'keep_seasons': None, 'combine': 'earliest'}})
-        rows = self.main.newly_scoped_rows(self.settings, rule, self.episodes, self.state_for(rule))
+        rows = self.main.newly_scoped_rows(self.settings, self.rule(90), self.episodes,
+                                           self.scope(30))
         self.assertEqual([row['episode_id'] for row in rows], [2])
 
     def test_a_new_series_counts_its_whole_window(self):
-        rule = self.rule(90, {'from': None})
-        rows = self.main.newly_scoped_rows(self.settings, rule, self.episodes, self.state_for(rule))
+        rows = self.main.newly_scoped_rows(self.settings, self.rule(90), self.episodes, None)
         self.assertEqual(sorted(row['episode_id'] for row in rows), [1, 2])
 
-    def test_nothing_happens_unless_it_was_asked_for(self):
-        rule = self.rule(90)
-        self.assertEqual(self.main.newly_scoped_rows(self.settings, rule, self.episodes,
-                                                     self.state_for(rule)), [])
-        self.assertEqual(self.main.pending_monitor_pass(self.settings, rule, {'newly_scoped_rows': [1]}), [])
-
-    def test_the_pass_is_read_from_the_state_the_check_worked_out(self):
-        rule = self.rule(90, {'from': None})
-        state = {'newly_scoped_rows': [{'episode_id': 7}]}
-        self.assertEqual(self.main.pending_monitor_pass(self.settings, rule, state),
-                         [{'episode_id': 7}])
-
     def test_an_episode_arriving_after_the_save_lands_in_the_right_window(self):
-        # The window is stored, not a list of episode ids, so an episode that appears
-        # between the save and the run is judged by where it falls.
-        rule = self.rule(90, {'from': {'keep_days': 30, 'keep_episodes': None,
-                                       'keep_seasons': None, 'combine': 'earliest'}})
+        # The windows are compared, not a remembered list of ids, so an episode that
+        # appears between the save and the pass is judged by where it falls.
         self.episodes.append({'episode_id': 4, 'season': 1, 'episode': 4, 'title': 'New',
-                              'has_file': True, 'monitored': False, 'size': 1, 'path': '/tv/S01E04.mkv',
-                              'air_date': (dt.date.today() - dt.timedelta(days=60)).isoformat(),
-                              'air_source': 'sonarr', 'date_added': ''})
-        rows = self.main.newly_scoped_rows(self.settings, rule, self.episodes, self.state_for(rule))
+                              'has_file': True, 'monitored': False, 'size': 1,
+                              'path': '/tv/S01E04.mkv', 'air_source': 'sonarr', 'date_added': '',
+                              'air_date': (dt.date.today() - dt.timedelta(days=60)).isoformat()})
+        rows = self.main.newly_scoped_rows(self.settings, self.rule(90), self.episodes,
+                                           self.scope(30))
         self.assertEqual(sorted(row['episode_id'] for row in rows), [2, 4])
+
+    def test_already_monitored_episodes_are_left_alone(self):
+        rows = self.main.newly_scoped_rows(self.settings, self.rule(500), self.episodes, None)
+        self.assertNotIn(3, [row['episode_id'] for row in rows], 'episode 3 is already monitored')
+
+
+class ScopePassApplies(unittest.TestCase):
+    """It writes to Sonarr at once, because waiting is what made one half pointless."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        import main, store
+        from core import validate_settings
+        self.main, self.store = main, store
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = validate_settings({
+            'instances': [{'id': 'i1', 'name': 'S', 'url': 'http://s:8989', 'api_key': 'a' * 32}],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                       'series_title': 'A', 'keep_days': 30}],
+        })
+        self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
+        self.rule = self.settings['rules'][0]
+        self.rule['match_status'] = 'matched'
+        self.episodes = [
+            {'episode_id': n, 'season': 1, 'episode': n, 'title': f'E{n}', 'has_file': True,
+             'monitored': monitored, 'size': 1, 'path': f'/tv/S01E{n:02d}.mkv',
+             'air_date': (dt.date.today() - dt.timedelta(days=days)).isoformat(),
+             'air_source': 'sonarr', 'date_added': ''}
+            for n, days, monitored in ((1, 5, False), (2, 200, True), (3, 300, True))
+        ]
+        store.store_episodes(self.settings, self.rule, self.episodes, {'series_id': 1, 'title': 'A'})
+        self.calls = []
+        holder = self
+
+        class Client:
+            def set_monitored(self, ids, wanted):
+                holder.calls.append(('set', sorted(ids), wanted))
+
+            def search_episodes(self, ids):
+                holder.calls.append(('search', sorted(ids), None))
+
+        self.original = main.client_for
+        main.client_for = lambda *a, **k: Client()
+
+    def tearDown(self):
+        self.main.client_for = self.original
+        self.temp.cleanup()
+
+    def test_unmonitoring_outside_the_window_happens_now(self):
+        result = self.main.scope_pass(self.settings, self.rule, unmonitor_outside=True)
+        self.assertEqual(result['unmonitored'], 2)
+        self.assertEqual(self.calls, [('set', [2, 3], False)])
+
+    def test_monitoring_newly_covered_happens_now(self):
+        result = self.main.scope_pass(self.settings, self.rule, monitor_new=True,
+                                      previous_scope={'keep_days': 1, 'keep_episodes': None,
+                                                      'keep_seasons': None, 'combine': 'earliest'})
+        self.assertEqual(result['monitored'], 1)
+        self.assertEqual(self.calls, [('set', [1], True)])
+
+    def test_asking_for_neither_writes_nothing(self):
+        self.assertEqual(self.main.scope_pass(self.settings, self.rule),
+                         {'monitored': 0, 'unmonitored': 0})
+        self.assertEqual(self.calls, [])
+
+    def test_it_decides_from_the_stored_reading_and_never_reads_sonarr(self):
+        # One write, no reads: the episodes are already in hand from the last sync.
+        self.main.scope_pass(self.settings, self.rule, monitor_new=True, unmonitor_outside=True)
+        self.assertTrue(all(kind in ('set', 'search') for kind, _, _ in self.calls))
