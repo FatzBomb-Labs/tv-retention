@@ -174,19 +174,6 @@
   border-radius: 6px; background: rgba(0,0,0,.22); font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 
-.tvr-combo { position: relative; }
-.tvr-combo input { width: 100%; }
-.tvr-combo-list { position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 70;
-  max-height: 320px; overflow-y: auto; display: flex; flex-direction: column;
-  border: 1px solid var(--tvr-line); border-radius: 6px;
-  background: var(--background-color, #1c1c1c); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
-#tv-retention .tvr-combo-list button { display: flex; flex-direction: column; align-items: flex-start;
-  gap: 1px; text-align: left; border: none; border-radius: 0; padding: 6px 10px; font-size: 12.5px; }
-#tv-retention .tvr-combo-list button:hover:not([disabled]),
-#tv-retention .tvr-combo-list button:focus { background: var(--tvr-soft); outline: none; }
-.tvr-combo-note { opacity: .6; font-size: 11px; }
-.tvr-combo-blocked { color: var(--tvr-warn); font-size: 11px; }
-.tvr-combo-empty { padding: 8px 10px; opacity: .6; }
 
 .tvr-dialog { border: 1px solid var(--tvr-line); border-radius: 8px; padding: 0; width: min(820px, 94vw);
   color: inherit; background: var(--background-color, #1c1c1c); }
@@ -597,3 +584,27 @@
 .tvr-alert-item.acknowledged { opacity: .55; }
 .tvr-alert-item.acknowledged .tvr-alert-kind::after { content: ' · acknowledged'; opacity: .7;
   font-weight: normal; }
+
+/* Posters are fitted, never cropped: a 2:3 poster and a square one both show whole, in a
+   box of the same size, so a wall of them lines up without lying about any of them. */
+.tvr-rules-grid .tvr-poster-row img { object-fit: contain; }
+.tvr-poster img { object-fit: contain; }
+
+/* Connected, in poster view: a border all the way round rather than a bar down one side,
+   which under a poster read as a printing fault. */
+.tvr-rules-grid .tvr-rule { border-left-width: 1px; }
+.tvr-rules-grid .tvr-rule.ok { border-color: var(--tvr-good); }
+.tvr-rules-grid .tvr-rule.blocked { border-color: var(--tvr-bad); }
+.tvr-rules-grid .tvr-rule.loose { border-color: var(--tvr-line); }
+.tvr-rules-grid .tvr-rule.selected { border-color: var(--tvr-action); }
+
+/* The panel takes precedence: it is what you are working on, and it was the thing being
+   squeezed. The list gives way; the panel does not get cut off. */
+.tvr-series-shell.open { grid-template-columns: minmax(0, 1fr) minmax(400px, 460px); }
+.tvr-identity { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px;
+  align-items: start; padding-bottom: 8px; border-bottom: 1px solid var(--tvr-line); }
+.tvr-poster-panel { width: 92px; height: 138px; }
+.tvr-identity-body { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.tvr-identity-title { font-weight: 600; font-size: 14px; }
+.tvr-identity .tvr-mono { font-size: 10px; opacity: .55; overflow-wrap: anywhere; }
+@media (max-width: 1250px) { .tvr-series-shell.open { grid-template-columns: 1fr; } }

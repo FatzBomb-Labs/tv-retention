@@ -135,9 +135,15 @@ class Interface(unittest.TestCase):
         root = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot()
         self.assertTrue(root.get('icon'))
 
-    def test_the_picker_refuses_unselectable_series(self):
-        self.assertIn("usable: (entry) => entry.selectable", self.js)
-        self.assertIn("cannot be used", self.js)
+    def test_a_series_that_cannot_be_used_is_refused_on_save(self):
+        """The picker is gone: the navigator says which series you mean.
+
+        What it guarded still holds — a series Sonarr has no folder for cannot take a
+        rule — so the check moved to the save, which is the only place it can be evaded.
+        """
+        self.assertIn('series.selectable === false', self.js)
+        self.assertIn('cannot be used', self.js)
+        self.assertNotIn('Refresh list', self.js)
 
 
     def test_series_problems_surface_on_the_card(self):
@@ -614,3 +620,30 @@ class Interface(unittest.TestCase):
         self.assertTrue(alert_module.may_acknowledge(notice, {'alerts': {'acknowledge': True}}))
         # And the interface offers it on exactly the same terms.
         self.assertIn("alert.severity !== 'error' && !alert.blocking", self.js)
+
+    def test_add_and_edit_are_one_panel(self):
+        """They were the same form with different framing; now they are the same form.
+
+        The differences that remain are the ones that mean something: what the heading
+        says, and whether the action adds, updates or deletes.
+        """
+        self.assertIn("title: existing ? 'Edit series' : 'Add series'", self.js)
+        self.assertIn("textContent: editing.existing ? 'Update' : 'Add series'", self.js)
+        # No picker and no instance choice: the navigator already said which series, and a
+        # rule *is* its binding to one, so re-pointing it is delete and add.
+        self.assertNotIn('instanceSelect', self.js)
+        self.assertNotIn("placeholder: 'Type a few letters", self.js)
+
+    def test_the_action_says_whether_pressing_it_would_do_anything(self):
+        self.assertIn('primary.disabled = !valid || (editing.existing && context.state() === settled)', self.js)
+        self.assertIn("primary.title = !valid ? 'Set a preset, or at least one keep value'", self.js)
+
+    def test_inheriting_names_what_it_inherits(self):
+        # "Use the global setting" made you go and look it up.
+        self.assertIn('`[Default] ${globalSpecials}`', self.js)
+        self.assertIn('`[Default] ${globalMonitoring}`', self.js)
+
+    def test_posters_are_fitted_rather_than_cropped(self):
+        self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-poster-row img \{ object-fit: contain')
+        # And connected is a whole border in poster view, not a bar down one side.
+        self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-rule\.ok \{ border-color: var\(--tvr-good\)')

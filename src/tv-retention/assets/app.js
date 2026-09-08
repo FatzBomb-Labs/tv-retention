@@ -176,76 +176,6 @@
     box.showModal();
   }
 
-  // -- searchable picker -------------------------------------------------
-  // A plain select is unusable at three thousand entries: it cannot be typed into beyond
-  // the first letters and gives no reason why an option is unavailable.
-  function comboBox(items, config) {
-    const input = el('input', { type: 'text', placeholder: config.placeholder || 'Type to search…',
-                                autocomplete: 'off', spellcheck: false, role: 'combobox' });
-    const list = el('div', { className: 'tvr-combo-list', role: 'listbox', hidden: true });
-    const holder = el('div', { className: 'tvr-combo' }, [input, list]);
-    let chosen = null;
-
-    const matches = (term) => {
-      const needle = term.trim().toLowerCase();
-      const scored = [];
-      for (const item of items) {
-        const label = config.label(item).toLowerCase();
-        if (!needle) scored.push([2, item]);
-        else if (label.startsWith(needle)) scored.push([0, item]);
-        else if (label.includes(needle)) scored.push([1, item]);
-        if (scored.length > 600) break;
-      }
-      scored.sort((a, b) => a[0] - b[0]);
-      return scored.slice(0, config.limit || 40).map((pair) => pair[1]);
-    };
-
-    const render = () => {
-      const rows = matches(input.value);
-      list.replaceChildren();
-      if (!rows.length) list.append(el('div', { className: 'tvr-combo-empty', textContent: 'No matches.' }));
-      rows.forEach((item) => {
-        const usable = config.usable ? config.usable(item) : true;
-        const row = el('button', { type: 'button', role: 'option', disabled: !usable });
-        row.append(el('span', { textContent: config.label(item) }));
-        const note = config.note ? config.note(item) : '';
-        if (note) row.append(el('small', { className: usable ? 'tvr-combo-note' : 'tvr-combo-blocked', textContent: note }));
-        row.addEventListener('click', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          chosen = item;
-          input.value = config.label(item);
-          list.hidden = true;
-          if (config.onPick) config.onPick(item);
-        });
-        list.append(row);
-      });
-      list.hidden = false;
-    };
-
-    input.addEventListener('input', () => { chosen = null; render(); });
-    input.addEventListener('focus', render);
-    input.addEventListener('click', (event) => { event.stopPropagation(); render(); });
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') { list.hidden = true; return; }
-      if (event.key === 'ArrowDown') {
-        const first = list.querySelector('button:not([disabled])');
-        if (first) { event.preventDefault(); first.focus(); }
-      }
-    });
-    list.addEventListener('keydown', (event) => {
-      const buttons = [...list.querySelectorAll('button:not([disabled])')];
-      const index = buttons.indexOf(document.activeElement);
-      if (event.key === 'ArrowDown' && index < buttons.length - 1) { event.preventDefault(); buttons[index + 1].focus(); }
-      if (event.key === 'ArrowUp') { event.preventDefault(); (index > 0 ? buttons[index - 1] : input).focus(); }
-      if (event.key === 'Escape') { list.hidden = true; input.focus(); }
-    });
-    document.addEventListener('click', () => { list.hidden = true; });
-
-    return { node: holder, get value() { return chosen; },
-             set(item) { chosen = item; input.value = item ? config.label(item) : ''; } };
-  }
-
   // -- tabs --------------------------------------------------------------
   // Read from the markup rather than listed here. A hand-kept copy disagreed with the page
   // the moment a tab was removed: the lookup for the departed panel returned null, setting
@@ -1538,48 +1468,47 @@
 
     if (!settings.instances.length) {
       notice('Add a Sonarr instance first — every series must be bound to a Sonarr record.', 'bad');
-      return;
+      return null;
+    }
+    // Sonarr's own record for this series: the one being added, or the one the rule is
+    // already bound to. Everything the panel shows about the series comes from here.
+    const series = preselect
+      || (library || []).find((entry) => entry.series_id === rule.series_id
+                                         && entry.instance_id === rule.instance_id)
+      || { series_id: rule.series_id, instance_id: rule.instance_id, title: rule.series_title,
+           path: rule.path };
+    if (!existing) {
+      Object.assign(rule, { instance_id: series.instance_id, series_id: series.series_id,
+                            series_title: series.title, tvdb_id: series.tvdb_id,
+                            path: series.path });
     }
 
-    // The same form serves the details pane and, for a delete confirmation, a dialog.
-    // It is built once and handed to whichever surface is showing it.
     return {
-      title: existing ? rule.series_title || 'Edit series' : 'Add series',
+      title: existing ? 'Edit series' : 'Add series',
       rule,
+      series,
+      existing: !!existing,
       build: (body) => {
-      const instanceSelect = options(el('select'),
-        settings.instances.map((instance) => [instance.id, instance.name]), rule.instance_id);
-      const hint = el('small', { textContent: 'Loading series from Sonarr…' });
-      let picker = null;
-      const holder = el('div', {});
-      const refreshButton = el('button', { type: 'button', textContent: 'Refresh list' });
-      const seriesField = el('label', { className: 'tvr-field' },
-        [el('span', { textContent: 'Series' }), holder, hint]);
-
-      const load = (force) => guarded('', async () => {
-        const catalogue = await seriesFor(instanceSelect.value, rule.id, force);
-        picker = comboBox(catalogue, {
-          placeholder: 'Type a few letters of the series name…',
-          label: (entry) => `${entry.title}${entry.year ? ` (${entry.year})` : ''}`,
-          usable: (entry) => entry.selectable,
-          note: (entry) => (entry.selectable
-            ? (entry.awaiting ? 'awaiting first episode — no folder yet' : entry.path)
-            : entry.reason),
-        });
-        holder.replaceChildren(picker.node);
-        // Arriving from the Add view, the series is already chosen; the picker still shows
-        // it, so the choice can be changed without leaving the dialog.
-        const wanted = preselect ? preselect.series_id : rule.series_id;
-        const current = catalogue.find((entry) => String(entry.series_id) === String(wanted));
-        if (current) picker.set(current);
-        const blocked = catalogue.filter((entry) => !entry.selectable).length;
-        hint.textContent = blocked
-          ? `${catalogue.length - blocked} of ${catalogue.length} series can be used; the rest show why not.`
-          : `${catalogue.length} series available.`;
-      });
-      refreshButton.addEventListener('click', (event) => { event.preventDefault(); load(true); });
-      instanceSelect.addEventListener('change', () => { seriesCache = {}; load(false); });
-      load(false);
+      // The navigator already said which series this is, so there is no picker and no
+      // instance to choose: the series carries its own. A rule *is* its binding to one
+      // series, so pointing it at another is delete and add, not an edit.
+      const facts = [series.year, series.network, series.certification,
+                     series.season_count ? plural(series.season_count, 'season') : '',
+                     series.total_episode_count
+                       ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
+                     series.size_on_disk ? bytes(series.size_on_disk) : '',
+                     series.ended ? 'ended' : (series.next_airing ? `next ${when(series.next_airing)}` : '')]
+        .filter(Boolean);
+      const enabled = toggle(rule.enabled ? 'Enabled' : 'Disabled', rule.enabled, null, {});
+      const identity = el('div', { className: 'tvr-identity' }, [
+        posterNode(series, 'tvr-poster tvr-poster-panel'),
+        el('div', { className: 'tvr-identity-body' }, [
+          el('div', { className: 'tvr-identity-title', textContent: series.title || rule.series_title }),
+          el('div', { className: 'tvr-details-facts', textContent: facts.join(' · ') }),
+          el('div', { className: 'tvr-details-facts tvr-mono', textContent: series.path || rule.path || '' }),
+          enabled.node,
+        ]),
+      ]);
 
       const presetSelect = el('select');
       (settings.profiles || []).forEach((preset) => presetSelect.append(
@@ -1591,17 +1520,21 @@
       presetSelect.addEventListener('change', applyPreset);
       applyPreset();
 
-      const specials = options(el('select'), [['', 'Use the global setting'], ['no', 'Exclude specials'],
+      // Inheriting says what it will inherit. "Use the global setting" made you go and
+      // look; naming the value means the row already answers the question.
+      const globalSpecials = (settings.retention || {}).include_specials ? 'Include specials' : 'Exclude specials';
+      const globalMonitoring = ((settings.retention || {}).monitoring || 'unmonitor-only') === 'full-sync'
+        ? 'Full sync' : 'Unmonitor only';
+      const specials = options(el('select'), [['', `[Default] ${globalSpecials}`], ['no', 'Exclude specials'],
                                               ['yes', 'Include specials']],
         rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : ''));
-      const monitoring = options(el('select'), [['', 'Use the global setting'],
+      const monitoring = options(el('select'), [['', `[Default] ${globalMonitoring}`],
                                                 ['unmonitor-only', 'Unmonitor only'],
                                                 ['full-sync', 'Full sync']],
                                  rule.monitoring || '');
-      // A one-time pass, not a setting: it applies once, to the episodes this save brings
-      // into the window, and is meaningless under full sync where it happens continuously.
-      // Two one-time actions, not settings. They happen when you press Save and never
-      // again, which is why each says so and says what it will do to Sonarr.
+
+      // Two one-time actions, not settings. They happen when you save and never again,
+      // which is why each says so and says what it will ask Sonarr to do.
       const before = existing ? scopeOf(rule) : null;
       const monitorNew = toggle('Once, on save: monitor the episodes this newly covers',
                                 false, null, { className: 'tvr-row-switch' });
@@ -1618,12 +1551,18 @@
                                    + 'A run does this too, so this only closes the gap between '
                                    + 'saving and the next run.' }),
       ]);
+      const draftScope = () => ({
+        profile_id: presetSelect.value || '',
+        keep_days: presetSelect.value ? null : (conditions.days.value || null),
+        keep_episodes: presetSelect.value ? null : (conditions.episodes.value || null),
+        keep_seasons: presetSelect.value ? null : (conditions.seasons.value || null),
+        combine: conditions.combine.value,
+      });
       const updateScopeRow = () => {
         const mode = monitoring.value || (settings.retention || {}).monitoring || 'unmonitor-only';
         const widens = !existing || widensScope(before, draftScope());
         monitorNew.node.hidden = mode === 'full-sync' || !widens;
         if (monitorNew.node.hidden) monitorNew.input.checked = false;
-        // Nothing to unmonitor outside a window that has only grown.
         const narrows = !existing || !widens;
         unmonitorOut.node.hidden = mode === 'full-sync' || (existing && widens && !narrows);
         if (unmonitorOut.node.hidden) unmonitorOut.input.checked = false;
@@ -1632,55 +1571,39 @@
           note.hidden = index === 0 ? monitorNew.node.hidden : unmonitorOut.node.hidden;
         });
       };
-      const draftScope = () => ({
-        profile_id: presetSelect.value || '',
-        keep_days: presetSelect.value ? null : (conditions.days.value || null),
-        keep_episodes: presetSelect.value ? null : (conditions.episodes.value || null),
-        keep_seasons: presetSelect.value ? null : (conditions.seasons.value || null),
-        combine: conditions.combine.value,
-      });
       [monitoring, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
        conditions.combine].forEach((input) => input.addEventListener('change', updateScopeRow));
       setTimeout(updateScopeRow, 0);
-      const enabled = toggle(rule.enabled ? 'Enabled' : 'Disabled', rule.enabled, null,
-                             { className: 'tvr-card-switch' });
 
       body.append(
-        el('div', { className: 'tvr-card-head' },
-           [el('span', { className: 'tvr-card-title', textContent: existing ? 'Series' : 'New series' }),
-            enabled.node]),
-        field('Sonarr instance', instanceSelect),
-        seriesField,
-        el('div', { className: 'tvr-row' }, [refreshButton]),
+        identity,
         field('Retention', presetSelect, (settings.profiles || []).length
-          ? 'Presets are managed on the Presets tab.' : 'No presets yet — create one to reuse values.'),
+          ? 'Presets are managed under Media management.' : 'No presets yet — create one to reuse values.'),
         conditions.node,
-        el('div', { className: 'tvr-row' }, [
-          field('Season 0 / specials', specials),
-          field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
-        ]),
+        field('Season 0 / specials', specials),
+        field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
         scopeRow,
       );
-      if (existing) {
-        // Bottom left, in the row with Cancel and Save, away from the primary action.
-        const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small',
-                                      textContent: 'Delete…' });
-        remove.addEventListener('click', (event) => {
-          event.preventDefault();
-          $('tvr-dialog').close('cancel');
-          deleteSeries(rule);
-        });
-        $('tvr-dialog-extra').replaceChildren(remove);
-      }
-      return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions,
-               specials, monitoring, monitorNew, unmonitorOut, before, enabled };
+      return { presetSelect, conditions, specials, monitoring, monitorNew, unmonitorOut,
+               before, enabled,
+               // A rule needs somewhere to keep from: a preset, or at least one value.
+               valid: () => !!(presetSelect.value || conditions.days.value
+                               || conditions.episodes.value || conditions.seasons.value),
+               state: () => JSON.stringify({ profile_id: presetSelect.value,
+                                        keep_days: conditions.days.value,
+                                        keep_episodes: conditions.episodes.value,
+                                        keep_seasons: conditions.seasons.value,
+                                        combine: conditions.combine.value,
+                                        include_specials: specials.value,
+                                        monitoring: monitoring.value,
+                                        enabled: enabled.input.checked,
+                                        once: monitorNew.input.checked || unmonitorOut.input.checked }) };
     },
       save: async (context) => {
-      const chosen = context.getSeries();
       const draft = {
         id: rule.id || undefined,
         enabled: context.enabled.input.checked,
-        instance_id: context.instanceSelect.value,
+        instance_id: series.instance_id,
         profile_id: context.presetSelect.value || '',
         keep_days: context.presetSelect.value ? null : (context.conditions.days.value || null),
         keep_episodes: context.presetSelect.value ? null : (context.conditions.episodes.value || null),
@@ -1690,16 +1613,11 @@
         monitoring: context.monitoring.value,
         queue: rule.queue || undefined,
       };
-      if (chosen) {
-        if (!chosen.selectable) throw new Error(`${chosen.title} cannot be used: ${chosen.reason}.`);
-        Object.assign(draft, { series_id: chosen.series_id, series_title: chosen.title,
-                               tvdb_id: chosen.tvdb_id, path: chosen.path });
-      } else if (existing) {
-        Object.assign(draft, { series_id: rule.series_id, series_title: rule.series_title,
-                               tvdb_id: rule.tvdb_id, path: rule.path });
-      } else {
-        throw new Error('Choose a series from the list.');
+      if (!existing && series.selectable === false) {
+        throw new Error(`${series.title} cannot be used: ${series.reason}.`);
       }
+      Object.assign(draft, { series_id: series.series_id, series_title: series.title || rule.series_title,
+                             tvdb_id: series.tvdb_id, path: series.path || rule.path });
       settings.rules = (settings.rules || []).filter((other) => other.id !== rule.id).concat([draft]);
       await saveSettings(null);
       const matched = await api('match', {}, 'Matching against Sonarr…');
@@ -1769,21 +1687,34 @@
       pane.append(body);
       const context = editing.build(body);
       const actions = el('div', { className: 'tvr-actions' });
-      const save = el('button', { type: 'button', className: 'tvr-primary', textContent: 'Save' });
-      save.addEventListener('click', () => guarded('', async () => {
+      const primary = el('button', { type: 'button', className: 'tvr-primary',
+                                     textContent: editing.existing ? 'Update' : 'Add series' });
+      // Adding needs a keep window to be worth anything; updating needs something to have
+      // changed as well, so the button says whether pressing it would do something.
+      const settled = context.state();
+      const check = () => {
+        const valid = context.valid();
+        primary.disabled = !valid || (editing.existing && context.state() === settled);
+        primary.title = !valid ? 'Set a preset, or at least one keep value'
+          : (primary.disabled ? 'Nothing has changed' : '');
+      };
+      body.addEventListener('input', check);
+      body.addEventListener('change', check);
+      primary.addEventListener('click', () => guarded('', async () => {
         await editing.save(context);
         editing = null;
         renderDetails();
       }));
       const cancel = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Cancel' });
       cancel.addEventListener('click', () => { editing = null; renderDetails(); });
-      actions.append(save, cancel);
-      if (editing.rule && editing.rule.id) {
+      actions.append(primary, cancel);
+      if (editing.existing) {
         const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small', textContent: 'Delete…' });
         remove.addEventListener('click', () => deleteSeries(editing.rule));
         actions.append(el('span', { className: 'tvr-spacer' }), remove);
       }
       pane.append(actions);
+      check();
       return;
     }
 
@@ -1843,11 +1774,9 @@
     pane.append(body);
 
     const actions = el('div', { className: 'tvr-actions' });
-    const edit = el('button', { type: 'button', className: 'tvr-primary', textContent: 'Edit' });
-    edit.addEventListener('click', () => openEditor(rule));
     const refresh = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Re-read from Sonarr' });
     refresh.addEventListener('click', () => queueChecks([rule.id], true));
-    actions.append(edit, refresh);
+    actions.append(refresh);
     const link = sonarrLink(rule);
     if (link) actions.append(el('span', { className: 'tvr-spacer' }), link);
     pane.append(actions);
