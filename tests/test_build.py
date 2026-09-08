@@ -305,11 +305,13 @@ class Interface(unittest.TestCase):
         block = self.js.split("const enabled = toggle('', rule.enabled")[1].split('const identity')[0]
         self.assertIn("await saveSettings(null, true)", block)
         self.assertIn('target.enabled = rule.enabled = !on', block)   # nothing written, nothing shown
-        self.assertNotIn('enabled.node.hidden', block)                # offered while adding too
-        # A rule that exists is switched on the spot; one being added is switched on save,
-        # so only the second is an unsaved value the dirty check should count.
+        # Adding is switched by which button saves it, so the switch would be a second
+        # answer to the same question sitting above the first.
+        self.assertIn('enabled.node.hidden = !existing;', block)
+        # A rule that exists is switched on the spot, and one being added is switched by
+        # which button saves it. Neither is a form value the dirty check should count.
         state = self.js.split('const formState = () => JSON.stringify(')[1].split('});')[0]
-        self.assertIn('enabled: existing ? undefined : enabled.input.checked', state)
+        self.assertNotIn('enabled', state)
 
     def test_the_switch_says_which_way_it_is_without_a_word_beside_it(self):
         # A caption reading "Enabled" beside every series is a word that never changes.
@@ -659,15 +661,28 @@ class Interface(unittest.TestCase):
         says, and whether the action adds, updates or deletes.
         """
         self.assertIn("title: existing ? 'Edit series' : 'Add series'", self.js)
-        self.assertIn("textContent: editing.existing ? 'Update' : 'Add series'", self.js)
+        self.assertIn("textContent: editing.existing ? 'Update' : 'Save and enable'", self.js)
         # No picker and no instance choice: the navigator already said which series, and a
         # rule *is* its binding to one, so re-pointing it is delete and add.
         self.assertNotIn('instanceSelect', self.js)
         self.assertNotIn("placeholder: 'Type a few letters", self.js)
 
     def test_the_action_says_whether_pressing_it_would_do_anything(self):
-        self.assertIn('primary.disabled = !valid || (editing.existing && now === context.saved)', self.js)
-        self.assertIn("primary.title = !valid ? 'Set a preset, or at least one keep value'", self.js)
+        self.assertIn('button.disabled = !valid || (editing.existing && now === context.saved)', self.js)
+        self.assertIn("button.title = !valid ? 'Set a preset, or at least one keep value'", self.js)
+
+    def test_adding_and_switching_on_are_two_buttons(self):
+        """Two decisions, so two buttons rather than a switch that has to be found first.
+
+        And no Cancel: the pane's close leaves what was typed where it was, which is what
+        clicking away already did, so a third button to throw it away was one more thing
+        to read on the way to the two that matter.
+        """
+        self.assertIn("textContent: 'Save' });", self.js)
+        self.assertIn('primary.addEventListener(\'click\', () => commit(true));', self.js)
+        self.assertIn('quiet.addEventListener(\'click\', () => commit(false));', self.js)
+        self.assertIn('enabled: existing ? context.enabled.input.checked : !!startEnabled', self.js)
+        self.assertNotIn("textContent: 'Cancel'", self.js)
 
     def test_inheriting_names_what_it_inherits(self):
         # "Use the global setting" made you go and look it up.
@@ -876,17 +891,17 @@ class Interface(unittest.TestCase):
         panel come straight from Sonarr, and a series being added is the one most likely
         to have moved since the catalogue was read.
         """
-        self.assertIn("className: 'tvr-icon-button tvr-identity-refresh'", self.js)
-        # On the line whose age is the reason anyone presses it.
-        self.assertIn('readLine.append(refresh);', self.js)
+        # In the pane's own bar, beside the other thing the pane can be told to do.
+        head = self.js.split("el('h3', { textContent: 'Series details' })")[0]
+        self.assertIn("title: 'Re-read this series from Sonarr'", head)
+        self.assertIn("el('span', { className: 'tvr-spacer' }), refresh, close);", self.js)
+        self.assertIn('refresh.addEventListener(\'click\', () => context.reread(refresh));', self.js)
         self.assertIn('`Last refreshed: ${stamp ? ago(stamp) : \'never\'}`', self.js)
-        block = self.js.split('const refresh = el(')[1].split('const controls =')[0]
+        block = self.js.split('const reread = (button) =>')[1].split('const controls =')[0]
         self.assertIn('if (existing) {', block)          # a rule is re-checked
         self.assertIn('refreshCounts();', block)         # everything else is re-counted
         self.assertNotIn('tvr-linky', self.js)           # the text link it replaced
         self.assertNotIn('tvr-linky', self.css)
-        # Out of flow, so the switch beside it costs the title no height.
-        self.assertIn('.tvr-identity-controls { position: absolute', self.css)
 
     def test_the_form_does_not_shadow_the_map_of_readings(self):
         """`monitoring` is the module's readings by rule id, and was also the control.
@@ -940,7 +955,7 @@ class Interface(unittest.TestCase):
         """
         block = self.js.split('const saved = formState();')[1].split('return { presetSelect')[0]
         self.assertIn('drafts.get(draftKey)', block)
-        self.assertIn('primary.disabled = !valid || (editing.existing && now === context.saved)', self.js)
+        self.assertIn('button.disabled = !valid || (editing.existing && now === context.saved)', self.js)
 
     def test_a_different_series_starts_at_its_own_top(self):
         # The pane is the scroller, and replacing its contents leaves the position the

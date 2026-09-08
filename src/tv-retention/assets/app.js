@@ -465,30 +465,37 @@
   };
 
   // kind -> [tone, count, description]. Tone is the colour; the verb lives in the text.
+  // Every row carries both lengths: the sentence for a list with room for one, and the
+  // count for a panel where these sit among other one-line facts. The long form is the
+  // tooltip there, so nothing is lost by shortening it.
   function changeSummary(plan) {
     const rows = [];
     Object.entries((plan.removals_by_action) || {}).forEach(([action, count]) => {
       rows.push({ kind: 'remove', tone: action.startsWith('delete') ? 'delete' : 'unmonitor',
+                  short: `${plural(count, 'series removal')} scheduled`,
                   text: (REMOVAL_SUMMARY[action] || REMOVAL_SUMMARY.remove)(count) });
     });
     if (plan.delete) {
       rows.push({ kind: 'delete', tone: 'delete',
+                  short: `${plural(plan.delete, 'deletion')} scheduled`,
                   text: `${plural(plan.delete, 'episode')} scheduled for deletion (${bytes(plan.delete_bytes)})` });
     }
     if (plan.monitor) {
       rows.push({ kind: 'monitor', tone: 'monitor',
+                  short: `${plan.monitor} to be monitored`,
                   text: `${plural(plan.monitor, 'episode')} will be set to monitored` });
     }
     if (plan.unmonitor) {
       rows.push({ kind: 'unmonitor', tone: 'unmonitor',
+                  short: `${plan.unmonitor} to be unmonitored`,
                   text: `${plural(plan.unmonitor, 'episode')} will be set to unmonitored` });
     }
     return rows;
   }
 
-  function changeLines(plan, onOpen) {
+  function changeLines(plan, onOpen, compact) {
     const rows = changeSummary(plan);
-    const list = el('div', { className: 'tvr-plan-list' });
+    const list = el('div', { className: `tvr-plan-list${compact ? ' compact' : ''}` });
     // The total only earns its line when more than one kind of thing is happening.
     if (rows.length > 1 && onOpen) {
       const total = el('button', { type: 'button', className: 'tvr-plan-total',
@@ -497,10 +504,11 @@
       list.append(total);
     }
     rows.forEach((row) => {
+      const shown = compact ? row.short : row.text;
       const line = onOpen
-        ? el('button', { type: 'button', className: `tvr-plan ${row.tone}`, textContent: row.text,
+        ? el('button', { type: 'button', className: `tvr-plan ${row.tone}`, textContent: shown,
                          title: `${row.text} — click to list them` })
-        : el('div', { className: `tvr-plan ${row.tone}`, textContent: row.text });
+        : el('div', { className: `tvr-plan ${row.tone}`, textContent: shown, title: row.text });
       if (onOpen) line.addEventListener('click', () => onOpen(row.kind));
       list.append(line);
     });
@@ -1660,42 +1668,66 @@
       const originLine = el('div', { className: 'tvr-identity-line' });
       const countLine = el('div', { className: 'tvr-identity-line' });
       const nextLine = el('div', { className: 'tvr-identity-line tvr-identity-next' });
-      const sizeOf = () => (series.size_on_disk ? bytes(series.size_on_disk) : '');
-      // Sonarr's own counts until the episodes answer for themselves — one names how many
-      // are monitored, and that is the number the monitoring settings below act on.
+      // One number on the line, coloured by the thing anyone actually wants to know: not
+      // how many episodes are monitored, but whether the ones the rule keeps are. Green
+      // is the state a run leaves the series in; anything else is a difference from it.
+      // Everything behind the colour is in the tooltip rather than on the line.
+      const monitorCountText = el('span', { className: 'tvr-monitor-count' });
       const sayCounts = (counts) => {
         const parts = [];
         if (series.season_count) parts.push(plural(series.season_count, 'season'));
         const total = (counts && counts.episodes) || series.total_episode_count || 0;
-        if (total) {
-          const held = (counts && counts.episodes_on_disk != null)
-            ? counts.episodes_on_disk : series.episode_file_count;
-          const inner = `${held} on disk`
-            + (existing && counts && counts.episodes_monitored != null
-               ? `, ${counts.episodes_monitored} monitored` : '');
-          parts.push(`${plural(total, 'episode')} (${inner})`);
+        countLine.replaceChildren();
+        countLine.hidden = !total && !parts.length;
+        if (parts.length) countLine.append(text(`${parts.join(' · ')}${total ? ' · ' : ''}`));
+        if (!total) return;
+        countLine.append(text(`${plural(total, 'episode')} (`), monitorCountText, text(')'));
+        const monitored = counts && counts.episodes_monitored != null
+          ? counts.episodes_monitored : null;
+        monitorCountText.textContent = `${monitored == null ? '?' : monitored} monitored`;
+        // Scope, not the whole series: a finished show with two seasons kept and six
+        // unmonitored is exactly right, and colouring it orange would say otherwise.
+        const scope = counts && counts.known ? counts.in_scope : null;
+        const inScopeMonitored = scope == null ? null : scope - counts.in_scope_unmonitored;
+        monitorCountText.className = 'tvr-monitor-count'
+          + (inScopeMonitored == null || !scope ? ''
+             : (counts.in_scope_unmonitored === 0 ? ' all'
+                : (inScopeMonitored > 0 ? ' some' : ' none')));
+        const held = counts && counts.episodes_on_disk != null
+          ? counts.episodes_on_disk : series.episode_file_count;
+        const lines = [`${held} of ${total} episodes are on disk`];
+        if (series.size_on_disk) lines.push(`${bytes(series.size_on_disk)} on disk`);
+        if (scope != null) {
+          lines.push(`${inScopeMonitored} of ${scope} episodes inside the keep window are monitored`);
+          lines.push(counts.out_scope_monitored
+            ? `${counts.out_scope_monitored} of ${counts.out_scope} outside it are still monitored`
+              + ' — a run will unmonitor them'
+            : `none of the ${counts.out_scope} outside it are monitored`);
         }
-        const size = sizeOf();
-        if (size) parts.push(size);
-        countLine.textContent = parts.join(' · ');
-        countLine.hidden = !parts.length;
+        monitorCountText.title = lines.join('\n');
       };
       // Three answers, and only one of them is a date: a series that has ended is not
       // "nothing scheduled", it is finished, and the difference decides what retention on
       // it even means.
+      const stamp = (iso) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
       const sayNext = (counts) => {
         const next = counts && counts.next_episode;
-        if (next) {
-          const code = `S${String(next.season).padStart(2, '0')}E${String(next.episode).padStart(2, '0')}`;
-          const shown = new Date(`${next.air_date}T00:00:00`).toLocaleDateString();
-          nextLine.textContent = `Next episode: ${code}${next.title ? `: ${next.title}` : ''}`
-                                 + ` (${shown}${next.estimated ? ', estimated' : ''})`;
+        const at = series.next_airing
+          ? stamp(series.next_airing)
+          : (next ? new Date(`${next.air_date}T00:00:00`).toLocaleDateString() : '');
+        if (at) {
+          nextLine.textContent = `Next episode: ${at}`;
+          // Which episode it is belongs to whoever asks for it: the line is about when.
+          nextLine.title = next
+            ? `S${String(next.season).padStart(2, '0')}E${String(next.episode).padStart(2, '0')}`
+              + `${next.title ? `: ${next.title}` : ''}${next.estimated ? '\nDate estimated, not from Sonarr' : ''}`
+            : '';
         } else if (series.ended) {
           nextLine.textContent = 'Series ended';
-        } else if (series.next_airing) {
-          nextLine.textContent = `Next episode: ${when(series.next_airing)}`;
+          nextLine.title = '';
         } else {
           nextLine.textContent = 'Nothing scheduled';
+          nextLine.title = '';
         }
       };
       originLine.textContent = [series.year, series.network, series.certification]
@@ -1718,7 +1750,7 @@
         enabled.input.setAttribute('aria-label', on ? 'Enabled' : 'Disabled');
       };
       sayState();
-      if (!existing) enabled.input.addEventListener('change', sayState);
+      enabled.node.hidden = !existing;
       if (existing) {
         enabled.input.addEventListener('change', () => {
           const on = enabled.input.checked;
@@ -1755,7 +1787,7 @@
                 const data = await api('preview', { rule_ids: [rule.id] },
                                        'Working out what would change…');
                 changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
-              }))
+              }), true)
             : el('div', { className: 'tvr-plan-quiet',
                           textContent: plan ? 'Nothing scheduled for the next run'
                                             : 'Not read from Sonarr yet' }));
@@ -1777,32 +1809,26 @@
       // Offered while adding too. There it has no rule to check, but the counts and the
       // episode list behind them come straight from Sonarr, so it is the same question
       // asked of the same series — and the one being added is the one most likely to have
-      // changed since the catalogue was read.
-      const refresh = el('button', { type: 'button', className: 'tvr-icon-button tvr-identity-refresh',
-                                     title: 'Re-read this series from Sonarr' },
-                         [el('i', { className: 'fa fa-refresh' })]);
-      refresh.addEventListener('click', (event) => {
-        event.stopPropagation();
-        guarded('', async () => {
-          refresh.disabled = true;
-          try {
-            if (existing) {
-              const data = await api('check-rule', { rule_id: rule.id, force: true },
-                                     'Reading from Sonarr…', true);
-              if (data.busy) throw new Error('A run is in progress. Try again when it finishes.');
-              if (data.state) monitoring[data.rule_id] = data.state;
-              applyAlerts(data.alerts);
-              renderRules();
-              sayRead();
-              sayPlan((monitoring[rule.id] || {}).plan);
-            }
-            refreshCounts();
-          } finally {
-            refresh.disabled = false;
+      // changed since the catalogue was read. The button lives in the pane's own bar; this
+      // is only what pressing it does.
+      const reread = (button) => guarded('', async () => {
+        if (button) button.disabled = true;
+        try {
+          if (existing) {
+            const data = await api('check-rule', { rule_id: rule.id, force: true },
+                                   'Reading from Sonarr…', true);
+            if (data.busy) throw new Error('A run is in progress. Try again when it finishes.');
+            if (data.state) monitoring[data.rule_id] = data.state;
+            applyAlerts(data.alerts);
+            renderRules();
+            sayRead();
+            sayPlan((monitoring[rule.id] || {}).plan);
           }
-        });
+          refreshCounts();
+        } finally {
+          if (button) button.disabled = false;
+        }
       });
-      readLine.append(refresh);
       const controls = el('div', { className: 'tvr-identity-controls' }, [enabled.node]);
       const identity = el('div', { className: 'tvr-identity' }, [
         controls,
@@ -1974,7 +2000,6 @@
                                         combine: conditions.combine.value,
                                         include_specials: specials.value,
                                         monitoring: monitorMode.value,
-                                        enabled: existing ? undefined : enabled.input.checked,
                                         once: monitorNew.input.checked });
       // What Update compares against: the rule as saved, captured before any half-typed
       // draft is put back. Taken after the restore it would call the draft the baseline,
@@ -1991,7 +2016,6 @@
           conditions.combine.value = values.combine || 'earliest';
           specials.value = values.include_specials || '';
           monitorMode.value = values.monitoring || '';
-          if (!existing && values.enabled === false) enabled.input.checked = false;
           applyPreset();
           sayState();
         } catch (error) {
@@ -1999,17 +2023,17 @@
         }
       }
       return { presetSelect, conditions, specials, monitoring: monitorMode, monitorNew,
-               before, enabled, draftKey, saved,
+               before, enabled, draftKey, saved, reread,
                tree: () => (monitorNew.input.checked ? tree : null),
                // A rule needs somewhere to keep from: a preset, or at least one value.
                valid: () => !!(presetSelect.value || conditions.days.value
                                || conditions.episodes.value || conditions.seasons.value),
                state: formState };
     },
-      save: async (context) => {
+      save: async (context, startEnabled) => {
       const draft = {
         id: rule.id || undefined,
-        enabled: context.enabled.input.checked,
+        enabled: existing ? context.enabled.input.checked : !!startEnabled,
         instance_id: series.instance_id,
         profile_id: context.presetSelect.value || '',
         keep_days: context.presetSelect.value ? null : (context.conditions.days.value || null),
@@ -2108,9 +2132,13 @@
 
     {
       // The pane's own title, not the form's: what is below it is this series, whether it
-      // is being added or edited, and the close button belongs to the pane.
+      // is being added or edited, and both buttons belong to the pane rather than to the
+      // form under it.
+      const refresh = el('button', { type: 'button', className: 'tvr-icon-button',
+                                     title: 'Re-read this series from Sonarr' },
+                         [el('i', { className: 'fa fa-refresh' })]);
       head.append(el('h3', { textContent: 'Series details' }),
-                  el('span', { className: 'tvr-spacer' }), close);
+                  el('span', { className: 'tvr-spacer' }), refresh, close);
       pane.append(head);
       // Fixed: the series, and what the next run would do to it. Only the settings below
       // scroll, so neither can be scrolled out from under the other.
@@ -2119,9 +2147,29 @@
       pane.append(top, body);
       const context = editing.build(body, top);
       editing.context = context;
+      refresh.addEventListener('click', () => context.reread(refresh));
       const actions = el('div', { className: 'tvr-actions' });
+      const commit = (startEnabled) => guarded('', async () => {
+        await editing.save(context, startEnabled);
+        drafts.delete(context.draftKey);
+        editing = null;
+        renderDetails();
+      });
+      // Adding a series and switching it on are two decisions, so they are two buttons
+      // rather than a switch that has to be found first. Nothing runs against a series
+      // saved with the plain one until someone says so.
       const primary = el('button', { type: 'button', className: 'tvr-primary',
-                                     textContent: editing.existing ? 'Update' : 'Add series' });
+                                     textContent: editing.existing ? 'Update' : 'Save and enable' });
+      primary.addEventListener('click', () => commit(true));
+      const buttons = [primary];
+      actions.append(primary);
+      if (!editing.existing) {
+        const quiet = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Save' });
+        quiet.dataset.hint = 'Added switched off. No run touches it until it is enabled.';
+        quiet.addEventListener('click', () => commit(false));
+        buttons.push(quiet);
+        actions.append(quiet);
+      }
       // Adding needs a keep window to be worth anything; updating needs something to have
       // changed as well, so the button says whether pressing it would do something.
       const check = () => {
@@ -2130,25 +2178,14 @@
         // Kept as it stands, so clicking away and back returns to what was typed.
         if (now === context.saved) drafts.delete(context.draftKey);
         else drafts.set(context.draftKey, now);
-        primary.disabled = !valid || (editing.existing && now === context.saved);
-        primary.title = !valid ? 'Set a preset, or at least one keep value'
-          : (primary.disabled ? 'Nothing has changed' : '');
+        buttons.forEach((button) => {
+          button.disabled = !valid || (editing.existing && now === context.saved);
+          button.title = !valid ? 'Set a preset, or at least one keep value'
+            : (button.disabled ? 'Nothing has changed' : (button.dataset.hint || ''));
+        });
       };
       body.addEventListener('input', check);
       body.addEventListener('change', check);
-      primary.addEventListener('click', () => guarded('', async () => {
-        await editing.save(context);
-        drafts.delete(context.draftKey);
-        editing = null;
-        renderDetails();
-      }));
-      const cancel = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Cancel' });
-      cancel.addEventListener('click', () => {
-        drafts.delete(context.draftKey);
-        editing = null;
-        renderDetails();
-      });
-      actions.append(primary, cancel);
       if (editing.existing) {
         const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small', textContent: 'Delete…' });
         remove.addEventListener('click', () => deleteSeries(editing.rule));

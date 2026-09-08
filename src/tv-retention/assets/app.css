@@ -312,6 +312,7 @@
 
 #tv-retention button.tvr-icon-button { padding: 4px 7px; border-radius: 4px; opacity: .65; line-height: 1; }
 #tv-retention button.tvr-icon-button:hover { opacity: 1; }
+#tv-retention button.tvr-icon-button:disabled { opacity: .3; cursor: progress; }
 .tvr-uptodate { font-size: 12px; opacity: .7; }
 #tv-retention button.tvr-rollup { display: block; width: 100%; text-align: left; padding: 10px 12px;
   border-radius: 6px; border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-warn);
@@ -640,11 +641,17 @@
 .tvr-identity-controls { position: absolute; top: 0; right: 0; display: grid; gap: 2px;
   justify-items: center; z-index: 1; }
 .tvr-identity-switch { flex: none; gap: 0; }
-#tv-retention button.tvr-identity-refresh { padding: 2px 6px; font-size: 12px; }
-#tv-retention button.tvr-identity-refresh:disabled { opacity: .35; cursor: progress; }
 .tvr-identity-line { font-size: 12px; opacity: .8; line-height: 1.35; }
+.tvr-monitor-count { cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+.tvr-monitor-count.all { color: var(--tvr-good); }
+.tvr-monitor-count.some { color: var(--tvr-warn); }
+.tvr-monitor-count.none { color: var(--tvr-bad); }
 .tvr-identity-next { opacity: .95; }
-.tvr-identity-plan { margin-top: 2px; }
+.tvr-identity-plan .tvr-plan-list.compact { gap: 0; }
+.tvr-identity-plan .tvr-plan,
+#tv-retention .tvr-identity-plan button.tvr-plan,
+#tv-retention .tvr-identity-plan button.tvr-plan-total,
+.tvr-identity-plan .tvr-plan-quiet { font-size: 12px; line-height: 1.35; }
 .tvr-identity-read { grid-column: 1 / -1; display: flex; align-items: center;
   justify-content: flex-end; gap: 4px; font-size: 11px; opacity: .55; }
 .tvr-identity-read:hover { opacity: .85; }
