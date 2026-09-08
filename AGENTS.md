@@ -65,6 +65,12 @@ Sonarr and decides things, plus the tick and the CLI.
 - Test against isolated fixtures. Live checks against Sonarr must be read-only, run from
   a `/tmp` staging directory with `TVR_CONFIG` pointed away from `/boot`.
 
+## Planned work
+
+[docs/PLAN.md](docs/PLAN.md) holds what is agreed and not yet built, and the reasoning
+behind the decisions that shaped it. Delete from it as things land, so it always describes
+what is left.
+
 ## Deployment
 
 `install/tv-retention.plg` is the self-contained installer. Work through
