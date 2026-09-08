@@ -384,6 +384,21 @@ class Interface(unittest.TestCase):
         self.assertIn('.tvr-field > input, .tvr-field > select, .tvr-field > textarea '
                       '{ width: 100%; }', self.css)
 
+    def test_a_sidebar_group_is_a_band_not_a_label(self):
+        """Reaching the panel edge is what makes it a section rather than small type.
+
+        And it is a div: nothing collapses, so the rule styling it as a button had been
+        styling nothing at all.
+        """
+        self.assertIn('<div class="tvr-side-head">', self.html)
+        self.assertNotIn('button.tvr-side-head', self.css)
+        block = self.css.split('.tvr-side-head {')[1].split('}')[0]
+        self.assertIn('background: var(--tvr-soft)', block)
+        # Out past the panel's own padding, which is what "full width" means here.
+        panel = self.css.split('.tvr-side { display: block;')[1].split('}')[0]
+        self.assertIn('padding: 4px 4px 8px', panel)
+        self.assertIn('margin: 0 -4px 2px', block)
+
     def test_the_layout_switch_is_two_square_icons(self):
         # A box around them made one control out of two buttons, and the padding inside it
         # was carrying an icon that needs none.

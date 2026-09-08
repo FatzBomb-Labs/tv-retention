@@ -445,12 +445,12 @@
 /* Chrome and page are two surfaces, not one. The tint is translucent rather than a
    colour, so it reads as one shade off the page under every Unraid theme — a fixed grey
    would be right on black and wrong on white. */
-.tvr-topbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+.tvr-topbar { display: flex; align-items: center; gap: 12px; padding: 4px 10px;
   border: 1px solid var(--tvr-line); border-radius: 6px 6px 0 0; border-bottom: none;
   background: var(--tvr-panel); }
 .tvr-brand { display: flex; align-items: baseline; gap: 8px; }
 .tvr-brand .fa { font-size: 15px; opacity: .75; align-self: center; }
-.tvr-brand-name { font-size: 16px; font-weight: 600; }
+.tvr-brand-name { font-size: 15px; font-weight: 600; }
 .tvr-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 
 /* The count is the control: it says how much is scheduled and opens what it counts.
@@ -490,11 +490,6 @@
 .tvr-side::-webkit-scrollbar { width: 6px; }
 .tvr-side::-webkit-scrollbar-thumb { background: var(--tvr-line); border-radius: 3px; }
 .tvr-side-group { display: grid; gap: 0; margin-bottom: 5px; }
-#tv-retention button.tvr-side-head { display: flex; align-items: center; gap: 6px; width: 100%;
-  text-align: left; border: none; background: none; border-radius: 0; padding: 3px 8px 1px;
-  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; opacity: .55;
-  font-weight: 700; }
-#tv-retention button.tvr-side-head:hover { opacity: .8; background: none; }
 #tv-retention button.tvr-side-item { display: flex; align-items: center; gap: 8px; width: 100%;
   text-align: left; border: none; background: none; border-radius: 3px; padding: 0 8px;
   font-size: 12px; line-height: 1.35; opacity: .8; border-left: 2px solid transparent; }
@@ -573,8 +568,8 @@
   text-transform: uppercase; opacity: .75; }
 #tv-retention .tvr-details-head button.tvr-icon-button { padding: 3px 6px; font-size: 12px; }
 .tvr-details-head h3 { font-size: 11px; font-weight: 600; letter-spacing: inherit;
-  text-transform: inherit; line-height: 1.1; }
-.tvr-details-head-main { display: grid; gap: 0; min-width: 0; }
+  text-transform: inherit; line-height: 1.25; }
+.tvr-details-head-main { display: grid; gap: 1px; min-width: 0; }
 /* Small and quiet, and neither uppercase nor tracked: it is a timestamp under a label,
    not a second label. */
 .tvr-details-head .tvr-identity-read { font-size: 9.5px; line-height: 1.15; opacity: .55;
@@ -626,8 +621,11 @@
 #tv-retention button.tvr-alert-total.warning { color: var(--tvr-warn); }
 #tv-retention button.tvr-alert-total.notice { color: var(--tvr-notice); }
 
-.tvr-side-head { display: flex; align-items: center; gap: 6px; padding: 3px 8px 1px; font-size: 9.5px;
-  letter-spacing: .1em; text-transform: uppercase; opacity: .55; font-weight: 700; }
+.tvr-side-head { display: flex; align-items: center; gap: 6px; font-size: 9.5px;
+  letter-spacing: .1em; text-transform: uppercase; opacity: .6; font-weight: 700;
+  /* Out past the panel's own padding: a heading that stops short of the edge is a label,
+     and one that reaches it is a section. */
+  margin: 0 -4px 2px; padding: 2px 12px; background: var(--tvr-soft); }
 
 /* Stats: a bar is easier to compare than four numbers in a column. */
 .tvr-bar-row { display: grid; grid-template-columns: 70px 1fr 90px; gap: 10px; align-items: center;
