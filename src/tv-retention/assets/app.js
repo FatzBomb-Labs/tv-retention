@@ -843,33 +843,6 @@
 
   // Enabling a series is the most frequent change anyone makes, so it lives on the card.
   // It saves immediately and reverts visibly if the save is refused.
-  function enableToggle(rule) {
-    const control = toggle(rule.enabled ? 'Enabled' : 'Disabled', rule.enabled, null, {
-      className: `tvr-card-switch${rule.enabled ? ' on' : ''}`,
-      disabled: isChecking(rule.id),
-      label: `${rule.series_title || rule.path} enabled`,
-      title: 'Disabled series are skipped by runs and by the checks',
-    });
-    control.input.addEventListener('change', () => {
-      const wanted = control.input.checked;
-      control.input.disabled = true;
-      control.caption.textContent = 'Saving…';
-      guarded('', async () => {
-        const target = (settings.rules || []).find((other) => other.id === rule.id);
-        if (!target) throw new Error('That series is no longer in the list.');
-        target.enabled = wanted;
-        try {
-          await saveSettings(null, true);
-        } catch (error) {
-          target.enabled = !wanted;
-          renderRules();
-          throw error;
-        }
-      });
-    });
-    return control.node;
-  }
-
   // A small round badge, left of the title, the way a count belongs. It carries the worst
   // severity present and nothing else: the detail is one click away and does not need to
   // compete with the series name for space.
@@ -1056,43 +1029,124 @@
   // One card for a series, whether or not it has a rule. The check is the difference, and
   // it is the only difference the eye needs: everything else follows from it.
   function libraryCard(row) {
+    return layout === 'grid' ? gridCard(row) : listCard(row);
+  }
+
+  // The frame carries the state: green where a rule runs, dim where one is turned off,
+  // plain where there is no rule yet. A tick saying "this has a rule" said the same thing
+  // twice, and the retention pill says it a third time on hover.
+  function cardShell(row) {
     const { series, rule } = row;
     const blocked = rule ? isBlocked(rule.id) : false;
     const card = el('div', { className: `tvr-rule ${rule ? (blocked ? 'blocked' : 'ok') : 'loose'}`
                                         + (rule && !rule.enabled ? ' disabled' : '')
                                         + (isOpen(rule) ? ' selected' : '') });
-    // Clicking opens it; clicking the one already open closes it. Opening a series *is*
-    // opening its settings, whether it has a rule yet or not.
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
       if (isOpen(rule)) { editing = null; renderLibrary(); renderDetails(); return; }
       openEditor(rule, rule ? undefined : series);
-      renderLibrary();          // the card has to show that it is the one being edited
+      renderLibrary();
     });
+    return card;
+  }
 
+  const seriesFacts = (series) => [series.year, series.network,
+    series.season_count ? plural(series.season_count, 'season') : '',
+    series.total_episode_count ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
+    series.size_on_disk ? bytes(series.size_on_disk) : '',
+    series.ended ? 'ended' : (series.next_airing ? `next ${when(series.next_airing)}` : '')].filter(Boolean);
+
+  // What the next run would do, as a badge and a number. The detail is a tooltip because
+  // on a poster there is room for the count and nothing else.
+  const CHANGE_MARKS = [
+    ['delete', 'fa-trash', (n, plan) => `${plural(n, 'episode')} scheduled for deletion (${bytes(plan.delete_bytes)})`],
+    ['monitor', 'fa-bookmark', (n) => `${plural(n, 'episode')} will be set to monitored`],
+    ['unmonitor', 'fa-bookmark-o', (n) => `${plural(n, 'episode')} will be set to unmonitored`],
+  ];
+
+  function changeMarks(rule, plan) {
+    const box = el('div', { className: 'tvr-card-changes' });
+    CHANGE_MARKS.forEach(([kind, icon, describe]) => {
+      const count = plan[kind] || 0;
+      if (!count) return;
+      const mark = el('button', { type: 'button', className: `tvr-card-mark ${kind}`,
+                                  title: describe(count, plan) }, [
+        el('i', { className: `fa ${icon}` }), el('span', { textContent: String(count) }),
+      ]);
+      mark.addEventListener('click', (event) => {
+        event.stopPropagation();
+        guarded('', async () => {
+          const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
+          changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
+        });
+      });
+      box.append(mark);
+    });
+    return box;
+  }
+
+  // Severities stacked, worst first, each with its own count. One glance says both what
+  // kind of trouble and how much.
+  function alertMarks(rule) {
+    const box = el('div', { className: 'tvr-card-alerts' });
+    const found = seriesAlerts(rule.id);
+    ['error', 'warning', 'notice'].forEach((severity) => {
+      const here = found.filter((alert) => alert.severity === severity && !alert.acknowledged);
+      if (!here.length) return;
+      const mark = el('button', { type: 'button', className: `tvr-card-alert ${severity}`,
+                                  title: here.map((alert) => `${alert.title}: ${alert.detail}`).join('\n') },
+                      [el('span', { textContent: String(here.length) })]);
+      mark.addEventListener('click', (event) => { event.stopPropagation(); showSeriesAlerts(rule); });
+      box.append(mark);
+    });
+    return box;
+  }
+
+  function retentionPill(rule) {
+    if (!rule) return el('span', { className: 'tvr-card-pill loose', textContent: 'No rule — click to add' });
+    const preset = presetFor(rule);
+    const detail = preset ? presetSummary(preset).join(', ') : ruleSummary(rule).join(' · ');
+    return el('span', { className: `tvr-card-pill${preset ? ' preset' : ''}`,
+                        title: detail || 'no keep window set',
+                        textContent: preset ? preset.name : 'Custom' });
+  }
+
+  // Poster first, name under it, everything else laid over the artwork: alerts top right,
+  // what the next run would do down the left, and the retention on hover along the bottom.
+  function gridCard(row) {
+    const { series, rule } = row;
+    const card = cardShell(row);
+    const art = posterNode(series, 'tvr-poster tvr-poster-row');
+    if (rule) {
+      const state = monitoring[rule.id] || {};
+      const plan = state.plan;
+      if (plan && (plan.delete || plan.monitor || plan.unmonitor)) art.append(changeMarks(rule, plan));
+      art.append(alertMarks(rule));
+    }
+    art.append(retentionPill(rule));
+    card.append(art);
+    card.append(el('div', { className: 'tvr-rule-main' }, [
+      el('div', { className: 'tvr-grid-title', textContent: series.title, title: series.title }),
+      el('div', { className: 'tvr-grid-sub', textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
+    ]));
+    return card;
+  }
+
+  function listCard(row) {
+    const { series, rule } = row;
+    const blocked = rule ? isBlocked(rule.id) : false;
+    const card = cardShell(row);
     card.append(posterNode(series, 'tvr-poster tvr-poster-row'));
     const main = el('div', { className: 'tvr-rule-main' });
 
     const head = el('div', { className: 'tvr-rule-head' });
-    if (rule) {
-      head.append(alertBadge(rule));
-    }
+    if (rule) head.append(alertBadge(rule));
     head.append(el('span', { className: `tvr-connected ${rule ? 'yes' : 'no'}`,
                              title: rule ? 'Has a retention rule' : 'No rule yet' },
                    [el('i', { className: `fa fa-${rule ? 'check-circle' : 'circle-o'}` })]));
     head.append(el('span', { className: 'tvr-rule-title', textContent: series.title }));
-    const link = rule ? sonarrLink(rule) : null;
-    if (link) head.append(link);
-    if (rule) head.append(enableToggle(rule));
     main.append(head);
-
-    const facts = [series.year, series.network,
-                   series.season_count ? plural(series.season_count, 'season') : '',
-                   series.total_episode_count ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
-                   series.size_on_disk ? bytes(series.size_on_disk) : '',
-                   series.ended ? 'ended' : (series.next_airing ? `next ${when(series.next_airing)}` : '')]
-      .filter(Boolean);
-    main.append(el('div', { className: 'tvr-card-series-facts', textContent: facts.join(' · ') }));
+    main.append(el('div', { className: 'tvr-card-series-facts', textContent: seriesFacts(series).join(' · ') }));
 
     if (rule) {
       const retention = el('span', { className: 'tvr-retention' });
@@ -1611,7 +1665,14 @@
       const identity = el('div', { className: 'tvr-identity' }, [
         posterNode(series, 'tvr-poster tvr-poster-panel'),
         el('div', { className: 'tvr-identity-body' }, [
-          el('div', { className: 'tvr-identity-title', textContent: series.title || rule.series_title }),
+          el('div', { className: 'tvr-identity-title' }, [
+            el('span', { textContent: series.title || rule.series_title }),
+            // The one place it belongs: beside the name, where you are already looking at
+            // this series. On every card in a list it was three thousand links to nowhere
+            // anyone was going.
+            sonarrLink(Object.assign({}, rule, { slug: series.slug || rule.slug,
+                                                 instance_id: series.instance_id })) || text(''),
+          ]),
           el('div', { className: 'tvr-details-facts', textContent: facts.join(' · ') }),
           el('div', { className: 'tvr-details-facts tvr-mono', textContent: series.path || rule.path || '' }),
           enabled.node,

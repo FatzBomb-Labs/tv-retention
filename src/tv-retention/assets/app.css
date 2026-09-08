@@ -686,3 +686,47 @@
 .tvr-tree-note { font-size: 10px; opacity: .5; }
 .tvr-tree-season-wrap { border-top: 1px solid var(--tvr-line); }
 .tvr-tree-season-wrap:first-of-type { border-top: none; }
+
+/* ---------------------------------------------------------------------------
+   Poster view: the artwork is the card, and everything else is laid over it or
+   sits under it. Alerts top right, what the next run would do down the left, the
+   retention along the bottom on hover — so at rest it is a wall of posters, and
+   what it knows appears where you point.
+   --------------------------------------------------------------------------- */
+.tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; gap: 0; padding: 0; overflow: hidden; }
+.tvr-rules-grid .tvr-poster-row { border-radius: 5px 5px 0 0; }
+.tvr-rules-grid .tvr-rule-main { padding: 5px 7px 6px; gap: 1px; }
+.tvr-grid-title { font-size: 12px; font-weight: 600; line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tvr-grid-sub { font-size: 10.5px; opacity: .55; }
+
+.tvr-card-alerts { position: absolute; top: 4px; right: 4px; display: grid; gap: 3px; z-index: 2; }
+#tv-retention button.tvr-card-alert { display: grid; place-items: center; width: 19px; height: 19px;
+  min-width: 19px; padding: 0; border: none; border-radius: 50%; font-size: 10px; font-weight: 700;
+  color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+#tv-retention button.tvr-card-alert.error { background: var(--tvr-bad); }
+#tv-retention button.tvr-card-alert.warning { background: var(--tvr-warn); color: #1a1a1a; }
+#tv-retention button.tvr-card-alert.notice { background: var(--tvr-notice); color: #1a1a1a; }
+
+.tvr-card-changes { position: absolute; top: 4px; left: 4px; display: grid; gap: 3px; z-index: 2; }
+#tv-retention button.tvr-card-mark { display: flex; align-items: center; gap: 3px; padding: 1px 5px;
+  border: none; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1.4;
+  background: rgba(0,0,0,.66); box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+#tv-retention button.tvr-card-mark .fa { font-size: 9px; }
+#tv-retention button.tvr-card-mark.delete { color: #ff8f83; }
+#tv-retention button.tvr-card-mark.monitor { color: #7fdca6; }
+#tv-retention button.tvr-card-mark.unmonitor { color: #f0b46a; }
+
+/* Along the bottom, on hover: at rest the poster is the picture, and the retention is
+   what you ask for by pointing at it. */
+.tvr-card-pill { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  padding: 3px 6px; font-size: 10.5px; font-weight: 600; text-align: center;
+  background: rgba(0,0,0,.72); color: #fff; opacity: 0; transition: opacity .12s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tvr-card-pill.preset { color: #9ec9ef; }
+.tvr-card-pill.loose { color: #cfcfcf; font-weight: normal; }
+.tvr-rules-grid .tvr-rule:hover .tvr-card-pill { opacity: 1; }
+
+/* A rule that is switched off, said by the frame rather than a control on the card. */
+#tv-retention .tvr-rule.disabled { opacity: 1; border-style: dashed; border-color: var(--tvr-line); }
+.tvr-rules-grid .tvr-rule.disabled .tvr-poster-row img { opacity: .45; }

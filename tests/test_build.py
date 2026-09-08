@@ -150,7 +150,7 @@ class Interface(unittest.TestCase):
         # A badge only when something needs attention, and the fixes live behind it.
         self.assertIn("function alertBadge", self.js)
         self.assertIn("function showSeriesAlerts", self.js)
-        self.assertRegex(self.js, r"head\.append\(enableToggle\(rule\)\)")
+        self.assertIn('function alertMarks', self.js)
 
     def test_the_script_is_not_prefixed_by_a_stray_fragment(self):
         # A build-time edit once prepended a fragment above the opening comment, which
@@ -284,14 +284,16 @@ class Interface(unittest.TestCase):
         self.assertFalse(manifest_icon.endswith('.png'), 'no image is shipped with this plugin')
         self.assertRegex(manifest_icon, r'^[a-z0-9-]+$')
 
-    def test_a_series_can_be_enabled_from_its_card(self):
-        # The most frequent change to a rule should not require opening the editor.
-        self.assertIn("function enableToggle", self.js)
-        self.assertIn("tvr-switch", (ROOT / "src" / "tv-retention" / "assets" / "app.css").read_text())
+    def test_switching_a_series_off_is_done_where_its_settings_are(self):
+        """Not on the card. It is a setting, and settings live in the panel.
 
-    def test_a_refused_toggle_is_reverted(self):
-        # Leaving the switch showing a state the backend rejected would be a lie.
-        self.assertRegex(self.js, r'target\.enabled = !wanted')
+        On the card it was a control sitting on a list built for browsing, one slip away
+        from turning off a rule while looking for another one. The frame says which series
+        are off instead.
+        """
+        self.assertNotIn('function enableToggle', self.js)
+        self.assertIn('tvr-rule.disabled', self.css)
+        self.assertIn("toggle(rule.enabled ? 'Enabled' : 'Disabled'", self.js)
 
     def test_badge_styling_outranks_the_generic_button_rule(self):
         """`#tv-retention button` outranks a bare class, which is not obvious and bit once.
@@ -776,3 +778,24 @@ class Interface(unittest.TestCase):
         for identifier in ('tvr-layout-list', 'tvr-layout-grid'):
             self.assertIn(f'id="{identifier}"', self.html)
         self.assertIn('tvr-rules-grid', self.css)
+
+    def test_a_poster_card_carries_what_it_knows_on_the_artwork(self):
+        """At rest a wall of posters; what it knows appears where you point.
+
+        Alerts top right stacked by severity, what the next run would do down the left as
+        a badge and a number, and the retention along the bottom on hover.
+        """
+        block = self.js.split('function gridCard')[1].split('function listCard')[0]
+        self.assertIn('alertMarks(rule)', block)
+        self.assertIn('changeMarks(rule, plan)', block)
+        self.assertIn('retentionPill(rule)', block)
+        self.assertRegex(self.css, r'\.tvr-card-alerts \{ position: absolute; top: 4px; right: 4px')
+        self.assertRegex(self.css, r'\.tvr-card-changes \{ position: absolute; top: 4px; left: 4px')
+        self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-rule:hover \.tvr-card-pill \{ opacity: 1')
+
+    def test_the_sonarr_link_is_only_where_one_series_is_in_front_of_you(self):
+        # On every card it was three thousand links to nowhere anyone was going.
+        for block in ('function gridCard', 'function listCard'):
+            body = self.js.split(block)[1].split('\n  }')[0]
+            self.assertNotIn('sonarrLink', body)
+        self.assertIn('sonarrLink(Object.assign({}, rule,', self.js)
