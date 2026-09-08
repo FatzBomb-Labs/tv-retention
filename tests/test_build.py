@@ -305,9 +305,11 @@ class Interface(unittest.TestCase):
         block = self.js.split("const enabled = toggle('', rule.enabled")[1].split('const identity')[0]
         self.assertIn("await saveSettings(null, true)", block)
         self.assertIn('target.enabled = rule.enabled = !on', block)   # nothing written, nothing shown
-        self.assertIn('enabled.node.hidden = !existing', block)       # nothing to switch while adding
-        state = self.js.split('state: () => JSON.stringify(')[1].split('}) };')[0]
-        self.assertNotIn('enabled', state)
+        self.assertNotIn('enabled.node.hidden', block)                # offered while adding too
+        # A rule that exists is switched on the spot; one being added is switched on save,
+        # so only the second is an unsaved value the dirty check should count.
+        state = self.js.split('const formState = () => JSON.stringify(')[1].split('});')[0]
+        self.assertIn('enabled: existing ? undefined : enabled.input.checked', state)
 
     def test_the_switch_says_which_way_it_is_without_a_word_beside_it(self):
         # A caption reading "Enabled" beside every series is a word that never changes.
@@ -664,7 +666,7 @@ class Interface(unittest.TestCase):
         self.assertNotIn("placeholder: 'Type a few letters", self.js)
 
     def test_the_action_says_whether_pressing_it_would_do_anything(self):
-        self.assertIn('primary.disabled = !valid || (editing.existing && context.state() === settled)', self.js)
+        self.assertIn('primary.disabled = !valid || (editing.existing && now === context.saved)', self.js)
         self.assertIn("primary.title = !valid ? 'Set a preset, or at least one keep value'", self.js)
 
     def test_inheriting_names_what_it_inherits(self):
@@ -856,10 +858,46 @@ class Interface(unittest.TestCase):
         self.assertIn('justify-items: start', block)
 
     def test_the_banner_sits_under_the_series_it_names(self):
-        # And still sticks, so the close button survives the poster scrolling away.
-        block = self.js.split('const context = editing.build(body);')[1].split('const actions')[0]
-        self.assertIn("body.querySelector('.tvr-identity')", block)
-        self.assertIn('identity.after(head)', block)
+        """Two headings, and each says its own thing.
+
+        The pane's is thin, fixed and names what the pane holds; the form's sits under the
+        series it is about. One heading doing both changed under the reader whenever the
+        same pane went from adding to editing.
+        """
+        self.assertIn("el('h3', { textContent: 'Series details' })", self.js)
+        self.assertIn("className: 'tvr-form-banner',\n                              textContent: "
+                      "existing ? 'Edit series' : 'Add series'", self.js)
+        body = self.js.split('body.append(identity);')[1].split('body.append(\n')[0]
+        self.assertIn('tvr-form-banner', body)
+
+    def test_an_unsaved_edit_survives_a_look_at_another_series(self):
+        """Clicking a second poster to check something is browsing, not abandoning.
+
+        Nothing was saved, so nothing should be lost — but the draft belongs to the
+        library, and leaving it drops them rather than holding a second, invisible copy of
+        the settings.
+        """
+        self.assertIn('const drafts = new Map();', self.js)
+        self.assertIn('drafts.set(context.draftKey, now)', self.js)
+        self.assertIn('drafts.delete(context.draftKey)', self.js)
+        self.assertIn('forgetDrafts(); editing = null; renderDetails();', self.js)
+
+    def test_the_dirty_check_compares_against_what_was_saved(self):
+        """Not against what the pane opened showing.
+
+        With a draft put back, the two are different things: taking the baseline after the
+        restore calls the draft the saved state, and Update sits disabled over changes
+        nobody has written.
+        """
+        block = self.js.split('const saved = formState();')[1].split('return { presetSelect')[0]
+        self.assertIn('drafts.get(draftKey)', block)
+        self.assertIn('primary.disabled = !valid || (editing.existing && now === context.saved)', self.js)
+
+    def test_a_different_series_starts_at_its_own_top(self):
+        # The pane is the scroller, and replacing its contents leaves the position the
+        # last series had put it in.
+        block = self.js.split('function openEditor')[1].split('\n  }')[0]
+        self.assertIn("$('tvr-details').scrollTop = 0", block)
 
     def test_nothing_still_reaches_for_the_tab_bar_that_was_removed(self):
         # querySelector returns null and .click() on null throws, so each of these was a

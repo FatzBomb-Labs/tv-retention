@@ -2,7 +2,7 @@ import datetime as dt
 import unittest
 
 import context  # noqa: F401
-from core import DEFAULTS, classify_monitoring, evaluate
+from core import DEFAULTS, classify_monitoring, evaluate, next_episode
 
 NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 S = {'retention': dict(DEFAULTS['retention']),
@@ -51,3 +51,33 @@ class UnairedSeasons(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NextEpisode(unittest.TestCase):
+    """What the panel names as coming up, from episodes it already holds."""
+
+    def test_the_next_one_due_is_the_earliest_that_has_not_aired(self):
+        episodes = [ep(1, 1, 900), future(4, 2, 37), future(4, 1, 30)]
+        found = next_episode(episodes, now=NOW)
+        self.assertEqual((found['season'], found['episode']), (4, 1))
+        self.assertEqual(found['air_date'], (NOW.date() + dt.timedelta(days=30)).isoformat())
+        self.assertFalse(found['estimated'])
+
+    def test_one_that_aired_this_morning_and_is_on_disk_is_not_next(self):
+        # "Next" means the one still to come, not the most recent thing to arrive.
+        episodes = [ep(1, 1, 0), future(1, 2, 7)]
+        self.assertEqual(next_episode(episodes, now=NOW)['episode'], 2)
+
+    def test_an_episode_due_today_is_still_next(self):
+        episodes = [ep(1, 1, 30), ep(1, 2, 0, has_file=False)]
+        self.assertEqual(next_episode(episodes, now=NOW)['episode'], 2)
+
+    def test_a_finished_series_has_nothing_next(self):
+        self.assertIsNone(next_episode([ep(1, 1, 900), ep(1, 2, 890)], now=NOW))
+
+    def test_a_guessed_date_says_so(self):
+        # An interpolated or TMDB date is not one Sonarr gave us, and the panel must not
+        # print it with the same confidence.
+        episode = future(2, 1, 14)
+        episode['air_source'] = 'estimated'
+        self.assertTrue(next_episode([episode], now=NOW)['estimated'])

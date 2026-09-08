@@ -19,8 +19,8 @@ import alerts
 import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
-                  describe_selectability, effective_rule, new_id, normalise, redact,
-                  validate_settings)
+                  describe_selectability, effective_rule, new_id, next_episode, normalise,
+                  redact, validate_settings)
 from sonarr import Sonarr, SonarrError
 from store import (CRON, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
@@ -333,6 +333,12 @@ def action_scope_counts(settings, request):
         'would_monitor': len(newly),
         'out_scope': len(outside),
         'out_scope_monitored': len(monitored_outside),
+        # What the panel's header says about the series itself. Free here, and a call of
+        # its own anywhere else.
+        'episodes': len(episodes),
+        'episodes_monitored': sum(1 for episode in episodes if episode.get('monitored')),
+        'episodes_on_disk': sum(1 for episode in episodes if episode.get('has_file')),
+        'next_episode': next_episode(episodes),
     }
 
 

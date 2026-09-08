@@ -656,6 +656,35 @@ def effective_date(episode, allow_import_fallback):
     return None, 'unknown'
 
 
+def next_episode(episodes, now=None):
+    """The next episode due, named rather than dated.
+
+    Sonarr's own `nextAiring` is a timestamp and nothing else, so a panel wanting to say
+    "S03E04: Title" would have to ask again for what the reading already holds. Episodes
+    with a file are skipped: one that aired this morning and is already on disk is not
+    what "next" means to anyone.
+    """
+    today = (now or dt.datetime.now(dt.timezone.utc)).date()
+    best = None
+    for episode in episodes:
+        if episode.get('has_file'):
+            continue
+        date, source = effective_date(episode, allow_import_fallback=False)
+        if not date or date < today:
+            continue
+        key = (date, episode.get('season') or 0, episode.get('episode') or 0)
+        if best is None or key < best[0]:
+            best = (key, episode, source)
+    if best is None:
+        return None
+    (date, _, _), episode, source = best
+    return {'season': episode.get('season'), 'episode': episode.get('episode'),
+            'title': episode.get('title') or '', 'air_date': date.isoformat(),
+            # An interpolated or TMDB date is a guess, and the panel says so rather than
+            # printing it with the same confidence as one Sonarr gave us.
+            'estimated': source not in ('sonarr', '')}
+
+
 def _order_key(episode, allow_import_fallback):
     date, _ = effective_date(episode, allow_import_fallback)
     return (date or dt.date.min, episode.get('season') or 0, episode.get('episode') or 0)

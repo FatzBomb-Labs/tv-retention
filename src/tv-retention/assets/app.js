@@ -423,6 +423,10 @@
 
   function showView(name) {
     if (!VIEWS.includes(name)) name = 'series-all';
+    // Unsaved edits belong to the library. Leaving it closes the pane, and a draft kept
+    // past that would be a second copy of the settings, invisible until it reappeared
+    // over whatever the rule had become in the meantime.
+    if (!LIBRARY[name] && LIBRARY[currentView]) { forgetDrafts(); editing = null; renderDetails(); }
     currentView = name;
     const panel = LIBRARY[name] ? 'series-all' : name;
     [...new Set(VIEWS)].forEach((view) => {
@@ -494,7 +498,8 @@
     }
     rows.forEach((row) => {
       const line = onOpen
-        ? el('button', { type: 'button', className: `tvr-plan ${row.tone}`, textContent: row.text })
+        ? el('button', { type: 'button', className: `tvr-plan ${row.tone}`, textContent: row.text,
+                         title: `${row.text} — click to list them` })
         : el('div', { className: `tvr-plan ${row.tone}`, textContent: row.text });
       if (onOpen) line.addEventListener('click', () => onOpen(row.kind));
       list.append(line);
@@ -1637,22 +1642,67 @@
                             path: series.path });
     }
 
+    const draftKey = existing ? `rule:${rule.id}`
+                              : `add:${series.instance_id}:${series.series_id}`;
     return {
       title: existing ? 'Edit series' : 'Add series',
       rule,
       series,
       existing: !!existing,
+      draftKey,
       build: (body) => {
       // The navigator already said which series this is, so there is no picker and no
       // instance to choose: the series carries its own. A rule *is* its binding to one
       // series, so pointing it at another is delete and add, not an edit.
-      const facts = [series.year, series.network, series.certification,
-                     series.season_count ? plural(series.season_count, 'season') : '',
-                     series.total_episode_count
-                       ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
-                     series.size_on_disk ? bytes(series.size_on_disk) : '',
-                     series.ended ? 'ended' : (series.next_airing ? `next ${when(series.next_airing)}` : '')]
-        .filter(Boolean);
+      // One fact per line rather than a single run of dots: they answer different
+      // questions, and a reader looking for the episode count should not have to find it
+      // among the network and the certificate.
+      const originLine = el('div', { className: 'tvr-identity-line' });
+      const countLine = el('div', { className: 'tvr-identity-line' });
+      const nextLine = el('div', { className: 'tvr-identity-line tvr-identity-next' });
+      const sizeOf = () => (series.size_on_disk ? bytes(series.size_on_disk) : '');
+      // Sonarr's own counts until the episodes answer for themselves — one names how many
+      // are monitored, and that is the number the monitoring settings below act on.
+      const sayCounts = (counts) => {
+        const parts = [];
+        if (series.season_count) parts.push(plural(series.season_count, 'season'));
+        const total = (counts && counts.episodes) || series.total_episode_count || 0;
+        if (total) {
+          const held = (counts && counts.episodes_on_disk != null)
+            ? counts.episodes_on_disk : series.episode_file_count;
+          const inner = `${held} on disk`
+            + (existing && counts && counts.episodes_monitored != null
+               ? `, ${counts.episodes_monitored} monitored` : '');
+          parts.push(`${plural(total, 'episode')} (${inner})`);
+        }
+        const size = sizeOf();
+        if (size) parts.push(size);
+        countLine.textContent = parts.join(' · ');
+        countLine.hidden = !parts.length;
+      };
+      // Three answers, and only one of them is a date: a series that has ended is not
+      // "nothing scheduled", it is finished, and the difference decides what retention on
+      // it even means.
+      const sayNext = (counts) => {
+        const next = counts && counts.next_episode;
+        if (next) {
+          const code = `S${String(next.season).padStart(2, '0')}E${String(next.episode).padStart(2, '0')}`;
+          const shown = new Date(`${next.air_date}T00:00:00`).toLocaleDateString();
+          nextLine.textContent = `Next episode: ${code}${next.title ? `: ${next.title}` : ''}`
+                                 + ` (${shown}${next.estimated ? ', estimated' : ''})`;
+        } else if (series.ended) {
+          nextLine.textContent = 'Series ended';
+        } else if (series.next_airing) {
+          nextLine.textContent = `Next episode: ${when(series.next_airing)}`;
+        } else {
+          nextLine.textContent = 'Nothing scheduled';
+        }
+      };
+      originLine.textContent = [series.year, series.network, series.certification]
+        .filter(Boolean).join(' · ');
+      originLine.hidden = !originLine.textContent;
+      sayCounts(null);
+      sayNext(null);
       // Not a field on a form: switching a series off is a thing you do, not a change you
       // save, so it takes effect where it is clicked and the list redraws behind it. No
       // caption either — the tooltip says which way it is, and one word beside the name
@@ -1660,15 +1710,15 @@
       const enabled = toggle('', rule.enabled, null, { className: 'tvr-identity-switch' });
       const sayState = () => {
         const on = enabled.input.checked;
-        enabled.node.title = on
-          ? 'Enabled — every run includes this series. Click to disable it.'
-          : 'Disabled — every run skips this series. Click to enable it.';
+        enabled.node.title = existing
+          ? (on ? 'Enabled — every run includes this series. Click to disable it.'
+                : 'Disabled — every run skips this series. Click to enable it.')
+          : (on ? 'Will be added enabled — every run will include this series.'
+                : 'Will be added disabled — no run will touch this series until it is enabled.');
         enabled.input.setAttribute('aria-label', on ? 'Enabled' : 'Disabled');
       };
       sayState();
-      // Only a saved rule has something to switch. While adding one there is nothing yet
-      // to disable, and a switch that did nothing would still look like it had.
-      enabled.node.hidden = !existing;
+      if (!existing) enabled.input.addEventListener('change', sayState);
       if (existing) {
         enabled.input.addEventListener('change', () => {
           const on = enabled.input.checked;
@@ -1693,6 +1743,32 @@
           });
         });
       }
+      // What the next run would do, with the facts rather than in a box of its own below
+      // them: it is a fact about this series, and it was the thing being scrolled past.
+      const planLines = el('div', { className: 'tvr-identity-plan', hidden: true });
+      const readLine = el('div', { className: 'tvr-identity-read', hidden: true });
+      if (existing) {
+        const state = monitoring[rule.id] || {};
+        const plan = state.plan;
+        planLines.hidden = false;
+        if (plan && (plan.delete || plan.monitor || plan.unmonitor || plan.remove)) {
+          planLines.append(changeLines(plan, (kind) => guarded('', async () => {
+            const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
+            changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
+          })));
+        } else {
+          planLines.append(el('div', { className: 'tvr-plan-quiet',
+                                       textContent: plan ? 'Nothing scheduled for the next run'
+                                                         : 'Not read from Sonarr yet' }));
+        }
+        const reread = el('button', { type: 'button', className: 'tvr-linky',
+                                      textContent: 'Re-read from Sonarr' });
+        reread.addEventListener('click', () => queueChecks([rule.id], true));
+        readLine.hidden = false;
+        readLine.append(el('span', { textContent: state.read_at || state.checked_at
+                                       ? `Sonarr read ${ago(state.read_at || state.checked_at)}` : '' }),
+                        reread);
+      }
       const identity = el('div', { className: 'tvr-identity' }, [
         posterNode(series, 'tvr-poster tvr-poster-panel'),
         el('div', { className: 'tvr-identity-body' }, [
@@ -1708,7 +1784,7 @@
           ]),
           // The path is Sonarr's business. Nothing here is decided by it, nothing here
           // reads it, and it was the one line long enough to wrap the panel.
-          el('div', { className: 'tvr-details-facts', textContent: facts.join(' · ') }),
+          originLine, countLine, nextLine, planLines, readLine,
         ]),
       ]);
 
@@ -1796,6 +1872,8 @@
             draft: Object.assign({}, scope, { include_specials: specials.value,
                                               previous_scope: existing ? before : null }),
           }, '', true);
+          sayCounts(counts.known ? counts : null);
+          sayNext(counts.known ? counts : null);
           if (!counts.known) {
             monitorCount.textContent = unmonitorCount.textContent = '';
             return;
@@ -1837,28 +1915,13 @@
       setTimeout(() => { updateScopeRow(); refreshCounts(); }, 0);
 
       body.append(identity);
-      // What the next run would do to this series, above the settings that decide it.
+      // The banner names what this form does, under the series it does it to. Enabling a
+      // series is not one of the things it does, which is why the switch sits above it.
+      body.append(el('div', { className: 'tvr-form-banner',
+                              textContent: existing ? 'Edit series' : 'Add series' }));
       if (existing) {
-        const state = monitoring[rule.id] || {};
-        const plan = state.plan;
         const alertsHere = seriesAlerts(rule.id);
         if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
-        const box = el('div', { className: 'tvr-panel-plan' });
-        box.append(el('div', { className: 'tvr-once-title', textContent: 'Next run' }));
-        if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
-          box.append(changeLines(plan, (kind) => guarded('', async () => {
-            const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
-            changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
-          })));
-        } else {
-          box.append(el('div', { className: 'tvr-plan-quiet',
-                                 textContent: plan ? 'Nothing scheduled.' : 'Not read yet.' }));
-        }
-        const reread = el('button', { type: 'button', className: 'tvr-small',
-                                      textContent: 'Re-read from Sonarr' });
-        reread.addEventListener('click', () => queueChecks([rule.id], true));
-        box.append(reread);
-        body.append(box);
       }
       body.append(
         field('Retention', presetSelect, (settings.profiles || []).length
@@ -1867,19 +1930,44 @@
         field('Season 0 / specials', specials),
         field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
         scopeRow, unmonitorNote);
-      return { presetSelect, conditions, specials, monitoring, monitorNew,
-               before, enabled, tree: () => (monitorNew.input.checked ? tree : null),
-               // A rule needs somewhere to keep from: a preset, or at least one value.
-               valid: () => !!(presetSelect.value || conditions.days.value
-                               || conditions.episodes.value || conditions.seasons.value),
-               state: () => JSON.stringify({ profile_id: presetSelect.value,
+      const formState = () => JSON.stringify({ profile_id: presetSelect.value,
                                         keep_days: conditions.days.value,
                                         keep_episodes: conditions.episodes.value,
                                         keep_seasons: conditions.seasons.value,
                                         combine: conditions.combine.value,
                                         include_specials: specials.value,
                                         monitoring: monitoring.value,
-                                        once: monitorNew.input.checked }) };
+                                        enabled: existing ? undefined : enabled.input.checked,
+                                        once: monitorNew.input.checked });
+      // What Update compares against: the rule as saved, captured before any half-typed
+      // draft is put back. Taken after the restore it would call the draft the baseline,
+      // and Update would sit disabled over changes nobody had saved.
+      const saved = formState();
+      const held = drafts.get(draftKey);
+      if (held && held !== saved) {
+        try {
+          const values = JSON.parse(held);
+          presetSelect.value = values.profile_id || '';
+          conditions.days.value = values.keep_days || '';
+          conditions.episodes.value = values.keep_episodes || '';
+          conditions.seasons.value = values.keep_seasons || '';
+          conditions.combine.value = values.combine || 'earliest';
+          specials.value = values.include_specials || '';
+          monitoring.value = values.monitoring || '';
+          if (!existing && values.enabled === false) enabled.input.checked = false;
+          applyPreset();
+          sayState();
+        } catch (error) {
+          drafts.delete(draftKey);      // unreadable is not worth carrying
+        }
+      }
+      return { presetSelect, conditions, specials, monitoring, monitorNew,
+               before, enabled, draftKey, saved,
+               tree: () => (monitorNew.input.checked ? tree : null),
+               // A rule needs somewhere to keep from: a preset, or at least one value.
+               valid: () => !!(presetSelect.value || conditions.days.value
+                               || conditions.episodes.value || conditions.seasons.value),
+               state: formState };
     },
       save: async (context) => {
       const draft = {
@@ -1949,12 +2037,22 @@
   let editing = null;          // the form currently open in the pane, if any
   const isOpen = (rule) => !!(editing && rule && editing.rule && editing.rule.id === rule.id);
 
+  // Half-typed edits, kept while the library is on screen. Clicking a second poster to
+  // check something and clicking back is browsing, not abandoning: nothing was saved, so
+  // nothing should be lost. Leaving the library is leaving, and clears them — held any
+  // longer they would be a second, invisible copy of the settings.
+  const drafts = new Map();
+  const forgetDrafts = () => drafts.clear();
+
   function openEditor(existing, preselect) {
     const form = ruleForm(existing, preselect);
     if (!form) return;
     editing = form;
     if (!LIBRARY[currentView]) showView('series-all');
     renderDetails();
+    // A different series starts at its own top. The pane is the scroller, and replacing
+    // its contents leaves the scroll position where the last series had put it.
+    $('tvr-details').scrollTop = 0;
     $('tvr-details').scrollIntoView({ block: 'nearest' });
   }
 
@@ -1972,23 +2070,27 @@
     close.addEventListener('click', () => { editing = null; renderLibrary(); renderDetails(); });
 
     {
-      head.append(el('h3', { textContent: editing.title }), el('span', { className: 'tvr-spacer' }), close);
+      // The pane's own title, not the form's: what is below it is this series, whether it
+      // is being added or edited, and the close button belongs to the pane.
+      head.append(el('h3', { textContent: 'Series details' }),
+                  el('span', { className: 'tvr-spacer' }), close);
+      pane.append(head);
       const body = el('div', { className: 'tvr-details-body' });
       pane.append(body);
       const context = editing.build(body);
-      // Under the identity, not above it. It still sticks, so the close button stays
-      // reachable once the poster has scrolled away.
-      const identity = body.querySelector('.tvr-identity');
-      if (identity) identity.after(head); else body.prepend(head);
+      editing.context = context;
       const actions = el('div', { className: 'tvr-actions' });
       const primary = el('button', { type: 'button', className: 'tvr-primary',
                                      textContent: editing.existing ? 'Update' : 'Add series' });
       // Adding needs a keep window to be worth anything; updating needs something to have
       // changed as well, so the button says whether pressing it would do something.
-      const settled = context.state();
       const check = () => {
         const valid = context.valid();
-        primary.disabled = !valid || (editing.existing && context.state() === settled);
+        const now = context.state();
+        // Kept as it stands, so clicking away and back returns to what was typed.
+        if (now === context.saved) drafts.delete(context.draftKey);
+        else drafts.set(context.draftKey, now);
+        primary.disabled = !valid || (editing.existing && now === context.saved);
         primary.title = !valid ? 'Set a preset, or at least one keep value'
           : (primary.disabled ? 'Nothing has changed' : '');
       };
@@ -1996,11 +2098,16 @@
       body.addEventListener('change', check);
       primary.addEventListener('click', () => guarded('', async () => {
         await editing.save(context);
+        drafts.delete(context.draftKey);
         editing = null;
         renderDetails();
       }));
       const cancel = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Cancel' });
-      cancel.addEventListener('click', () => { editing = null; renderDetails(); });
+      cancel.addEventListener('click', () => {
+        drafts.delete(context.draftKey);
+        editing = null;
+        renderDetails();
+      });
       actions.append(primary, cancel);
       if (editing.existing) {
         const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small', textContent: 'Delete…' });

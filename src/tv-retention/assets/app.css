@@ -544,7 +544,15 @@
   background: var(--background-color, #1c1c1c); }
 .tvr-details-head h3 { margin: 0; font-size: 14px; }
 .tvr-details-body { padding: 10px; display: grid; gap: 8px; }
-.tvr-details-body .tvr-details-head { margin: 2px -10px 0; }
+/* Thin, and the pane's own: it names what the pane holds rather than what the form does,
+   so it does not change under you when the same pane switches from adding to editing. */
+.tvr-details-head { padding: 5px 6px 5px 10px; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; opacity: .75; }
+.tvr-details-head h3 { font-size: 11px; font-weight: 600; letter-spacing: inherit;
+  text-transform: inherit; }
+/* The form's own heading, under the series it is about. */
+.tvr-form-banner { font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; opacity: .7; margin-top: 2px; }
 .tvr-details .tvr-actions { padding: 10px; border-top: 1px solid var(--tvr-line); margin: 0; }
 .tvr-details-facts { font-size: 12px; opacity: .8; }
 .tvr-details-overview { font-size: 12px; opacity: .7; margin: 0; }
@@ -629,6 +637,13 @@
 .tvr-identity-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
 .tvr-identity-name { min-width: 0; }
 .tvr-identity-switch { margin-left: auto; flex: none; gap: 0; }
+.tvr-identity-line { font-size: 12px; opacity: .8; line-height: 1.35; }
+.tvr-identity-next { opacity: .95; }
+.tvr-identity-plan { margin-top: 2px; }
+.tvr-identity-read { display: flex; align-items: baseline; gap: 8px; font-size: 11px; opacity: .55; }
+#tv-retention button.tvr-linky { border: none; background: none; padding: 0; font-size: 11px;
+  color: var(--tvr-action); text-decoration: underline; }
+#tv-retention button.tvr-linky:hover { background: none; filter: brightness(1.2); }
 @media (max-width: 1250px) { .tvr-series-shell.open { grid-template-columns: 1fr; } }
 
 /* Three columns that scroll independently, under a header that does not scroll at all.
@@ -643,8 +658,6 @@
    scrolls on its own once its own contents are taller than the window. */
 .tvr-details { position: sticky; top: 0; max-height: 100%; overflow-y: auto;
   overscroll-behavior: contain; }
-.tvr-panel-plan { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 8px 10px;
-  display: grid; gap: 4px; justify-items: start; }
 @media (max-width: 1250px) {
   .tvr-shell { height: auto; min-height: 0; overflow: visible; }
   .tvr-side, .tvr-main { height: auto; overflow: visible; }
