@@ -11,9 +11,16 @@ $tvrToken = htmlspecialchars($var['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8');
 // timestamp-based key collapses to the same string for every release and a browser then
 // serves a stale script after an upgrade. Hashing ~60KB per render is cheap and is right
 // whether the files arrived from a package, an upgrade, or a hand copy.
-$tvdAsset = @md5_file("$tvrBase/assets/app.js") . @md5_file("$tvrBase/assets/app.css");
-$tvdAsset = $tvdAsset ? substr($tvdAsset, 0, 12)
-                      : trim((string)@file_get_contents("$tvrBase/VERSION"));
+//
+// Hashed *together*, not joined and cut. Joining the two digests and taking the first
+// twelve characters takes all twelve from the first one, so the key moved when the script
+// changed and never when only the stylesheet did — and a release that was pure CSS shipped
+// under the key the browser already had. Every visual change for a week arrived on a page
+// still styled by the file it replaced.
+$tvrScript = @md5_file("$tvrBase/assets/app.js");
+$tvrStyle = @md5_file("$tvrBase/assets/app.css");
+$tvdAsset = ($tvrScript && $tvrStyle) ? substr(md5($tvrScript . $tvrStyle), 0, 12)
+                                      : trim((string)@file_get_contents("$tvrBase/VERSION"));
 ?>
 <link rel="stylesheet" href="/plugins/tv-retention/assets/app.css?v=<?=rawurlencode($tvdAsset)?>">
 <div id="tv-retention" data-csrf="<?=$tvrToken?>" data-api="/plugins/tv-retention/include/api.php">

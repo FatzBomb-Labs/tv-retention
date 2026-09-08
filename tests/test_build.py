@@ -384,6 +384,17 @@ class Interface(unittest.TestCase):
         self.assertIn('.tvr-field > input, .tvr-field > select, .tvr-field > textarea '
                       '{ width: 100%; }', self.css)
 
+    def test_a_stylesheet_only_change_moves_the_cache_key(self):
+        """Joining two digests and taking twelve characters takes twelve from the first.
+
+        So the key followed app.js and ignored app.css entirely, and any release that
+        changed only the stylesheet shipped under the key the browser already held. The
+        page came back new and was styled by the file it had replaced.
+        """
+        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
+        self.assertIn('substr(md5($tvrScript . $tvrStyle), 0, 12)', page)
+        self.assertNotIn('substr($tvdAsset, 0, 12)', page)
+
     def test_a_sidebar_group_is_a_band_not_a_label(self):
         """Reaching the panel edge is what makes it a section rather than small type.
 
