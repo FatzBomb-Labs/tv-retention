@@ -492,21 +492,22 @@
 .tvr-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .tvr-card-series { display: grid; grid-template-columns: 62px 1fr; gap: 10px; padding: 8px;
   border: 1px solid var(--tvr-line); border-radius: 6px; align-items: start; }
-.tvr-poster { width: 62px; height: 92px; border-radius: 4px; overflow: hidden; display: grid;
-  place-items: center; background: var(--tvr-soft); font-size: 22px; opacity: .95; }
-/* One rule for every poster, everywhere, and it does not depend on object-fit.
+.tvr-poster { position: relative; width: 62px; height: 92px; border-radius: 4px;
+  overflow: hidden; display: grid; place-items: center; background: var(--tvr-soft);
+  font-size: 22px; opacity: .95; }
+/* Taken out of the layout entirely rather than fitted within it.
 
-   `width/height: 100%` with `object-fit: contain` looks right and is not: the box centres
-   its contents, so the image is sized to its own content before it is placed, the
-   percentage height has nothing definite to resolve against, and the image keeps its
-   intrinsic size and is clipped by the box. It showed only in the poster grid, because
-   the list and the panel are already 2:3 — the same shape as the artwork, so a cropped
-   poster and a fitted one are the same picture there.
+   Two attempts failed here because both left the image's size depending on how its box
+   chose to lay it out — `height: 100%` and then `max-height: 100%` each resolve against
+   the box only when the box is stretching the image, and this box centres it. When they
+   resolve to nothing the image keeps its intrinsic size and the box clips it, which is a
+   crop that no object-fit value can prevent, because object-fit was never reached.
 
-   Bounds instead of dimensions: the image is never wider or taller than its box, keeps
-   its own aspect, and the box centres what is left over. Nothing to resolve, nothing to
-   clip. */
-.tvr-poster img { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; }
+   Positioned against the box's own edges, the size is the box's size by construction:
+   there is no alignment step to depend on and no percentage to fail to resolve. Only then
+   does object-fit decide the shape, and it decides it everywhere. */
+.tvr-poster img { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; display: block; }
 .tvr-card-series-body { display: grid; gap: 2px; align-content: start; min-width: 0; }
 .tvr-card-series-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tvr-card-series-sub { font-size: 11px; opacity: .6; }
@@ -566,7 +567,9 @@
 /* Poster layout: the artwork leads and the facts sit under it. */
 .tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 .tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; }
-.tvr-rules-grid .tvr-poster-row { width: 100%; height: 210px; }
+/* And the box is the shape of the artwork, so there is barely any letterbox to see: a
+   poster is 2:3, and a grid of them lines up as a shelf rather than a set of stamps. */
+.tvr-rules-grid .tvr-poster-row { width: 100%; height: auto; aspect-ratio: 2 / 3; }
 .tvr-rules-grid .tvr-rule-title { white-space: normal; }
 
 /* One number for "is anything wrong", next to the one for "is anything scheduled". */

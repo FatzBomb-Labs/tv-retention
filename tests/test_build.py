@@ -675,9 +675,12 @@ class Interface(unittest.TestCase):
         """
         import re
         rule = self.css.split('.tvr-poster img {')[1].split('}')[0]
-        self.assertIn('max-width: 100%', rule)
-        self.assertIn('max-height: 100%', rule)
-        self.assertIn('height: auto', rule)
+        # Positioned against the box's edges: its size is the box's size by construction,
+        # with no alignment step to depend on and no percentage that can fail to resolve.
+        self.assertIn('position: absolute', rule)
+        self.assertIn('inset: 0', rule)
+        self.assertIn('object-fit: contain', rule)
+        self.assertIn('position: relative', self.css.split('.tvr-poster {')[1].split('}')[0])
         self.assertEqual(re.findall(r'object-fit:\s*cover', self.css), [],
                          'a poster is cropped somewhere')
 
