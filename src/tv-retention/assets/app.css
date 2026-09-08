@@ -54,7 +54,7 @@
 #tv-retention button.tvr-danger { border-color: var(--tvr-bad); color: var(--tvr-bad); }
 #tv-retention button[disabled] { opacity: .45; cursor: not-allowed; }
 #tv-retention input, #tv-retention select, #tv-retention textarea { font: inherit; padding: 4px 7px;
-  line-height: 1.35; min-height: 0;
+  line-height: 1.35; min-height: 0; width: auto;
   border: 1px solid var(--tvr-line); border-radius: 4px; background: transparent; color: inherit; max-width: 100%; }
 #tv-retention input[disabled] { opacity: .45; }
 
@@ -109,14 +109,17 @@
 .tvr-empty { opacity: .65; padding: 12px; border: 1px dashed var(--tvr-line); border-radius: 6px; text-align: center; }
 .tvr-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
 .tvr-dirty { font-size: 12px; color: var(--tvr-warn); }
-.tvr-seg { display: inline-flex; border: 1px solid var(--tvr-line); border-radius: 6px; overflow: hidden; }
-#tv-retention .tvr-seg button { border: none; border-radius: 0; padding: 6px 12px; font-size: 12px; }
-#tv-retention .tvr-seg button.active { background: var(--tvr-soft); font-weight: 600; }
+.tvr-seg { display: inline-flex; gap: 2px; }
+#tv-retention .tvr-seg button { border: none; border-radius: 4px; padding: 0; font-size: 12px;
+  width: 24px; height: 24px; display: grid; place-items: center; opacity: .5; }
+#tv-retention .tvr-seg button:hover { opacity: .8; }
+#tv-retention .tvr-seg button.active { background: var(--tvr-soft); opacity: 1; }
 
 .tvr-card { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 10px 11px; display: grid; gap: 7px; margin-bottom: 8px; }
 .tvr-card-head { display: flex; align-items: center; gap: 10px; }
 .tvr-card-head .tvr-card-title { margin: 0; flex: 1; }
 .tvr-field { display: grid; gap: 2px; }
+.tvr-field > input, .tvr-field > select, .tvr-field > textarea { width: 100%; }
 .tvr-field > span { font-weight: 600; }
 .tvr-field small, .tvr-switch + small { opacity: .65; display: block; font-weight: normal; }
 .tvr-grow { flex: 1 1 320px; }
@@ -298,9 +301,12 @@
    of them was answering it from a row of its own. Wraps rather than squeezes on a narrow
    window: two rows there is the honest answer, not a search box six characters wide. */
 .tvr-series-head { flex-wrap: wrap; row-gap: 6px; }
-.tvr-series-head h2 { margin-right: 4px; }
-.tvr-series-head input[type=search] { width: auto; flex: 1 1 190px; max-width: 300px; }
-.tvr-series-head select { flex: 0 0 auto; }
+/* The title is as wide as it reads and no wider; the search takes what is left, because
+   it is the one control here whose usefulness grows with its width. */
+.tvr-series-head h2 { flex: 0 0 auto; white-space: nowrap; margin-right: 2px; }
+.tvr-series-head input[type=search] { flex: 1 1 200px; min-width: 140px; }
+.tvr-series-head select { flex: 0 0 auto; width: auto; }
+.tvr-series-head .tvr-switch { flex: 0 0 auto; }
 
 /* Retention sits with the identity, spaced from the instance. A preset is one blue pill
    because the values live in the preset; only a custom rule spells them out. */
@@ -490,8 +496,10 @@
   font-weight: 700; }
 #tv-retention button.tvr-side-head:hover { opacity: .8; background: none; }
 #tv-retention button.tvr-side-item { display: flex; align-items: center; gap: 8px; width: 100%;
-  text-align: left; border: none; background: none; border-radius: 3px; padding: 1px 8px;
-  font-size: 12px; line-height: 1.4; opacity: .8; border-left: 2px solid transparent; }
+  text-align: left; border: none; background: none; border-radius: 3px; padding: 0 8px;
+  font-size: 12px; line-height: 1.35; opacity: .8; border-left: 2px solid transparent; }
+#tv-retention .tvr-side-item .tvr-tab-badge { height: 15px; min-width: 15px; font-size: 9px;
+  margin-left: 4px; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
 #tv-retention button.tvr-side-item.active { background: var(--tvr-soft); opacity: 1;
   font-weight: 600; border-left-color: var(--tvr-accent); }

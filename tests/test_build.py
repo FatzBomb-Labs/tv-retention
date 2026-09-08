@@ -378,6 +378,20 @@ class Interface(unittest.TestCase):
         fields = self.css.split('#tv-retention input, #tv-retention select,')[1].split('}')[0]
         self.assertIn('min-height: 0', fields)
         self.assertIn('line-height: 1.35', fields)
+        # `width: 100%` on a select is harmless in a grid cell and means "all of it" in a
+        # flex row, which is how the sort dropdown took the search box's space.
+        self.assertIn('width: auto', fields)
+        self.assertIn('.tvr-field > input, .tvr-field > select, .tvr-field > textarea '
+                      '{ width: 100%; }', self.css)
+
+    def test_the_layout_switch_is_two_square_icons(self):
+        # A box around them made one control out of two buttons, and the padding inside it
+        # was carrying an icon that needs none.
+        seg = self.css.split('#tv-retention .tvr-seg button {')[1].split('}')[0]
+        self.assertIn('width: 24px', seg)
+        self.assertIn('height: 24px', seg)
+        self.assertIn('padding: 0', seg)
+        self.assertNotIn('border: 1px solid var(--tvr-line)', self.css.split('.tvr-seg {')[1].split('}')[0])
 
     def test_a_sentence_shaped_button_is_not_shouted(self):
         # Uppercase with 1.8px tracking is the WebGUI's idea of a button. These are
