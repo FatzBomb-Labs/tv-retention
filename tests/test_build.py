@@ -576,3 +576,41 @@ class Interface(unittest.TestCase):
         page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
         self.assertIn('Icon="television"', page)
         self.assertNotIn('trash', page)
+
+    def test_what_stops_work_sits_above_the_chrome(self):
+        # A message about the array being down belongs over the page, not inside it.
+        head = self.html.split('<header class="tvr-topbar">')[0]
+        for identifier in ('tvr-array', 'tvr-checking', 'tvr-test-banner'):
+            self.assertIn(f'id="{identifier}"', head, f'{identifier} is below the header')
+
+    def test_no_two_elements_share_an_id(self):
+        """A duplicate id is a lookup that silently finds the wrong element.
+
+        The Test Mode select was given the banner's id, so reading the setting read a div
+        and writing it wrote to nothing.
+        """
+        import re
+        found = re.findall(r'id="([a-z0-9-]+)"', self.html)
+        duplicates = sorted({name for name in found if found.count(name) > 1})
+        self.assertEqual(duplicates, [])
+
+    def test_test_mode_can_be_made_small_but_never_silent(self):
+        self.assertIn('id="tvr-test-chip"', self.html)
+        options = self.html.split('id="tvr-test-banner-mode"')[1].split('</select>')[0]
+        self.assertIn('value="full"', options)
+        self.assertIn('value="chip"', options)
+        self.assertNotIn('value="off"', options)
+        self.assertNotIn('value="none"', options)
+
+    def test_an_error_can_never_be_acknowledged_or_muted(self):
+        """Hiding \"this series will not run\" does not stop it being true."""
+        import alerts as alert_module
+        from core import BLOCKING_KINDS
+        for kind in BLOCKING_KINDS:
+            self.assertTrue(alert_module.KINDS[kind]['blocking'])
+        error = alert_module.make('unmatched', rule_id='r1')
+        self.assertFalse(alert_module.may_acknowledge(error, {'alerts': {'acknowledge': True}}))
+        notice = alert_module.make('ended-expired', rule_id='r1')
+        self.assertTrue(alert_module.may_acknowledge(notice, {'alerts': {'acknowledge': True}}))
+        # And the interface offers it on exactly the same terms.
+        self.assertIn("alert.severity !== 'error' && !alert.blocking", self.js)

@@ -881,9 +881,13 @@ def announce_alerts(settings: dict, previous: list, current: list) -> list:
     wrong — a series that cannot be found, a binding that moved, a Sonarr that will not
     answer. Never the retention itself, which is the job, not the news.
     """
+    # A muted kind is not notified about either. Saying "never show me this" and then
+    # sending it to the notification centre would be the plugin arguing with the operator.
+    muted = set(((settings.get('alerts') or {}).get('muted')) or [])
     known = {alert['key'] for alert in previous or []}
     fresh = [alert for alert in current or []
-             if alert['key'] not in known and alerts.notifies(alert)]
+             if alert['key'] not in known and alerts.notifies(alert)
+             and alert.get('kind') not in muted]
     for alert in fresh:
         notify(settings, f'TV Retention: {alert["title"]}',
                f'{alert.get("detail") or alert.get("help") or ""}'.strip()[:600],

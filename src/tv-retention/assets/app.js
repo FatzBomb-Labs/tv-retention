@@ -476,7 +476,9 @@
     $('tvr-version').textContent = snapshot.version || '';
     $('tvr-about-version').textContent = snapshot.version || '';
     $('tvr-array').hidden = !!snapshot.array_ready;
-    $('tvr-test-banner').hidden = !snapshot.test_mode;
+    const banner = ((settings || {}).alerts || {}).test_banner || 'full';
+    $('tvr-test-banner').hidden = !snapshot.test_mode || banner === 'chip';
+    $('tvr-test-chip').hidden = !snapshot.test_mode || banner !== 'chip';
     renderCounts();
     renderTopBar();
     renderRules();
@@ -485,6 +487,7 @@
     renderInstances();
     renderSchedule();
     renderSettings();
+    renderAlertSettings();
     renderHistory();
     renderAbout();
   }
@@ -676,9 +679,10 @@
   });
 
   function setBadge(badge, list) {
-    badge.hidden = list.length === 0;
-    badge.textContent = list.length || '';
-    badge.className = `tvr-tab-badge ${worstSeverity(list) || 'notice'}`;
+    const live = (list || []).filter((alert) => !alert.acknowledged);
+    badge.hidden = live.length === 0;
+    badge.textContent = live.length || '';
+    badge.className = `tvr-tab-badge ${worstSeverity(live) || 'notice'}`;
   }
 
   // The sidebar carries the counts. Two badges for two audiences: a series problem belongs
@@ -706,11 +710,17 @@
     const failed = (snapshot.runs || []).slice(0, 1).filter((run) => (run.errors || []).length);
     setBadge($('tvr-badge-system-history'), failed.map(() => ({ severity: 'warning' })));
 
+    // What the header counts is a setting; what the badges count is not. An acknowledged
+    // alert stops being counted anywhere, but is still there to be found.
     const everything = connectedAlerts.concat(systemAlerts);
+    const wanted = ((settings || {}).alerts || {}).header || 'all';
+    const ranked = { errors: ['error'], warnings: ['error', 'warning'] }[wanted]
+                   || ['error', 'warning', 'notice'];
+    const counted = everything.filter((alert) => ranked.includes(alert.severity) && !alert.acknowledged);
     const total = $('tvr-alert-total');
-    total.hidden = everything.length === 0;
-    total.textContent = `${everything.length} ${everything.length === 1 ? 'alert' : 'alerts'}`;
-    total.className = `tvr-alert-total ${worstSeverity(everything) || 'notice'}`;
+    total.hidden = counted.length === 0;
+    total.textContent = `${counted.length} ${counted.length === 1 ? 'alert' : 'alerts'}`;
+    total.className = `tvr-alert-total ${worstSeverity(counted) || 'notice'}`;
   }
 
   // The one overview left: what is wrong, and where to go and fix it.
@@ -1242,6 +1252,23 @@
       button.addEventListener('click', () => runAlertAction(alert));
       foot.append(button);
     }
+    // Acknowledging is not dismissing: it hides this alert as it stands, and the alert
+    // comes back if what it says changes. An error is never offered it.
+    const ackable = alert.severity !== 'error' && !alert.blocking
+                    && ((settings || {}).alerts || {}).acknowledge !== false;
+    if (ackable) {
+      const ack = el('button', { type: 'button', className: 'tvr-small',
+                                 textContent: alert.acknowledged ? 'Show again' : 'Acknowledge' });
+      ack.addEventListener('click', () => guarded('', async () => {
+        const data = await api('acknowledge', { key: alert.key, undo: !!alert.acknowledged },
+                               'Saving…', true);
+        applyAlerts(data.alerts);
+        render();
+        notice(alert.acknowledged ? 'Shown again.' : 'Acknowledged — it will return if it changes.', 'ok');
+      }));
+      foot.append(ack);
+    }
+    if (alert.acknowledged) item.classList.add('acknowledged');
     if ((alert.data || {}).files) {
       const files = el('div', { className: 'tvr-alert-files', hidden: true });
       ((alert.data || {}).files || []).slice(0, 10).forEach((path) =>
@@ -2218,6 +2245,13 @@
     ['errors', 'Any error'],
   ];
   const notifyInputs = {};
+  // Only the two that are a preference rather than a fault. The blocking kinds are absent
+  // on purpose: hiding "this series will not run" does not stop it being true.
+  const MUTABLE_KINDS = [
+    ['no-recycle-bin', 'Sonarr has no recycle bin'],
+    ['ended-expired', 'A series has ended with nothing left in its window'],
+  ];
+  const mutedInputs = {};
 
   function renderSettings() {
     const retention = settings.retention || {};
@@ -2263,6 +2297,12 @@
       state_dir: $('tvr-state-dir').value.trim(),
       log_retention_runs: $('tvr-history-size').value,
       logging: Object.assign({}, settings.logging, { level: $('tvr-log-level').value }),
+      alerts: {
+        header: $('tvr-alert-header').value,
+        acknowledge: $('tvr-alert-ack').checked,
+        test_banner: $('tvr-test-banner-mode').value,
+        muted: MUTABLE_KINDS.map(([kind]) => kind).filter((kind) => mutedInputs[kind] && mutedInputs[kind].checked),
+      },
       health: Object.assign({}, settings.health, { ttl_hours: $('tvr-ttl-hours').value }),
       notifications,
     });
@@ -2356,6 +2396,25 @@
       el('td', { textContent: bytes(row.freed_bytes) }),
     ])));
     $('tvr-stats-series').hidden = !(data.series || []).length;
+  }
+
+  function renderAlertSettings() {
+    const options = (settings || {}).alerts || {};
+    $('tvr-alert-header').value = options.header || 'all';
+    $('tvr-alert-ack').checked = options.acknowledge !== false;
+    $('tvr-test-banner-mode').value = options.test_banner || 'full';
+    const box = $('tvr-alert-muted');
+    box.replaceChildren(el('p', { className: 'tvr-lede',
+                                  textContent: 'A kind hidden here is never shown and never notified '
+                                               + 'about — including ones you have not seen yet. It still '
+                                               + 'blocks a series if that is what it does.' }));
+    MUTABLE_KINDS.forEach(([kind, label]) => {
+      const control = toggle(label, (options.muted || []).includes(kind), null,
+                             { className: 'tvr-row-switch' });
+      control.input.dataset.kind = kind;
+      mutedInputs[kind] = control.input;
+      box.append(control.node);
+    });
   }
 
   function renderAbout() {

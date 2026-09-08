@@ -169,3 +169,43 @@ class Reachability(unittest.TestCase):
         handler = (WORKER / 'actions.py').read_text()
         self.assertNotIn("settings.get('preview'", handler)
         self.assertNotIn('preview', core.DEFAULTS)
+
+
+class Acknowledgement(unittest.TestCase):
+    """An alert is a fact about the present, so acknowledging one is against the fact."""
+
+    def setUp(self):
+        import alerts
+        self.alerts = alerts
+        self.settings = {'alerts': {'header': 'all', 'acknowledge': True, 'muted': []}}
+
+    def test_it_lapses_when_what_the_alert_says_changes(self):
+        first = self.alerts.make('no-recycle-bin', instance_id='i1', detail='Sonarr deletes outright')
+        acknowledged = {first['key']: self.alerts.fingerprint(first)}
+        self.assertTrue(self.alerts.annotate([first], self.settings, acknowledged)[0]['acknowledged'])
+        moved = self.alerts.make('no-recycle-bin', instance_id='i1', detail='something else now')
+        self.assertFalse(self.alerts.annotate([moved], self.settings, acknowledged)[0]['acknowledged'],
+                         'a different fact is not the one that was acknowledged')
+
+    def test_a_muted_kind_is_not_shown_at_all(self):
+        settings = {'alerts': {'muted': ['ended-expired']}}
+        both = [self.alerts.make('ended-expired', rule_id='r1'),
+                self.alerts.make('no-recycle-bin', instance_id='i1')]
+        kinds = [alert['kind'] for alert in self.alerts.annotate(both, settings, {})]
+        self.assertEqual(kinds, ['no-recycle-bin'])
+
+    def test_the_header_counts_what_it_was_told_to(self):
+        found = [self.alerts.make('unmatched', rule_id='r1'),
+                 self.alerts.make('no-recycle-bin', instance_id='i1'),
+                 self.alerts.make('ended-expired', rule_id='r2')]
+        counts = {}
+        for wanted in ('errors', 'warnings', 'all'):
+            counts[wanted] = len(self.alerts.header_worthy(found, {'alerts': {'header': wanted}}))
+        self.assertEqual(counts, {'errors': 1, 'warnings': 2, 'all': 3})
+
+    def test_an_acknowledged_alert_is_never_counted(self):
+        found = self.alerts.annotate([self.alerts.make('no-recycle-bin', instance_id='i1')],
+                                     self.settings,
+                                     {'no-recycle-bin:i1': self.alerts.fingerprint(
+                                         self.alerts.make('no-recycle-bin', instance_id='i1'))})
+        self.assertEqual(self.alerts.header_worthy(found, self.settings), [])

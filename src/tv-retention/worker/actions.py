@@ -107,8 +107,8 @@ def action_snapshot(settings, request):
         'health_stale': main.health_is_stale(settings, health),
         'stale_rules': main.stale_rule_ids(settings, health),
         'progress': read_progress(settings),
-        'alerts': (load_health(settings).get('alerts') or []),
-        'alert_summary': alerts.summarise(load_health(settings).get('alerts')),
+        'alerts': visible_alerts(settings, health),
+        'alert_summary': alerts.summarise(visible_alerts(settings, health)),
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
         'jobs': job_state(settings),
         'plan': plan_summary(settings, load_health(settings)),
@@ -123,7 +123,7 @@ def action_sync(settings, request):
     with main.run_lock():
         report = main.sync_from_sonarr(settings, reason='asked for')
     health = load_health(settings)
-    return {'report': report, 'health': trim_health(health), 'alerts': health.get('alerts') or [],
+    return {'report': report, 'health': trim_health(health), 'alerts': visible_alerts(settings, health),
             'plan': plan_summary(settings, health), 'sync': main.last_sync(settings),
             'settings': redact(load_settings())}
 
@@ -146,7 +146,7 @@ def action_watch(settings, request):
     return {'array_ready': True,
             'progress': read_progress(settings),
             'health': trim_health(health),
-            'alerts': health.get('alerts') or [],
+            'alerts': visible_alerts(settings, health),
             'stale_rules': main.stale_rule_ids(settings, health),
             'sync': main.last_sync(settings),
             'plan': plan_summary(settings, health)}
@@ -168,6 +168,38 @@ def action_scope_pass(settings, request):
                            monitor_new=bool(request.get('monitor_new')),
                            unmonitor_outside=bool(request.get('unmonitor_outside')),
                            previous_scope=request.get('previous_scope') or None)
+
+
+def visible_alerts(settings, health):
+    """Alerts as the interface should see them: muted ones gone, acknowledged ones marked."""
+    return alerts.annotate(health.get('alerts') or [], settings, health.get('acknowledged') or {})
+
+
+def action_acknowledge(settings, request):
+    """Mark an alert seen, as it is now.
+
+    Stored against a fingerprint of the alert rather than its key alone, so a change in
+    what it says brings it back. An error can never be acknowledged: one of them stops a
+    series from running, and hiding that would not stop it being true.
+    """
+    key = str(request.get('key') or '')
+    health = load_health(settings)
+    found = next((alert for alert in (health.get('alerts') or []) if alert['key'] == key), None)
+    if not found:
+        raise Rejected('That alert is no longer present.')
+    acknowledged = dict(health.get('acknowledged') or {})
+    if request.get('undo'):
+        acknowledged.pop(key, None)
+    else:
+        if not alerts.may_acknowledge(found, settings):
+            raise Rejected('An error cannot be acknowledged while it is still true.')
+        acknowledged[key] = alerts.fingerprint(found)
+    health['acknowledged'] = acknowledged
+    write_cache(settings, 'health.json', health)
+    log_line(settings, 'info',
+             f'{"un-" if request.get("undo") else ""}acknowledged: {found.get("title")}')
+    return {'alerts': visible_alerts(settings, health),
+            'summary': alerts.summarise(visible_alerts(settings, health))}
 
 
 def action_stats(settings, request):
@@ -268,7 +300,8 @@ def action_check_rule(settings, request):
     # meant a second PHP request and a second Python process for every series read.
     fresh = load_health(settings)
     return {'busy': False, 'rule_id': rule['id'], 'state': summary,
-            'alerts': fresh.get('alerts') or [], 'summary': alerts.summarise(fresh.get('alerts'))}
+            'alerts': visible_alerts(settings, fresh),
+            'summary': alerts.summarise(visible_alerts(settings, fresh))}
 
 
 def action_settings(settings, request):
@@ -344,7 +377,7 @@ def action_log(settings, request):
 def action_alerts(settings, request):
     """Everything currently wrong, split the way the interface shows it."""
     health = load_health(settings)
-    current = health.get('alerts') or []
+    current = visible_alerts(settings, health)
     return {
         'alerts': current,
         'summary': alerts.summarise(current),
@@ -484,6 +517,7 @@ ACTIONS = {
     'sync': action_sync,
     'scope-pass': action_scope_pass,
     'stats': action_stats,
+    'acknowledge': action_acknowledge,
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,

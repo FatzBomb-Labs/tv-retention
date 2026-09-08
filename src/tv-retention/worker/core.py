@@ -74,6 +74,14 @@ DEFAULTS = {
         # safe one is the default, because the other can start hundreds of downloads.
         'monitoring': 'unmonitor-only',
     },
+    # What the header says, and what may be quietened. Errors are absent on purpose: one
+    # blocks a series from running, so it is not something to turn off.
+    'alerts': {
+        'header': 'all',            # errors | warnings | all
+        'acknowledge': True,        # may a warning or notice be acknowledged
+        'muted': [],                # kinds never shown, and never notified about
+        'test_banner': 'full',      # full | chip — never absent
+    },
     'notifications': {
         'run_started': False,
         'run_completed': True,
@@ -225,6 +233,12 @@ def validate_library_path(value, field='Folder') -> str:
 
 
 LOG_LEVELS = ['minimal', 'error', 'warning', 'info', 'verbose']
+
+# Kept here rather than imported from alerts, which imports nothing and is imported by
+# everything. The blocking ones cannot be muted: hiding "this series will not run" does
+# not stop it being true, it only stops you finding out why.
+ALERT_KINDS = ['unmatched', 'ended-expired', 'sonarr-unreachable', 'no-recycle-bin']
+BLOCKING_KINDS = ['unmatched', 'sonarr-unreachable']
 
 
 def validate_schedule(raw, field='Schedule') -> dict:
@@ -480,6 +494,14 @@ def validate_settings(raw, previous=None) -> dict:
     if tmdb_key and not re.match(r'^[A-Za-z0-9._\-]{16,128}$', tmdb_key):
         raise Rejected('TMDB API key looks malformed')
 
+    alerts_raw = raw.get('alerts') or {}
+    muted = [_text(kind, 'Alert kind', 32) for kind in (alerts_raw.get('muted') or [])]
+    for kind in muted:
+        if kind not in ALERT_KINDS:
+            raise Rejected(f'Unknown alert kind "{kind}"')
+        if kind in BLOCKING_KINDS:
+            raise Rejected(f'"{kind}" stops a series from running and cannot be hidden')
+
     level = _text(logging_raw.get('level'), 'Log level', 16) or 'info'
     if level not in LOG_LEVELS:
         raise Rejected(f'Log level must be one of: {", ".join(LOG_LEVELS)}')
@@ -505,6 +527,14 @@ def validate_settings(raw, previous=None) -> dict:
         },
         'notifications': {name: _flag(notify_raw.get(name, default))
                           for name, default in DEFAULTS['notifications'].items()},
+        'alerts': {
+            'header': _choice(alerts_raw.get('header') or 'all', ['errors', 'warnings', 'all'],
+                              'Header alerts'),
+            'acknowledge': _flag(alerts_raw.get('acknowledge', True)),
+            'muted': sorted(set(muted)),
+            'test_banner': _choice(alerts_raw.get('test_banner') or 'full', ['full', 'chip'],
+                                   'Test mode banner'),
+        },
         'logging': {
             'level': level,
             'max_bytes': _whole(logging_raw.get('max_bytes', 2 * 1024 * 1024), 'Log size', 65536, 64 * 1024 * 1024, allow_none=False),

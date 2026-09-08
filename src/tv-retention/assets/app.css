@@ -587,3 +587,13 @@
 .tvr-bar-fill { background: var(--tvr-good); height: 100%; }
 .tvr-bar-value { text-align: right; opacity: .8; }
 .tvr-bar-label { opacity: .7; }
+
+/* Test Mode as a marker rather than a paragraph. It is never absent: a schedule that
+   reports and deletes nothing should say so somewhere you cannot miss. */
+.tvr-test-chip { font-size: 10px; font-weight: 700; letter-spacing: .08em; padding: 2px 7px;
+  border-radius: 999px; border: 1px solid var(--tvr-accent); color: var(--tvr-accent);
+  background: rgba(255,140,43,.10); align-self: center; }
+/* Acknowledged: still there, no longer shouting. */
+.tvr-alert-item.acknowledged { opacity: .55; }
+.tvr-alert-item.acknowledged .tvr-alert-kind::after { content: ' · acknowledged'; opacity: .7;
+  font-weight: normal; }

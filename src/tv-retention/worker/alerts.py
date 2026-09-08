@@ -13,6 +13,7 @@ itself when the condition clears.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 
 ERROR = 'error'
 WARNING = 'warning'
@@ -134,3 +135,48 @@ def summarise(alerts) -> dict:
     counts['total'] = sum(counts[severity] for severity in SEVERITIES)
     counts['blocking'] = sum(1 for alert in alerts or [] if alert.get('blocking'))
     return counts
+
+
+def fingerprint(alert) -> str:
+    """What an acknowledgement is against.
+
+    An alert is a fact about the present, so acknowledging one cannot mean "never tell me
+    again" — that would hide a live problem indefinitely. It means "I have seen this, as it
+    is". Change the detail, the count, or the data behind it and the acknowledgement no
+    longer applies, because it is no longer the same fact.
+    """
+    material = f"{alert.get('kind')}|{alert.get('rule_id')}|{alert.get('instance_id')}" \
+               f"|{alert.get('detail')}|{alert.get('count')}"
+    return hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]
+
+
+def annotate(alerts, settings: dict, acknowledged: dict) -> list:
+    """Mark what has been acknowledged and drop what has been muted.
+
+    Muting is a display decision and nothing more: a muted alert still blocks a series if
+    its kind blocks, because the two are not the same question.
+    """
+    options = settings.get('alerts') or {}
+    muted = set(options.get('muted') or [])
+    shown = []
+    for alert in alerts or []:
+        if alert.get('kind') in muted:
+            continue
+        seen = (acknowledged or {}).get(alert['key'])
+        shown.append(dict(alert, acknowledged=bool(seen and seen == fingerprint(alert))))
+    return shown
+
+
+def may_acknowledge(alert, settings: dict) -> bool:
+    """Errors are never acknowledgeable: one of them stops a series from running."""
+    if alert.get('severity') == ERROR or alert.get('blocking'):
+        return False
+    return bool((settings.get('alerts') or {}).get('acknowledge', True))
+
+
+def header_worthy(alerts, settings: dict) -> list:
+    """What the count at the top of the page is counting."""
+    wanted = (settings.get('alerts') or {}).get('header', 'all')
+    ranked = {'errors': [ERROR], 'warnings': [ERROR, WARNING]}.get(wanted, SEVERITIES)
+    return [alert for alert in alerts or []
+            if alert.get('severity') in ranked and not alert.get('acknowledged')]

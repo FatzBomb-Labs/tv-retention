@@ -1,8 +1,15 @@
+<!-- Anything that stops work sits above everything, including the chrome: a message about
+     the array being down belongs over the page, not inside it. -->
+<div id="tvr-array" class="tvr-warning" hidden>The array is stopped. Start it before running TV Retention.</div>
+<div id="tvr-checking" class="tvr-banner" hidden></div>
+<div id="tvr-test-banner" class="tvr-banner" hidden><strong>Test mode is on.</strong> The schedule runs and reports exactly what it would do, but changes nothing. Manual runs are not affected. Turn it off under <em>Media management → Schedule</em> once you are satisfied.</div>
+
 <header class="tvr-topbar">
   <div class="tvr-brand">
     <i class="fa fa-television" aria-hidden="true"></i>
     <span class="tvr-brand-name">TV Retention</span>
     <span class="tvr-version" id="tvr-version"></span>
+    <span class="tvr-test-chip" id="tvr-test-chip" hidden title="A scheduled run reports and changes nothing">TEST MODE</span>
   </div>
   <div class="tvr-topbar-actions">
     <button type="button" id="tvr-alert-total" class="tvr-alert-total" hidden></button>
@@ -21,9 +28,6 @@
 </header>
 
 <div id="tvr-notice" role="status" aria-live="polite" hidden></div>
-<div id="tvr-array" class="tvr-warning" hidden>The array is stopped. Start it before running TV Retention.</div>
-<div id="tvr-checking" class="tvr-banner" hidden></div>
-<div id="tvr-test-banner" class="tvr-banner" hidden><strong>Test mode is on.</strong> The schedule runs and reports exactly what it would do, but changes nothing. Manual runs are not affected. Turn it off under <em>Media management → Schedule</em> once you are satisfied.</div>
 
 <div class="tvr-shell">
   <nav class="tvr-side" aria-label="Sections">
@@ -60,6 +64,7 @@
       <button type="button" class="tvr-side-item" data-view="system-logs">Logs</button>
       <button type="button" class="tvr-side-item" data-view="system-notifications">Notifications</button>
       <button type="button" class="tvr-side-item" data-view="system-stats">Stats</button>
+      <button type="button" class="tvr-side-item" data-view="system-alerts">Alert settings</button>
     </div>
 
     <div class="tvr-side-group">
@@ -335,6 +340,42 @@
     <p class="tvr-lede">Sonarr is read once a day, and everything on screen is answered from that reading — which is why nothing here waits on it. The age is shown beside the scheduled changes, the refresh control at the top syncs on demand, and a run always reads Sonarr again before it acts.</p>
     <h3 class="tvr-h3">Air dates</h3>
     <p class="tvr-lede">Sonarr's air date is used first, then TMDB if a key is set, then an estimate from the episodes either side, then the date Sonarr first acquired the episode. The source of each date is shown against every episode, so it is clear when a decision rests on an estimate rather than a real air date.</p>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section id="tvr-view-system-alerts" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Alert settings</h2></div>
+    <p class="tvr-lede">An alert is a fact about the present: it appears when its condition becomes true and clears itself when the condition clears. Nothing here changes what is true — only how loudly you are told about it.</p>
+    <div class="tvr-card">
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Count in the header</span>
+        <select id="tvr-alert-header">
+          <option value="errors">Errors only</option>
+          <option value="warnings">Errors and warnings</option>
+          <option value="all">Everything</option>
+        </select>
+      </div>
+      <small>Badges beside each section always show, whatever this says. An error blocks a series from running, so it is always counted.</small>
+      <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-alert-ack"><span class="tvr-slider"></span><span class="tvr-switch-text">Let warnings and notices be acknowledged</span></label>
+      <small>Acknowledging hides one until it changes. If what it says changes — a different error from Sonarr, a different count — it comes back, because it is no longer the same fact. Errors can never be acknowledged.</small>
+    </div>
+
+    <h3 class="tvr-h3">Never show</h3>
+    <div class="tvr-card" id="tvr-alert-muted"></div>
+
+    <h3 class="tvr-h3">Test mode</h3>
+    <div class="tvr-card">
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">While Test Mode is on</span>
+        <select id="tvr-test-banner-mode">
+          <option value="full">Show the full banner</option>
+          <option value="chip">Show a small marker in the header</option>
+        </select>
+      </div>
+      <small>Never nothing. A schedule in Test Mode reports and deletes nothing, and a plugin that stops saying so is one you will find has done nothing for months.</small>
+    </div>
+    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
