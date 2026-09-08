@@ -681,6 +681,17 @@ class Interface(unittest.TestCase):
         self.assertIn('inset: 0', rule)
         self.assertIn('object-fit: contain', rule)
         self.assertIn('position: relative', self.css.split('.tvr-poster {')[1].split('}')[0])
+        # Every poster box states its height. A height derived from width through
+        # aspect-ratio is not definite for percentage resolution, so the image inside it
+        # fell back to its own size and the box clipped it.
+        for box in ('.tvr-poster {', '.tvr-poster-row {', '.tvr-poster-panel {',
+                    '.tvr-rules-grid .tvr-poster-row {'):
+            declared = self.css.split(box)[1].split('}')[0]
+            self.assertRegex(declared, r'height:\s*\d+px',
+                             f'{box.strip()} does not declare a height')
+        import re as regex
+        declarations = regex.sub(r'/\*.*?\*/', '', self.css, flags=regex.S)
+        self.assertNotIn('aspect-ratio', declarations, 'a derived height is not definite')
         self.assertEqual(re.findall(r'object-fit:\s*cover', self.css), [],
                          'a poster is cropped somewhere')
 

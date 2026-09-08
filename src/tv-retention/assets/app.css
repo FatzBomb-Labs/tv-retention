@@ -565,11 +565,16 @@
 .tvr-connected.no { opacity: .35; }
 
 /* Poster layout: the artwork leads and the facts sit under it. */
-.tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; }
-/* And the box is the shape of the artwork, so there is barely any letterbox to see: a
-   poster is 2:3, and a grid of them lines up as a shelf rather than a set of stamps. */
-.tvr-rules-grid .tvr-poster-row { width: 100%; height: auto; aspect-ratio: 2 / 3; }
+/* Declared, not derived. Every other poster box states its height outright — 68px in the
+   list, 138px in the panel — and that is why they were the two that always looked right:
+   a percentage height inside them has something definite to resolve against. This one
+   derived its height from its width through aspect-ratio, which is not definite for that
+   purpose, so the image fell back to its own size and the box clipped the bottom off it.
+   240px tall is 160px wide at 2:3, which is what the column is, so almost nothing is left
+   over to letterbox. */
+.tvr-rules-grid .tvr-poster-row { width: 100%; height: 240px; }
 .tvr-rules-grid .tvr-rule-title { white-space: normal; }
 
 /* One number for "is anything wrong", next to the one for "is anything scheduled". */
