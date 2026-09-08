@@ -101,12 +101,6 @@ SETTINGS
   Help                 (general usage; most items carry a ? tooltip)
 ```
 
-## Then: series views
-
-- grid view and list view, switchable
-- a details pane that edits in place — no dialog for add or edit
-- multiple selection, and mass edit across the selection
-
 ## Open questions
 
 **Should every series require a preset?** Argued for: one source of truth, no per-series

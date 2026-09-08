@@ -84,8 +84,13 @@
     <div class="tvr-view-head">
       <h2>Connected series</h2>
       <span class="tvr-spacer"></span>
-      <button type="button" id="tvr-enable-all" class="tvr-small">Enable shown</button>
-      <button type="button" id="tvr-disable-all" class="tvr-small">Disable shown</button>
+      <span id="tvr-selected-count" class="tvr-chip" hidden></span>
+      <button type="button" id="tvr-select-shown" class="tvr-small">Select shown</button>
+      <button type="button" id="tvr-select-none" class="tvr-small" hidden>Clear selection</button>
+      <div class="tvr-seg" role="group" aria-label="Layout">
+        <button type="button" id="tvr-layout-list" class="active" title="List">☰</button>
+        <button type="button" id="tvr-layout-grid" title="Grid">▦</button>
+      </div>
     </div>
     <div class="tvr-toolbar tvr-series-toolbar">
       <label class="tvr-field"><span>Search</span><input id="tvr-search" type="search" placeholder="Series name or folder…"></label>
@@ -105,9 +110,17 @@
         <option value="attention">Needs attention</option>
         <option value="blocked">Blocked only</option>
       </select></label>
+      <span class="tvr-spacer"></span>
+      <button type="button" id="tvr-enable-all" class="tvr-small">Enable shown</button>
+      <button type="button" id="tvr-disable-all" class="tvr-small">Disable shown</button>
     </div>
-    <div id="tvr-rules" class="tvr-rules"></div>
-    <p id="tvr-rules-empty" class="tvr-empty">No series yet. Choose <strong>Add series</strong> to pick one from Sonarr.</p>
+    <div id="tvr-series-shell" class="tvr-series-shell">
+      <div class="tvr-series-list">
+        <div id="tvr-rules" class="tvr-rules"></div>
+        <p id="tvr-rules-empty" class="tvr-empty">No series yet. Choose <strong>Add series</strong> to pick one from Sonarr.</p>
+      </div>
+      <aside id="tvr-details" class="tvr-details" hidden></aside>
+    </div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->

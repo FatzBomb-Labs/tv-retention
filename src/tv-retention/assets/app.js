@@ -963,23 +963,53 @@
         + `${bySeverity.warning} warning, ${bySeverity.notice} notice. Open this to show only those series.` }));
   }
 
+  let layout = 'list';
+
   function renderRules() {
     renderSeriesRollup();
     const container = $('tvr-rules');
     const rules = visibleRules();
     $('tvr-enable-all').textContent = `Enable shown (${rules.length})`;
     $('tvr-disable-all').textContent = `Disable shown (${rules.length})`;
+    container.className = layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules';
     container.replaceChildren();
     $('tvr-rules-empty').hidden = (settings.rules || []).length > 0;
+    // Selection drives the pane beside the list, so it is shown on the card as well as
+    // counted above it: nothing should be selected that you cannot see is selected.
+    selected = new Set([...selected].filter((id) => (settings.rules || []).some((r) => r.id === id)));
+    $('tvr-selected-count').hidden = selected.size === 0;
+    $('tvr-selected-count').textContent = `${plural(selected.size, 'series')} selected`;
+    $('tvr-select-none').hidden = selected.size === 0;
     rules.forEach((rule) => {
       // A queued series shows its intent instead of its retention: nothing about the
       // keep window matters once you have decided to stop managing it.
       if (queuedRemoval(rule)) { container.append(queuedCard(rule)); return; }
       const blocked = isBlocked(rule.id);
-      const card = el('div', { className: `tvr-rule ${blocked ? 'blocked' : 'ok'}${rule.enabled ? '' : ' disabled'}` });
+      const card = el('div', { className: `tvr-rule ${blocked ? 'blocked' : 'ok'}${rule.enabled ? '' : ' disabled'}`
+                                          + (selected.has(rule.id) ? ' selected' : '') });
+      // Anywhere that is not a control opens the series beside the list.
+      card.addEventListener('click', (event) => {
+        if (event.target.closest('button, input, select, a, label')) return;
+        editing = null;
+        if (event.shiftKey || event.ctrlKey || event.metaKey) {
+          if (selected.has(rule.id)) selected.delete(rule.id); else selected.add(rule.id);
+        } else {
+          selected = selected.has(rule.id) && selected.size === 1 ? new Set() : new Set([rule.id]);
+        }
+        renderRules();
+        renderDetails();
+      });
       const instance = (settings.instances || []).find((i) => i.id === rule.instance_id);
       const preset = presetFor(rule);
+      const tick = el('input', { type: 'checkbox', className: 'tvr-pick', checked: selected.has(rule.id) });
+      tick.addEventListener('change', () => {
+        if (tick.checked) selected.add(rule.id); else selected.delete(rule.id);
+        editing = null;
+        renderRules();
+        renderDetails();
+      });
       const head = el('div', { className: 'tvr-rule-head' }, [
+        tick,
         alertBadge(rule),
         el('span', { className: 'tvr-rule-title', textContent: rule.series_title || '(unmatched)' }),
         el('span', { className: 'tvr-chip', textContent: instance ? instance.name : 'unknown instance' }),
@@ -1039,7 +1069,7 @@
 
       const actions = el('div', { className: 'tvr-rule-actions' });
       const editButton = el('button', { type: 'button', className: 'tvr-small', textContent: 'Edit' });
-      editButton.addEventListener('click', () => editRule(rule));
+      editButton.addEventListener('click', () => openEditor(rule));
       actions.append(editButton);
       if (isChecking(rule.id) || bulkChecking) {
         [...actions.children].forEach((button) => { button.disabled = true; });
@@ -1070,6 +1100,26 @@
       await saveSettings(`${plural(changing.length, 'series')} ${wanted ? 'enabled' : 'disabled'}.`);
     });
   }
+
+  ['list', 'grid'].forEach((mode) => {
+    $(`tvr-layout-${mode}`).addEventListener('click', () => {
+      layout = mode;
+      ['list', 'grid'].forEach((other) => $(`tvr-layout-${other}`).classList.toggle('active', other === mode));
+      renderRules();
+    });
+  });
+  $('tvr-select-shown').addEventListener('click', () => {
+    visibleRules().forEach((rule) => selected.add(rule.id));
+    editing = null;
+    renderRules();
+    renderDetails();
+  });
+  $('tvr-select-none').addEventListener('click', () => {
+    selected = new Set();
+    editing = null;
+    renderRules();
+    renderDetails();
+  });
 
   $('tvr-enable-all').addEventListener('click', () => setAllShown(true));
   $('tvr-disable-all').addEventListener('click', () => setAllShown(false));
@@ -1376,7 +1426,7 @@
     return seriesCache[key];
   }
 
-  function editRule(existing, preselect) {
+  function ruleForm(existing, preselect) {
     const rule = Object.assign({
       id: '', enabled: true,
       instance_id: (preselect && preselect.instance_id) || (settings.instances[0] || {}).id || '',
@@ -1391,7 +1441,12 @@
       return;
     }
 
-    dialog(existing ? 'Edit series' : 'Add series', (body) => {
+    // The same form serves the details pane and, for a delete confirmation, a dialog.
+    // It is built once and handed to whichever surface is showing it.
+    return {
+      title: existing ? rule.series_title || 'Edit series' : 'Add series',
+      rule,
+      build: (body) => {
       const instanceSelect = options(el('select'),
         settings.instances.map((instance) => [instance.id, instance.name]), rule.instance_id);
       const hint = el('small', { textContent: 'Loading series from Sonarr…' });
@@ -1519,7 +1574,8 @@
       }
       return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions,
                specials, monitoring, monitorNew, unmonitorOut, before, enabled };
-    }, async (context) => {
+    },
+      save: async (context) => {
       const chosen = context.getSeries();
       const draft = {
         id: rule.id || undefined,
@@ -1569,7 +1625,200 @@
       }
       if (saved) queueChecks([saved.id]);
       notice(`Series saved.${done}`, 'ok');
-    });
+      selected = saved ? new Set([saved.id]) : new Set();
+      renderDetails();
+    },
+    };
+  }
+
+  // -- the details pane --------------------------------------------------
+  // Editing happens here rather than in a dialog: the list stays visible beside it, so
+  // what you are changing is never the only thing on screen.
+  let selected = new Set();
+  let editing = null;          // the form currently open in the pane, if any
+
+  function openEditor(existing, preselect) {
+    const form = ruleForm(existing, preselect);
+    if (!form) return;
+    editing = form;
+    if (currentView !== 'series-list') showView('series-list');
+    renderDetails();
+    $('tvr-details').scrollIntoView({ block: 'nearest' });
+  }
+
+  function renderDetails() {
+    const pane = $('tvr-details');
+    const shell = $('tvr-series-shell');
+    const chosen = [...selected].map((id) => (settings.rules || []).find((rule) => rule.id === id))
+      .filter(Boolean);
+    const open = !!editing || chosen.length > 0;
+    shell.classList.toggle('open', open);
+    pane.hidden = !open;
+    if (!open) return;
+    pane.replaceChildren();
+
+    const head = el('div', { className: 'tvr-details-head' });
+    const close = el('button', { type: 'button', className: 'tvr-icon-button', title: 'Close' },
+                    [el('i', { className: 'fa fa-times' })]);
+    close.addEventListener('click', () => { editing = null; selected = new Set(); renderRules(); renderDetails(); });
+
+    if (editing) {
+      head.append(el('h3', { textContent: editing.title }), el('span', { className: 'tvr-spacer' }), close);
+      pane.append(head);
+      const body = el('div', { className: 'tvr-details-body' });
+      pane.append(body);
+      const context = editing.build(body);
+      const actions = el('div', { className: 'tvr-actions' });
+      const save = el('button', { type: 'button', className: 'tvr-primary', textContent: 'Save' });
+      save.addEventListener('click', () => guarded('', async () => {
+        await editing.save(context);
+        editing = null;
+        renderDetails();
+      }));
+      const cancel = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Cancel' });
+      cancel.addEventListener('click', () => { editing = null; renderDetails(); });
+      actions.append(save, cancel);
+      if (editing.rule && editing.rule.id) {
+        const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small', textContent: 'Delete…' });
+        remove.addEventListener('click', () => deleteSeries(editing.rule));
+        actions.append(el('span', { className: 'tvr-spacer' }), remove);
+      }
+      pane.append(actions);
+      return;
+    }
+
+    if (chosen.length === 1) { renderOneDetail(pane, head, close, chosen[0]); return; }
+    renderMassEdit(pane, head, close, chosen);
+  }
+
+  // One series: what it is, what the next run would do to it, and the way in to change it.
+  function renderOneDetail(pane, head, close, rule) {
+    const series = seriesFacts(rule);
+    head.append(el('h3', { textContent: rule.series_title || rule.path }),
+                el('span', { className: 'tvr-spacer' }), close);
+    pane.append(head);
+    const body = el('div', { className: 'tvr-details-body' });
+
+    if (series && series.poster) {
+      body.append(el('div', { className: 'tvr-poster tvr-poster-wide' }, [
+        el('img', { loading: 'lazy', alt: '',
+                    src: `${API}?poster=${rule.series_id}&instance=${encodeURIComponent(rule.instance_id)}`
+                         + `&csrf_token=${encodeURIComponent(CSRF)}` })]));
+    }
+    if (series) {
+      const facts = [series.year, series.network, series.certification,
+                     series.season_count ? plural(series.season_count, 'season') : '',
+                     series.total_episode_count
+                       ? `${series.episode_file_count}/${series.total_episode_count} episodes` : '',
+                     series.size_on_disk ? bytes(series.size_on_disk) : ''].filter(Boolean);
+      body.append(el('div', { className: 'tvr-details-facts', textContent: facts.join(' · ') }));
+      if (series.next_airing) {
+        body.append(el('div', { className: 'tvr-details-facts',
+                                textContent: `Next airs ${when(series.next_airing)}` }));
+      }
+      if (series.overview) body.append(el('p', { className: 'tvr-details-overview', textContent: series.overview }));
+    }
+
+    const state = monitoring[rule.id] || {};
+    const plan = state.plan;
+    body.append(el('h4', { className: 'tvr-h3', textContent: 'Retention' }));
+    const preset = presetFor(rule);
+    body.append(el('div', { className: 'tvr-details-facts',
+                            textContent: preset ? preset.name : ruleSummary(rule).join(' · ') || 'no keep window' }));
+    body.append(el('h4', { className: 'tvr-h3', textContent: 'Next run' }));
+    if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
+      body.append(changeLines(plan, (kind) => guarded('', async () => {
+        const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
+        changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
+      })));
+    } else {
+      body.append(el('div', { className: 'tvr-plan-quiet',
+                              textContent: plan ? 'Nothing scheduled.' : 'Not read yet.' }));
+    }
+    const alertsHere = seriesAlerts(rule.id);
+    if (alertsHere.length) {
+      body.append(el('h4', { className: 'tvr-h3', textContent: 'Needs attention' }));
+      body.append(seriesAlertCard(rule, alertsHere, { hideOpen: true }));
+    }
+    pane.append(body);
+
+    const actions = el('div', { className: 'tvr-actions' });
+    const edit = el('button', { type: 'button', className: 'tvr-primary', textContent: 'Edit' });
+    edit.addEventListener('click', () => openEditor(rule));
+    const refresh = el('button', { type: 'button', className: 'tvr-secondary', textContent: 'Re-read from Sonarr' });
+    refresh.addEventListener('click', () => queueChecks([rule.id], true));
+    actions.append(edit, refresh);
+    const link = sonarrLink(rule);
+    if (link) actions.append(el('span', { className: 'tvr-spacer' }), link);
+    pane.append(actions);
+  }
+
+  // Several at once. Only the fields where "the same for all of them" is a sensible thing
+  // to say: a keep window, a preset, the monitoring mode, specials, enabled.
+  function renderMassEdit(pane, head, close, rules) {
+    head.append(el('h3', { textContent: `${plural(rules.length, 'series')} selected` }),
+                el('span', { className: 'tvr-spacer' }), close);
+    pane.append(head);
+    const body = el('div', { className: 'tvr-details-body' });
+    body.append(el('p', { className: 'tvr-lede',
+                          textContent: 'Leave a field on “Unchanged” and it is left alone on every '
+                                       + 'selected series. Nothing is written until you apply.' }));
+    body.append(el('div', { className: 'tvr-details-facts',
+                            textContent: rules.map((rule) => rule.series_title || rule.path).join(', ') }));
+
+    const presetSelect = options(el('select'),
+      [['', 'Unchanged'], ['custom', 'Custom — clear the preset']].concat(
+        (settings.profiles || []).map((preset) => [preset.id, preset.name])), '');
+    const monitoringSelect = options(el('select'), [['', 'Unchanged'], ['inherit', 'Use the global setting'],
+                                                    ['unmonitor-only', 'Unmonitor only'],
+                                                    ['full-sync', 'Full sync']], '');
+    const specialsSelect = options(el('select'), [['', 'Unchanged'], ['inherit', 'Use the global setting'],
+                                                  ['no', 'Exclude specials'], ['yes', 'Include specials']], '');
+    const enabledSelect = options(el('select'), [['', 'Unchanged'], ['yes', 'Enabled'], ['no', 'Disabled']], '');
+    const conditions = conditionFields({ keep_days: '', keep_episodes: '', keep_seasons: '', combine: '' });
+    conditions.combine.prepend(el('option', { value: '', textContent: 'Unchanged' }));
+    conditions.combine.value = '';
+
+    body.append(field('Preset', presetSelect), conditions.node,
+                el('small', { textContent: 'A blank keep value is left alone; set one to apply it to all.' }),
+                field('Monitoring', monitoringSelect), field('Season 0 / specials', specialsSelect),
+                field('State', enabledSelect));
+    pane.append(body);
+
+    const actions = el('div', { className: 'tvr-actions' });
+    const apply = el('button', { type: 'button', className: 'tvr-primary',
+                                 textContent: `Apply to ${plural(rules.length, 'series')}` });
+    apply.addEventListener('click', () => guarded('', async () => {
+      const ids = new Set(rules.map((rule) => rule.id));
+      settings.rules = (settings.rules || []).map((rule) => {
+        if (!ids.has(rule.id)) return rule;
+        const draft = Object.assign({}, rule);
+        if (presetSelect.value) draft.profile_id = presetSelect.value === 'custom' ? '' : presetSelect.value;
+        if (monitoringSelect.value) draft.monitoring = monitoringSelect.value === 'inherit' ? '' : monitoringSelect.value;
+        if (specialsSelect.value) {
+          draft.include_specials = specialsSelect.value === 'inherit' ? null : specialsSelect.value === 'yes';
+        }
+        if (enabledSelect.value) draft.enabled = enabledSelect.value === 'yes';
+        ['days', 'episodes', 'seasons'].forEach((name) => {
+          const value = conditions[name].value;
+          if (value) draft[`keep_${name}`] = value;
+        });
+        if (conditions.combine.value) draft.combine = conditions.combine.value;
+        return draft;
+      });
+      await saveSettings(`${plural(rules.length, 'series')} updated.`);
+      queueChecks([...ids]);
+      renderDetails();
+    }));
+    actions.append(apply);
+    pane.append(actions);
+  }
+
+  // Sonarr's own record for a rule's series, from the stored reading.
+  function seriesFacts(rule) {
+    const list = (addSeriesList || []).concat(...Object.values(seriesCache));
+    return list.find((entry) => entry && entry.series_id === rule.series_id
+                                && entry.instance_id === rule.instance_id) || null;
   }
 
   // A rule's keep window, as the one-time pass needs to remember it.
@@ -1669,7 +1918,7 @@
       body.append(el('span', { className: 'tvr-chip on', textContent: `next ${when(series.next_airing)}` }));
     }
     const add = el('button', { type: 'button', className: 'tvr-primary tvr-small', textContent: 'Add' });
-    add.addEventListener('click', () => editRule(null, series));
+    add.addEventListener('click', () => openEditor(null, series));
     body.append(add);
     card.append(art, body);
     return card;

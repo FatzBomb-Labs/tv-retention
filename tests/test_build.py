@@ -514,3 +514,33 @@ class Interface(unittest.TestCase):
         """
         import core
         self.assertEqual(core.VERSION, (ROOT / 'VERSION').read_text().strip())
+
+    def test_editing_a_series_happens_beside_the_list(self):
+        """No dialog for add or edit: the list stays visible while you change one.
+
+        The form is built once and handed to whichever surface shows it, so the pane and
+        any future dialog cannot drift into two different editors.
+        """
+        self.assertIn('function ruleForm(existing, preselect)', self.js)
+        self.assertIn('function openEditor(existing, preselect)', self.js)
+        self.assertIn('id="tvr-details"', self.html)
+        self.assertNotRegex(self.js, r"dialog\((existing \? 'Edit series'|'Add series')")
+
+    def test_the_list_offers_a_layout_and_a_selection(self):
+        for identifier in ('tvr-layout-list', 'tvr-layout-grid', 'tvr-select-shown',
+                           'tvr-select-none', 'tvr-selected-count'):
+            self.assertIn(f'id="{identifier}"', self.html)
+        self.assertIn('function renderMassEdit', self.js)
+        self.assertIn('tvr-rules-grid', self.css)
+
+    def test_a_mass_edit_leaves_unchanged_fields_alone(self):
+        # Every field defaults to "Unchanged" and is only applied when it is set, so
+        # selecting thirty series and touching one field cannot rewrite the other five.
+        block = self.js.split('function renderMassEdit')[1].split('function seriesFacts')[0]
+        for control in ('presetSelect', 'monitoringSelect', 'specialsSelect', 'enabledSelect'):
+            self.assertRegex(block, rf'if \({control}\.value\)')
+        self.assertIn("'Unchanged'", block)
+
+    def test_the_sidebar_scrolls_on_its_own(self):
+        self.assertRegex(self.css, r'\.tvr-side \{[^}]*overflow-y: auto')
+        self.assertRegex(self.css, r'\.tvr-side \{[^}]*position: sticky')

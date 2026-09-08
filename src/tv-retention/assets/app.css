@@ -464,7 +464,13 @@
 
 .tvr-shell { display: grid; grid-template-columns: 190px 1fr; gap: 20px; margin-top: 14px;
   align-items: start; }
-.tvr-side { display: grid; gap: 2px; position: sticky; top: 8px; }
+/* Its own scrollbar: the sections stay reachable however long the view beside them runs,
+   and a long series list no longer drags the navigation off the top of the screen. */
+.tvr-side { display: block; position: sticky; top: 8px; align-self: start;
+  max-height: calc(100vh - 90px); overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 4px; }
+.tvr-side::-webkit-scrollbar { width: 6px; }
+.tvr-side::-webkit-scrollbar-thumb { background: var(--tvr-line); border-radius: 3px; }
 .tvr-side-group { display: grid; gap: 1px; margin-bottom: 12px; }
 #tv-retention button.tvr-side-head { display: flex; align-items: center; gap: 6px; width: 100%;
   text-align: left; border: none; background: none; border-radius: 0; padding: 4px 8px;
@@ -504,4 +510,35 @@
 @media (max-width: 860px) {
   .tvr-shell { grid-template-columns: 1fr; }
   .tvr-side { position: static; grid-auto-flow: row; }
+}
+
+/* The list and what is selected in it, side by side. Editing happens in the pane rather
+   than a dialog, so what you are changing is never the only thing on screen. */
+.tvr-series-shell { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.tvr-series-shell.open { grid-template-columns: minmax(0, 1fr) 360px; }
+.tvr-series-list { min-width: 0; }
+.tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.tvr-rules-grid .tvr-rule-head { flex-wrap: wrap; }
+.tvr-rules-grid .tvr-retention { margin-left: 0; }
+#tv-retention .tvr-rule.selected { border-color: var(--tvr-action); background: rgba(61,126,191,.06); }
+#tv-retention .tvr-rule { cursor: pointer; }
+#tv-retention input.tvr-pick { width: 14px; height: 14px; flex: 0 0 14px; margin: 0; cursor: pointer; }
+
+.tvr-details { position: sticky; top: 8px; border: 1px solid var(--tvr-line); border-radius: 6px;
+  max-height: calc(100vh - 120px); overflow-y: auto; display: grid; align-content: start;
+  background: var(--tvr-soft); }
+.tvr-details-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--tvr-line); position: sticky; top: 0; background: inherit; }
+.tvr-details-head h3 { margin: 0; font-size: 14px; }
+.tvr-details-body { padding: 10px; display: grid; gap: 8px; }
+.tvr-details .tvr-actions { padding: 10px; border-top: 1px solid var(--tvr-line); margin: 0; }
+.tvr-details-facts { font-size: 12px; opacity: .8; }
+.tvr-details-overview { font-size: 12px; opacity: .7; margin: 0; }
+.tvr-poster-wide { width: 100%; height: 150px; }
+.tvr-poster-wide img { object-position: top; }
+#tv-retention .tvr-details .tvr-h3 { margin: 6px 0 2px; }
+
+@media (max-width: 1100px) {
+  .tvr-series-shell.open { grid-template-columns: 1fr; }
+  .tvr-details { position: static; max-height: none; }
 }
