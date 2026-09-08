@@ -61,8 +61,11 @@ class Overrides(unittest.TestCase):
 
     def test_monitoring_missing_episodes_is_off_unless_chosen(self):
         # Monitoring an episode with no file starts a download, so it is never a default.
-        self.assertFalse(validate_settings(base())['rules'][0]['monitor_missing'])
-        self.assertTrue(validate_settings(base(monitor_missing=True))['rules'][0]['monitor_missing'])
+        self.assertEqual(validate_settings(base())['rules'][0]['monitoring'], '')
+        self.assertEqual(validate_settings(base(monitoring='full-sync'))['rules'][0]['monitoring'],
+                         'full-sync')
+        with self.assertRaises(Rejected):
+            validate_settings(base(monitoring='leave-it-to-sonarr'))
 
     def test_nonsense_is_refused(self):
         with self.assertRaises(Rejected):
@@ -112,7 +115,7 @@ class LoadNormalises(unittest.TestCase):
         import json
         import tempfile
         from pathlib import Path
-        import main
+        import main, store
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'settings.json'
             path.write_text(json.dumps({
@@ -122,12 +125,12 @@ class LoadNormalises(unittest.TestCase):
                 'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
                            'keep_days': 30}],
             }))
-            original = main.CONFIG
-            main.CONFIG = path
+            original = store.CONFIG
+            store.CONFIG = path
             try:
                 rule = main.load_settings()['rules'][0]
             finally:
-                main.CONFIG = original
+                store.CONFIG = original
             self.assertIn('queue', rule)
-            self.assertEqual(rule['queue'], {'removal': None, 'fixes': []})
-            self.assertIn('monitor_missing', rule)
+            self.assertEqual(rule['queue'], {'removal': None, 'fixes': [], 'monitor_new': None})
+            self.assertIn('monitoring', rule)

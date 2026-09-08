@@ -19,7 +19,7 @@ from pathlib import Path
 import schedules
 
 VERSION = '2026.09.06'
-SETTINGS_VERSION = 4
+SETTINGS_VERSION = 5
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -32,6 +32,13 @@ MEDIA_EXTENSIONS = ['mkv', 'mp4', 'avi', 'mov', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg
 SIDECAR_EXTENSIONS = ['jpg', 'jpeg', 'png', 'nfo', 'txt', 'srt', 'sub', 'idx', 'ass', 'ssa', 'vtt', 'sup']
 
 COMBINE_MODES = ['earliest', 'latest', 'any']
+
+# How the plugin treats Sonarr's monitored flags. Two values, not three: "leave Sonarr
+# alone" would let it re-fetch what a run has just deleted, and unmonitoring on delete is
+# an invariant here rather than a preference. Unmonitoring is protection — it only ever
+# stops a download — so it happens in both. Monitoring is intent, and can cost hundreds of
+# gigabytes, so it happens only under full sync or when asked for once.
+MONITORING_MODES = ['unmonitor-only', 'full-sync']
 
 DEFAULTS = {
     'settings_version': SETTINGS_VERSION,
@@ -67,6 +74,9 @@ DEFAULTS = {
         # Monitoring an episode does not fetch it until Sonarr's next RSS pass. Searching
         # closes that gap, and can turn a metadata change into a great many downloads.
         'search_after_monitor': False,
+        # What the plugin does with Sonarr's monitored flags. See MONITORING_MODES: the
+        # safe one is the default, because the other can start hundreds of downloads.
+        'monitoring': 'unmonitor-only',
     },
     'notifications': {
         'run_started': False,
@@ -156,6 +166,15 @@ def _whole(value, field, low, high, allow_none=True):
 
 def _flag(value) -> bool:
     return value in (True, 'true', 'True', 1, '1', 'on', 'yes')
+
+
+def _choice(value, allowed, field, allow_blank=False) -> str:
+    value = _text(value, field, 32)
+    if not value and allow_blank:
+        return ''
+    if value not in allowed:
+        raise Rejected(f'{field} must be one of {", ".join(allowed)}')
+    return value
 
 
 def _tristate(value, field):
@@ -341,7 +360,17 @@ QUEUED_FIXES = ['monitor-in-frame', 'unmonitor-out-frame']
 def validate_queue(raw) -> dict:
     """A rule's pending intent. Nothing here has happened yet; a run is what applies it."""
     raw = raw if isinstance(raw, dict) else {}
-    queue = {'removal': None, 'fixes': []}
+    queue = {'removal': None, 'fixes': [], 'monitor_new': None}
+    # A one-time pass over the episodes a save brought into scope. It carries the window
+    # as it was, so "newly scoped" stays answerable later: at apply time the two windows
+    # are compared, rather than trusting a list of episode ids that has since moved.
+    once = raw.get('monitor_new')
+    if isinstance(once, dict):
+        before = once.get('from')
+        queue['monitor_new'] = {
+            'from': validate_conditions(before) if isinstance(before, dict) else None,
+            'created_at': _text(once.get('created_at'), 'Queued at', 40) or '',
+        }
     removal = raw.get('removal')
     if isinstance(removal, dict) and removal.get('action'):
         action = _text(removal.get('action'), 'Removal action', 32)
@@ -389,9 +418,9 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         path=validate_path(raw.get('path'), 'Series folder'),
         # Per show, because one series' specials are worth keeping and another's are not.
         include_specials=_tristate(raw.get('include_specials'), 'Include specials'),
-        # Monitoring episodes inside the window that have no file starts downloads, so it
-        # is a decision per series rather than a global default.
-        monitor_missing=_flag(raw.get('monitor_missing', False)),
+        # Empty means inherit the global mode. A series is the right place to override it:
+        # one show can be worth keeping fully in step with Sonarr while the rest are not.
+        monitoring=_choice(raw.get('monitoring'), MONITORING_MODES, 'Monitoring', allow_blank=True),
         queue=validate_queue(raw.get('queue')),
         # Match state is owned by the backend; the UI cannot assert a rule is matched.
         match_status='matched' if series_id else 'unmatched',
@@ -490,6 +519,8 @@ def validate_settings(raw, previous=None) -> dict:
             'include_specials': _flag(retention_raw.get('include_specials', False)),
             'allow_estimated_dates': _flag(retention_raw.get('allow_estimated_dates', True)),
             'search_after_monitor': _flag(retention_raw.get('search_after_monitor', False)),
+            'monitoring': _choice(retention_raw.get('monitoring') or DEFAULTS['retention']['monitoring'],
+                                  MONITORING_MODES, 'Monitoring'),
         },
         'notifications': {name: _flag(notify_raw.get(name, default))
                           for name, default in DEFAULTS['notifications'].items()},
@@ -708,32 +739,6 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     return result
 
 
-def select_remonitor(episodes, ledger_entries, rule, settings, now=None) -> list:
-    """Which previously-deleted episodes now fall back inside a widened rule.
-
-    When a rule's keep window grows — usually because a shared preset was raised from 30
-    to 90 days — episodes this plugin unmonitored may belong in the library again. They
-    are judged by replaying the current rule over the episodes still on disk *plus* the
-    ledger entries, so "keep the newest 20 episodes" counts the missing ones in their
-    proper order rather than pretending they never existed.
-
-    Only episodes this plugin unmonitored are ever considered; anything the operator
-    unmonitored by hand is untouched, because it was never written to the ledger.
-    """
-    if not ledger_entries:
-        return []
-    ghosts = []
-    for entry in ledger_entries:
-        ghost = dict(entry)
-        ghost['path'] = entry.get('path') or f'ledger:{entry.get("episode_id")}'
-        ghost['from_ledger'] = True
-        ghosts.append(ghost)
-    combined = list(episodes) + ghosts
-    decision = evaluate(combined, rule, settings, now=now)
-    keepers = {item['path'] for item in decision['keep'] if item.get('from_ledger')}
-    return [entry for entry, ghost in zip(ledger_entries, ghosts) if ghost['path'] in keepers]
-
-
 MONITOR_STATUS = {
     'empty': 'Sonarr lists no episodes',
     'aligned': 'In frame monitored, outside unmonitored',
@@ -744,18 +749,13 @@ MONITOR_STATUS = {
 }
 
 
-def classify_monitoring(episodes, rule, settings, now=None) -> dict:
-    """Compare Sonarr's monitored flags against a rule's keep frame.
+def keep_frame(episodes, rule, settings, now=None) -> dict:
+    """Split a series' episodes into what a rule keeps and what it does not.
 
-    This reads Sonarr live every time, so anything monitored or unmonitored by hand shows
-    up immediately — including the state a library is in before this plugin has ever run.
-    Episodes that have not aired yet are always treated as inside the frame: you want the
-    next episode, whatever the retention rule says about the old ones.
-
-    Specials are left out of the comparison unless asked for. A special is not part of a
-    "keep the last two seasons" decision, and counting them would make the corrective
-    actions sweep every special into whatever the rest of the show is doing — which is
-    rarely what anyone means.
+    The keep window as a set of episodes, which is what both the monitoring view and the
+    one-time pass over newly scoped episodes need. Specials are excluded unless asked for,
+    and anything that has not aired is inside the frame whatever the rule says: you want
+    the next episode regardless of what retention thinks of the old ones.
     """
     now = now or dt.datetime.now(dt.timezone.utc)
     today = now.date()
@@ -765,8 +765,7 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
     if include_specials is None:
         include_specials = bool(retention.get('include_specials', False))
 
-    specials = []
-    considered = []
+    specials, considered = [], []
     for episode in episodes:
         if episode.get('season') == 0 and not include_specials:
             specials.append(episode)
@@ -785,8 +784,27 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
 
     # The percentage guard exists to stop mass deletion, not to limit a read-only view.
     decision = evaluate(aired, rule, settings, now=now)
-    out_frame = decision['delete']
-    in_frame = decision['keep'] + decision['protected'] + unaired
+    return {'considered': considered, 'specials': specials, 'unaired': unaired,
+            'in_frame': decision['keep'] + decision['protected'] + unaired,
+            'out_frame': decision['delete']}
+
+
+def classify_monitoring(episodes, rule, settings, now=None) -> dict:
+    """Compare Sonarr's monitored flags against a rule's keep frame.
+
+    This reads Sonarr live every time, so anything monitored or unmonitored by hand shows
+    up immediately — including the state a library is in before this plugin has ever run.
+    Episodes that have not aired yet are always treated as inside the frame: you want the
+    next episode, whatever the retention rule says about the old ones.
+
+    Specials are left out of the comparison unless asked for. A special is not part of a
+    "keep the last two seasons" decision, and counting them would make the corrective
+    actions sweep every special into whatever the rest of the show is doing — which is
+    rarely what anyone means.
+    """
+    frame = keep_frame(episodes, rule, settings, now=now)
+    considered, specials = frame['considered'], frame['specials']
+    in_frame, out_frame = frame['in_frame'], frame['out_frame']
 
     files_in_frame = [e for e in in_frame if e.get('has_file')]
     files_total = [e for e in considered if e.get('has_file')]
@@ -821,7 +839,7 @@ def classify_monitoring(episodes, rule, settings, now=None) -> dict:
         'monitored': len(monitored),
         'in_frame': len(in_frame),
         'out_frame': len(out_frame),
-        'unaired': len(unaired),
+        'unaired': len(frame['unaired']),
         'files_in_frame': len(files_in_frame),
         'files_total': len(files_total),
         'in_frame_unmonitored': summarise(in_frame_unmonitored),
@@ -868,7 +886,8 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'path': active.get('path'),
         'series_id': active.get('series_id'),
         'global_specials': retention.get('include_specials'),
-        'monitor_missing': active.get('monitor_missing'),
+        'monitoring': active.get('monitoring'),
+        'global_monitoring': retention.get('monitoring'),
         'estimated_dates': retention.get('allow_estimated_dates'),
 
     }

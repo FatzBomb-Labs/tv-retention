@@ -16,9 +16,9 @@ class Progress(unittest.TestCase):
         os.environ['TVD_CONFIG'] = str(Path(self.temp.name) / 'settings.json')
         os.environ['TVD_RUNTIME'] = str(Path(self.temp.name) / 'run')
         os.environ['TVD_DEVELOPMENT'] = '1'
-        import main
+        import main, store
         self.main = main
-        main.CONFIG = Path(self.temp.name) / 'settings.json'
+        store.CONFIG = Path(self.temp.name) / 'settings.json'
         self.settings = {'state_dir': str(Path(self.temp.name) / 'state'),
                          'health': {'ttl_hours': 24}, 'rules': [], 'profiles': []}
 
@@ -52,7 +52,7 @@ class StaleSelection(unittest.TestCase):
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        import main
+        import main, store
         from core import rule_fingerprint, validate_settings
         self.main = main
         self.settings = validate_settings({
@@ -100,7 +100,7 @@ class HealthPruning(unittest.TestCase):
         """Otherwise the cache grows for ever and its counts disagree with the show list."""
         import tempfile
         from pathlib import Path
-        import main
+        import main, store
         with tempfile.TemporaryDirectory() as temp:
             settings = {'state_dir': str(Path(temp) / 'state'),
                         'rules': [{'id': 'r1'}, {'id': 'r2'}]}

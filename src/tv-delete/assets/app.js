@@ -533,9 +533,9 @@
       if (onOpen) line.addEventListener('click', () => onOpen(row.kind));
       list.append(line);
     });
-    if (plan.monitor_skipped) {
+    if (plan.newly_scoped) {
       list.append(el('div', { className: 'tvd-plan-quiet',
-                              textContent: `${plural(plan.monitor_skipped, 'missing episode')} left unmonitored` }));
+                              textContent: `includes ${plural(plan.newly_scoped, 'newly scoped episode')}, once` }));
     }
     return list;
   }
@@ -627,7 +627,7 @@
         body.append(el('p', { textContent: 'Nothing would change.' }));
         return {};
       }
-      const totals = { delete: 0, delete_bytes: 0, monitor: 0, unmonitor: 0, monitor_skipped: 0,
+      const totals = { delete: 0, delete_bytes: 0, monitor: 0, unmonitor: 0, newly_scoped: 0,
                        removals_by_action: {}, actionable: 0 };
       removals.forEach((record) => {
         totals.removals_by_action[record.action] = (totals.removals_by_action[record.action] || 0) + 1;
@@ -637,7 +637,7 @@
         totals.delete_bytes += rule.freed_bytes || 0;
         totals.monitor += (rule.monitor_list || []).length;
         totals.unmonitor += (rule.unmonitor_list || []).length;
-        totals.monitor_skipped += rule.monitor_skipped || 0;
+        totals.newly_scoped += rule.newly_scoped || 0;
       });
       totals.actionable = totals.delete + totals.monitor + totals.unmonitor + removals.length;
       body.append(el('div', { className: 'tvd-plan-summary' }, [changeLines(totals, null)]));
@@ -1359,9 +1359,32 @@
       const specials = options(el('select'), [['', 'Use the global setting'], ['no', 'Exclude specials'],
                                               ['yes', 'Include specials']],
         rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : ''));
-      const monitorMissing = options(el('select'), [['no', 'Leave them unmonitored'],
-                                                   ['yes', 'Set them to monitored']],
-                                     rule.monitor_missing ? 'yes' : 'no');
+      const monitoring = options(el('select'), [['', 'Use the global setting'],
+                                                ['unmonitor-only', 'Unmonitor only'],
+                                                ['full-sync', 'Full sync']],
+                                 rule.monitoring || '');
+      // A one-time pass, not a setting: it applies once, to the episodes this save brings
+      // into the window, and is meaningless under full sync where it happens continuously.
+      const before = existing ? scopeOf(rule) : null;
+      const monitorNew = toggle('Monitor the episodes this brings into scope', false, null,
+                                { className: 'tvd-row-switch' });
+      const scopeRow = el('div', { className: 'tvd-row', hidden: true }, [monitorNew.node]);
+      const updateScopeRow = () => {
+        const mode = monitoring.value || (settings.retention || {}).monitoring || 'unmonitor-only';
+        const widens = !existing || widensScope(before, draftScope());
+        scopeRow.hidden = mode === 'full-sync' || !widens;
+        if (scopeRow.hidden) monitorNew.input.checked = false;
+      };
+      const draftScope = () => ({
+        profile_id: presetSelect.value || '',
+        keep_days: presetSelect.value ? null : (conditions.days.value || null),
+        keep_episodes: presetSelect.value ? null : (conditions.episodes.value || null),
+        keep_seasons: presetSelect.value ? null : (conditions.seasons.value || null),
+        combine: conditions.combine.value,
+      });
+      [monitoring, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
+       conditions.combine].forEach((input) => input.addEventListener('change', updateScopeRow));
+      setTimeout(updateScopeRow, 0);
       const enabled = toggle(rule.enabled ? 'Enabled' : 'Disabled', rule.enabled, null,
                              { className: 'tvd-card-switch' });
 
@@ -1377,9 +1400,9 @@
         conditions.node,
         el('div', { className: 'tvd-row' }, [
           field('Season 0 / specials', specials),
-          field('Missing episodes inside the window', monitorMissing,
-                'Monitoring these asks Sonarr to fetch them.'),
+          field('Monitoring', monitoring, 'Unmonitor only never asks Sonarr to fetch anything.'),
         ]),
+        scopeRow,
       );
       if (existing) {
         // Bottom left, in the row with Cancel and Save, away from the primary action.
@@ -1393,7 +1416,7 @@
         $('tvd-dialog-extra').replaceChildren(remove);
       }
       return { instanceSelect, getSeries: () => picker && picker.value, presetSelect, conditions,
-               specials, monitorMissing, enabled };
+               specials, monitoring, monitorNew, before, enabled };
     }, async (context) => {
       const chosen = context.getSeries();
       const draft = {
@@ -1406,8 +1429,15 @@
         keep_seasons: context.presetSelect.value ? null : (context.conditions.seasons.value || null),
         combine: context.conditions.combine.value,
         include_specials: context.specials.value,
-        monitor_missing: context.monitorMissing.value === 'yes',
+        monitoring: context.monitoring.value,
+        queue: rule.queue || undefined,
       };
+      if (context.monitorNew.input.checked) {
+        // The window as it was travels with the request, so "newly scoped" is still
+        // answerable at run time: episodes move, a remembered list of ids does not.
+        draft.queue = Object.assign({}, draft.queue,
+                                    { monitor_new: { from: context.before, created_at: new Date().toISOString() } });
+      }
       if (chosen) {
         if (!chosen.selectable) throw new Error(`${chosen.title} cannot be used: ${chosen.reason}.`);
         Object.assign(draft, { series_id: chosen.series_id, series_title: chosen.title,
@@ -1428,6 +1458,25 @@
       if (saved) queueChecks([saved.id]);
       notice('Series saved.', 'ok');
     });
+  }
+
+  // A rule's keep window, as the one-time pass needs to remember it.
+  function scopeOf(rule) {
+    return { keep_days: rule.keep_days ?? null, keep_episodes: rule.keep_episodes ?? null,
+             keep_seasons: rule.keep_seasons ?? null, combine: rule.combine || 'earliest',
+             profile_id: rule.profile_id || '' };
+  }
+
+  // Whether a save can only have grown the window. A preset changing either way is treated
+  // as widening, because the preset's values are not in front of us to compare.
+  function widensScope(before, after) {
+    if (!before) return true;
+    if (before.profile_id !== after.profile_id || after.profile_id) return true;
+    const grew = (was, now) => (was == null ? now != null : (now != null && Number(now) > Number(was)));
+    const shrank = (was, now) => (was != null && (now == null || Number(now) < Number(was)));
+    const keys = ['keep_days', 'keep_episodes', 'keep_seasons'];
+    if (keys.some((key) => shrank(before[key], after[key]))) return keys.some((key) => grew(before[key], after[key]));
+    return keys.some((key) => grew(before[key], after[key])) || before.combine !== after.combine;
   }
 
   $('tvd-add').addEventListener('click', () => editRule(null));
@@ -1743,6 +1792,16 @@
     $('tvd-include-specials').checked = !!retention.include_specials;
     $('tvd-estimated-dates').checked = retention.allow_estimated_dates !== false;
     $('tvd-search-after').checked = !!retention.search_after_monitor;
+    $('tvd-monitoring').value = retention.monitoring || 'unmonitor-only';
+    const describeMonitoring = () => {
+      $('tvd-monitoring-help').textContent = $('tvd-monitoring').value === 'full-sync'
+        ? 'Episodes inside the keep window are set to monitored, including ones with no file — '
+          + 'which asks Sonarr to download them. On a large library that can be hundreds of episodes.'
+        : 'Nothing is ever set to monitored. Widening a series’ keep window will not start '
+          + 'downloads for the seasons it now covers; the series editor offers a one-time pass for that.';
+    };
+    $('tvd-monitoring').onchange = describeMonitoring;
+    describeMonitoring();
     $('tvd-tmdb-key').value = (settings.tmdb || {}).api_key || '';
     $('tvd-state-dir').value = settings.state_dir || '';
     $('tvd-history-size').value = settings.log_retention_runs;
@@ -1765,6 +1824,7 @@
         include_specials: $('tvd-include-specials').checked,
         allow_estimated_dates: $('tvd-estimated-dates').checked,
         search_after_monitor: $('tvd-search-after').checked,
+        monitoring: $('tvd-monitoring').value,
       },
       tmdb: { api_key: $('tvd-tmdb-key').value },
       state_dir: $('tvd-state-dir').value.trim(),

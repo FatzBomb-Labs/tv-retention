@@ -147,3 +147,29 @@ class RealConfiguration(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ToVersionFive(unittest.TestCase):
+    """One monitoring mode replaces a per-series flag and an unwritten rule."""
+
+    def test_everyone_lands_on_the_safe_mode(self):
+        document = migrate({'settings_version': 4, 'retention': {'include_specials': True},
+                            'rules': [{'id': 'r1', 'monitor_missing': True}]})
+        self.assertEqual(document['settings_version'], 5)
+        self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')
+        self.assertTrue(document['retention']['include_specials'], 'other settings survive')
+
+    def test_a_series_opted_into_downloads_is_not_carried_over(self):
+        """An upgrade is the wrong moment to start hundreds of downloads."""
+        document = migrate({'settings_version': 4, 'rules': [{'id': 'r1', 'monitor_missing': True}]})
+        self.assertNotIn('monitor_missing', document['rules'][0])
+        self.assertEqual(document['rules'][0]['monitoring'], '', 'inherits the global mode')
+
+    def test_migrating_twice_changes_nothing_further(self):
+        once = migrate({'settings_version': 4, 'rules': [{'id': 'r1', 'monitor_missing': True}]})
+        self.assertEqual(migrate(once), once)
+
+    def test_the_whole_chain_still_arrives(self):
+        document = migrate({'dry_run': True, 'schedule': {'cron': '0 4 * * *', 'enabled': True}})
+        self.assertEqual(document['settings_version'], 5)
+        self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')

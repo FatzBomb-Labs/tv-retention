@@ -1,7 +1,24 @@
 # Validation record
 
-Last run: 2026-09-06, from the Webtop development container against FatzServer
+Last run: 2026-09-07, from the Webtop development container against FatzServer
 (Unraid 7.3.2, Python 3.11.15, PHP 8).
+
+## Live, read-only, against 3022 series and 36 rules
+
+Staged under `/tmp` with `TVD_CONFIG` pointed away from `/boot`, and every Sonarr call
+asserted to be a GET.
+
+| Measurement | Result |
+|---|---|
+| Full read of the 36 bound series | 72 calls, 1.3s, 14.8 MiB |
+| Re-check with nothing changed | 0 calls, 0.03s |
+| Re-check after editing every rule's keep window | 0 calls, 0.03s |
+| One tick's change feed (`history/since`, 90s window) | 2 calls, 0 KiB, ~1s |
+| Heartbeat recomputing all 36 plans | 0 calls, 0.07s |
+| New-series check (catalogue, six-hourly) | 1 call, 3.6s, 11.5 MiB |
+| Settings migrated v4 → v5 | `monitor_missing` gone from all 36 rules, mode `unmonitor-only` |
+| Plan under Unmonitor only | 186 deletions, 0 monitoring changes |
+| Plan under Full sync | 186 deletions, 290 episodes monitored |
 
 ## Automated
 
@@ -9,7 +26,7 @@ Last run: 2026-09-06, from the Webtop development container against FatzServer
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 89 tests, all pass |
+| `python3 -m unittest discover -s tests` | 300 tests, all pass |
 | `python3 tools/build.py` | package and manifest built, rebuild is byte-identical |
 | `php -l src/tv-delete/include/api.php` | no syntax errors |
 | `php -l` on the PHP section of `TVDelete.page` | no syntax errors |

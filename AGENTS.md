@@ -8,7 +8,15 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 There is no Python or PHP in the Webtop development container. Run
 `./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
 `python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 196 tests with no expected failures.
+there. The suite is 300 tests with no expected failures.
+
+## Layout
+
+`worker/core.py` is pure: no network, no writes, no clock beyond what it is handed. It is
+why re-deciding a rule costs nothing. `worker/store.py` is the filesystem and nothing else.
+`worker/actions.py` is the RPC surface, one function per thing the interface can ask for,
+and it imports `main` rather than the other way round. `worker/main.py` is what talks to
+Sonarr and decides things, plus the tick and the CLI.
 [docs/VALIDATION.md](docs/VALIDATION.md) records the last validation.
 
 ## Project constraints
@@ -17,9 +25,15 @@ there. The suite is 196 tests with no expected failures.
 - The plugin touches no filesystem at all. Sonarr owns it: sizes, air dates, import dates
   and monitoring arrive with the episodes, and deletion is a Sonarr call. There is no
   path mapping, and no setting that duplicates something Sonarr already does.
-- Unmonitored inside the keep window is two situations: an episode on disk is always
-  monitored, because it costs nothing; a missing one is a download and is opted into per
-  series. Conflating them turns a free tidy-up into hundreds of gigabytes.
+- Unmonitoring is protection, monitoring is intent. Unmonitoring only ever stops a
+  download, so it happens in both modes — including episodes with no file, which are never
+  deleted and so would otherwise never be reached. Monitoring can start hundreds of
+  downloads, so it happens only under Full sync, or once when someone asks for it on a rule
+  they just widened.
+- There are two monitoring modes and there is no third. "Leave it to Sonarr" would let
+  Sonarr re-fetch what a run just deleted, which is the fetch-and-delete loop the invariant
+  below exists to prevent. A setting whose interface needs a danger label is a missing
+  invariant.
 - Deleting an episode file always unmonitors it. That is an invariant, not a setting:
   anything else builds a fetch-and-delete loop.
 - Nothing a series card offers happens immediately: removals and monitoring fixes queue,
@@ -46,9 +60,12 @@ there. The suite is 196 tests with no expected failures.
   bumping CACHE_SCHEMA, or the new field reads as absent until the cache expires.
 - Sonarr reads happen in the background, per show. They must never raise the busy overlay,
   and must never hold a show other than the one being read.
-- Re-monitoring on a widened rule only ever touches episodes recorded in the plugin's own
-  unmonitored ledger, never an episode the operator unmonitored by hand. The monitoring
-  pills are a separate, live read of Sonarr and change nothing until asked.
+- A widened rule offers a one-time pass over the episodes the widening brought into scope,
+  and offers it only then. The window as it was travels with the request, so "newly scoped"
+  stays answerable at run time: episodes move, and a remembered list of ids does not.
+- Both object caches are keyed by the shape of what Sonarr's mapping produces, not only by
+  a schema number. Listing a field in `SERIES_FIELDS` or `EPISODE_FIELDS` *is* the cache
+  bump, and a test fails if the mapping produces a key the list does not name.
 - Test the Sonarr mapping from a Sonarr-shaped payload, not from the shape a consumer
   wants: a consumer reading a key the mapping never set is invisible to the latter.
 - Test against isolated fixtures. Live checks against Sonarr must be read-only, run from

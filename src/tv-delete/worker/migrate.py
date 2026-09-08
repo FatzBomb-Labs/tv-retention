@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 4
+SETTINGS_VERSION = 5
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -70,8 +70,33 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v3(document))
     if version < 4:
         document.update(_to_v4(document))
+    if version < 5:
+        document.update(_to_v5(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v5(document: dict) -> dict:
+    """One monitoring mode replaces a per-series flag and an unwritten rule.
+
+    Monitoring used to be two decisions nobody could see together: episodes on disk inside
+    the window were always monitored, and missing ones were opted into per series. It took
+    a measurement against a real library — 28 on disk against 262 missing — to see that
+    those halves were nothing alike, which is a sign the model was wrong rather than that
+    the numbers were surprising.
+
+    Now there is one mode. Everyone lands on the safe one, including anyone who had opted
+    a series into fetching its missing episodes: an upgrade is the wrong moment to start
+    hundreds of downloads, and turning full sync on is one setting away.
+    """
+    retention = dict(document.get('retention') or {})
+    retention['monitoring'] = 'unmonitor-only'
+    rules = []
+    for rule in document.get('rules') or []:
+        rule = {key: value for key, value in rule.items() if key != 'monitor_missing'}
+        rule['monitoring'] = ''          # inherit
+        rules.append(rule)
+    return {'retention': retention, 'rules': rules}
 
 
 def _to_v4(document: dict) -> dict:

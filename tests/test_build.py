@@ -181,10 +181,10 @@ class Interface(unittest.TestCase):
 
     def test_the_tick_asks_what_changed_whether_or_not_anyone_is_looking(self):
         # A problem the page discovers first is a notification that never fired.
-        worker = (ROOT / 'src' / 'tv-delete' / 'worker' / 'main.py').read_text()
-        tick = worker.split('def tick()')[1].split('\ndef ')[0]
+        worker = ROOT / 'src' / 'tv-delete' / 'worker'
+        tick = (worker / 'main.py').read_text().split('def tick()')[1].split('\ndef ')[0]
         self.assertIn('watch_and_recheck', tick)
-        self.assertIn("'watch': action_watch", worker)
+        self.assertIn("'watch': action_watch", (worker / 'actions.py').read_text())
 
     def test_a_background_sweep_is_watched_not_duplicated(self):
         self.assertIn('startPolling', self.js)

@@ -11,8 +11,10 @@ import unittest
 from pathlib import Path
 
 import context  # noqa: F401
+import actions
 import main
-from core import CACHE_SCHEMA, Rejected, rule_fingerprint, validate_settings
+import store
+from core import Rejected, rule_fingerprint, validate_settings
 from sonarr import Sonarr
 
 INSTANCE = {'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32}
@@ -118,7 +120,7 @@ class Freshness(unittest.TestCase):
         # Both caches hold mapped objects, so a mapping change has to retire them.
         main.episodes_for(self.settings, self.rule)
         entry = main.read_cache(self.settings, 'episodes/r1.json')
-        entry['schema'] = CACHE_SCHEMA - 1
+        entry['schema'] = store.SCHEMA + '-old'
         main.write_cache(self.settings, 'episodes/r1.json', entry)
         self.assertIsNone(main.episode_cache(self.settings, self.rule)[0])
 
@@ -175,7 +177,7 @@ class Freshness(unittest.TestCase):
 
     def test_a_fresh_catalogue_is_used_when_it_is_already_there(self):
         main.write_cache(self.settings, 'catalogue.json', {'i1': {
-            'schema': CACHE_SCHEMA, 'fetched_at': main.now_iso(),
+            'schema': store.SCHEMA, 'fetched_at': main.now_iso(),
             'series': [{'series_id': 1, 'title': 'From catalogue'}]}})
         self.assertEqual(main.series_record(self.settings, self.rule)['title'], 'From catalogue')
         self.assertEqual(self.client.calls, [])
@@ -183,7 +185,7 @@ class Freshness(unittest.TestCase):
     def test_a_stale_catalogue_is_not_refreshed_to_read_one_series(self):
         old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=5)).isoformat()
         main.write_cache(self.settings, 'catalogue.json', {'i1': {
-            'schema': CACHE_SCHEMA, 'fetched_at': old,
+            'schema': store.SCHEMA, 'fetched_at': old,
             'series': [{'series_id': 1, 'title': 'Old'}]}})
         self.assertEqual(main.series_record(self.settings, self.rule)['title'], 'A')
         self.assertEqual(self.client.calls, [('series_one', 1)])
@@ -402,9 +404,9 @@ class Heartbeat(unittest.TestCase):
     def test_asking_for_zero_means_now_not_the_default(self):
         # `or` turns an explicit zero into the default, and zero is exactly what a caller
         # passes when it means "ask now".
-        main.action_watch(self.settings, {'min_interval': 0})
+        actions.action_watch(self.settings, {'min_interval': 0})
         first = main.load_health(self.settings)['watch']['i1']['checked_at']
-        main.action_watch(self.settings, {'min_interval': 0})
+        actions.action_watch(self.settings, {'min_interval': 0})
         self.assertNotEqual(main.load_health(self.settings)['watch']['i1']['checked_at'], first)
 
     def test_the_work_itself_is_never_announced(self):

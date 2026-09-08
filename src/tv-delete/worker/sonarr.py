@@ -8,6 +8,7 @@ limited; a slow or offline Sonarr must fail a run rather than hang the scheduler
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import ssl
 import urllib.error
@@ -23,6 +24,20 @@ USER_AGENT = 'TV-Delete/1.0 (Unraid plugin)'
 # a grab or a rename tells this plugin nothing it acts on.
 IMPORTED = 3
 FILE_DELETED = 5
+
+# The fields the two mappings below produce. Declared rather than inferred, because both
+# caches store mapped objects and a field added without retiring them reads as absent
+# everywhere until each entry happens to expire — which is how the ended pill, the Sonarr
+# link and the added date each silently did nothing for a while. MAPPING_SCHEMA is part of
+# the cache key, so listing a new field here *is* the cache bump; a test fails if the
+# mapping produces a key this list does not name.
+SERIES_FIELDS = ('instance_id', 'instance_name', 'series_id', 'title', 'sort_title', 'slug',
+                 'tvdb_id', 'tmdb_id', 'year', 'monitored', 'ended', 'status',
+                 'episode_file_count', 'size_on_disk', 'path', 'tags', 'added')
+EPISODE_FIELDS = ('episode_id', 'file_id', 'has_file', 'series_id', 'season', 'episode',
+                  'title', 'air_date', 'air_source', 'date_added', 'monitored', 'path', 'size')
+MAPPING_SCHEMA = hashlib.sha256(
+    '|'.join(SERIES_FIELDS + ('/',) + EPISODE_FIELDS).encode('utf-8')).hexdigest()[:8]
 
 
 class SonarrError(Rejected):

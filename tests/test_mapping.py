@@ -108,21 +108,48 @@ class CatalogueCacheShape(unittest.TestCase):
     """The catalogue caches mapped series, so a mapping change must retire it."""
 
     def test_the_cache_schema_is_shared_by_both_caches(self):
-        import main
-        from core import CACHE_SCHEMA
-        self.assertIs(main.CACHE_SCHEMA, CACHE_SCHEMA)
+        import store
+        self.assertTrue(store.SCHEMA)
+
+    def test_the_cache_key_moves_when_the_mapping_does(self):
+        """The bump is no longer something to remember.
+
+        Three times a field was added to the mapping and read as absent everywhere,
+        because the caches went on serving objects written before it existed. The key now
+        carries a fingerprint of the mapped field names, so listing a new field is the
+        bump — and the test below fails if a field is produced without being listed.
+        """
+        import hashlib
+        import sonarr
+        import store
+        self.assertIn(sonarr.MAPPING_SCHEMA, store.SCHEMA)
+        moved = hashlib.sha256('|'.join(sonarr.SERIES_FIELDS + ('/', 'extra')
+                                        + sonarr.EPISODE_FIELDS).encode('utf-8')).hexdigest()[:8]
+        self.assertNotEqual(moved, sonarr.MAPPING_SCHEMA)
+
+    def test_every_mapped_field_is_declared(self):
+        # Producing a key the list does not name would leave the cache key unmoved, which
+        # is exactly the bug the fingerprint exists to prevent.
+        import sonarr
+        client = Sonarr(INSTANCE)
+        client._request = lambda *a, **k: PAYLOAD
+        self.assertEqual(set(client.series()[0]), set(sonarr.SERIES_FIELDS))
+        client._request = lambda *a, **k: [
+            {'id': 1, 'seasonNumber': 1, 'episodeNumber': 2, 'title': 'E', 'monitored': True,
+             'hasFile': False, 'airDateUtc': '2020-01-01T00:00:00Z'}]
+        self.assertEqual(set(client.episodes(1, files_only=False)[0]), set(sonarr.EPISODE_FIELDS))
 
     def test_a_cached_catalogue_of_an_older_shape_is_refused(self):
         import tempfile
         from pathlib import Path
         import main
-        from core import CACHE_SCHEMA
+        import store
         with tempfile.TemporaryDirectory() as temp:
             settings = {'state_dir': str(Path(temp) / 'state'), 'catalogue_ttl_minutes': 60,
                         'instances': [dict(INSTANCE, enabled=True)]}
             # A cached entry written before the mapping carried 'ended', still within its TTL.
             main.write_cache(settings, 'catalogue.json', {'i1': {
-                'fetched_at': main.now_iso(), 'schema': CACHE_SCHEMA - 1,
+                'fetched_at': main.now_iso(), 'schema': store.SCHEMA + '-old',
                 'series': [{'series_id': 1, 'title': 'Old Shape'}]}})
             calls = []
 
@@ -144,12 +171,12 @@ class CatalogueCacheShape(unittest.TestCase):
         import tempfile
         from pathlib import Path
         import main
-        from core import CACHE_SCHEMA
+        import store
         with tempfile.TemporaryDirectory() as temp:
             settings = {'state_dir': str(Path(temp) / 'state'), 'catalogue_ttl_minutes': 60,
                         'instances': [dict(INSTANCE, enabled=True)]}
             main.write_cache(settings, 'catalogue.json', {'i1': {
-                'fetched_at': main.now_iso(), 'schema': CACHE_SCHEMA,
+                'fetched_at': main.now_iso(), 'schema': store.SCHEMA,
                 'series': [{'series_id': 1, 'title': 'Cached', 'ended': False, 'status': 'continuing'}]}})
 
             def explode(*args, **kwargs):

@@ -181,6 +181,19 @@
     </div>
   </div>
 
+  <h2 class="tvd-h2">Monitoring</h2>
+  <div class="tvd-card">
+    <div class="tvd-inline-row">
+      <span class="tvd-inline-label">Monitoring</span>
+      <select id="tvd-monitoring">
+        <option value="unmonitor-only">Unmonitor only — never asks Sonarr to fetch anything</option>
+        <option value="full-sync">Full sync — monitoring follows the keep window both ways</option>
+      </select>
+    </div>
+    <small id="tvd-monitoring-help"></small>
+    <small>Unmonitoring happens either way, including episodes with no file: those are never deleted, so nothing else would ever reach them, and Sonarr would go on fetching what the next run removes. Any series can override this.</small>
+  </div>
+
   <h2 class="tvd-h2">Global rules</h2>
   <div class="tvd-card">
     <label class="tvd-switch tvd-row-switch"><input type="checkbox" id="tvd-include-specials"><span class="tvd-slider"></span><span class="tvd-switch-text">Include specials (season 0)</span></label>

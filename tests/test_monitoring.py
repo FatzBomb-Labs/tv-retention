@@ -135,11 +135,11 @@ class Specials(unittest.TestCase):
 
 
 class MonitoringTargets(unittest.TestCase):
-    """Unmonitored inside the window is two different situations, not one.
+    """Unmonitoring is protection; monitoring is intent.
 
-    An episode already on disk costs nothing to monitor. A missing one is a download, and
-    a real library had 262 of those against 28 on disk — so treating them alike would turn
-    a free tidy-up into hundreds of gigabytes.
+    Unmonitoring only ever stops a download, so it happens in both modes. Monitoring can
+    start hundreds — a real library had 262 missing episodes inside its keep windows — so
+    it happens only where someone asked for it.
     """
 
     def setUp(self):
@@ -153,24 +153,101 @@ class MonitoringTargets(unittest.TestCase):
                 {'episode_id': 2, 'has_file': True},
                 {'episode_id': 3, 'has_file': False},
             ],
-            'out_frame_monitored': [{'episode_id': 9}],
+            'out_frame_monitored': [{'episode_id': 9, 'has_file': False}],
         }
 
-    def test_episodes_on_disk_are_always_monitored(self):
-        result = self.targets(self.state(), {'monitor_missing': False})
-        self.assertEqual(sorted(result['monitor']), [1, 2])
-        self.assertEqual(result['on_disk'], 2)
+    def settings(self, mode):
+        return {'retention': {'monitoring': mode}}
 
-    def test_missing_episodes_are_left_alone_unless_asked_for(self):
-        result = self.targets(self.state(), {'monitor_missing': False})
-        self.assertNotIn(3, result['monitor'])
-        self.assertEqual(result['skipped_missing'], 1)
+    def test_unmonitor_only_never_monitors_anything(self):
+        result = self.targets(self.settings('unmonitor-only'), self.state(), {})
+        self.assertEqual(result['monitor'], [])
 
-    def test_missing_episodes_are_included_when_asked_for(self):
-        result = self.targets(self.state(), {'monitor_missing': True})
+    def test_full_sync_monitors_everything_inside_the_window(self):
+        result = self.targets(self.settings('full-sync'), self.state(), {})
         self.assertEqual(sorted(result['monitor']), [1, 2, 3])
-        self.assertEqual(result['skipped_missing'], 0)
+
+    def test_a_series_may_override_the_global_mode(self):
+        result = self.targets(self.settings('unmonitor-only'), self.state(), {'monitoring': 'full-sync'})
+        self.assertEqual(sorted(result['monitor']), [1, 2, 3])
+        quiet = self.targets(self.settings('full-sync'), self.state(), {'monitoring': 'unmonitor-only'})
+        self.assertEqual(quiet['monitor'], [])
 
     def test_everything_outside_the_window_is_unmonitored_either_way(self):
-        for choice in (True, False):
-            self.assertEqual(self.targets(self.state(), {'monitor_missing': choice})['unmonitor'], [9])
+        for mode in ('unmonitor-only', 'full-sync'):
+            self.assertEqual(self.targets(self.settings(mode), self.state(), {})['unmonitor'], [9])
+
+    def test_the_fileless_ones_outside_are_the_point(self):
+        """An episode with a file is unmonitored when the file is deleted.
+
+        A missing one is never deleted, so nothing else would ever reach it, and Sonarr
+        would go on fetching what the next run removes. That is the side door the rule
+        closes, and it is why unmonitoring is not conditional on the mode.
+        """
+        result = self.targets(self.settings('unmonitor-only'), self.state(), {})
+        self.assertEqual(result['unmonitor_missing'], 1)
+
+    def test_there_is_no_mode_that_leaves_sonarr_alone(self):
+        from core import MONITORING_MODES
+        self.assertEqual(MONITORING_MODES, ['unmonitor-only', 'full-sync'])
+
+
+class OneTimePass(unittest.TestCase):
+    """Monitoring the episodes a save brought into scope, once, because someone asked."""
+
+    def setUp(self):
+        import main
+        self.main = main
+        self.settings = {'retention': {'monitoring': 'unmonitor-only'}, 'profiles': []}
+        self.episodes = [
+            {'episode_id': n, 'season': 1, 'episode': n, 'title': f'E{n}', 'has_file': True,
+             'monitored': False, 'size': 1, 'path': f'/tv/S01E{n:02d}.mkv',
+             'air_date': (dt.date.today() - dt.timedelta(days=days)).isoformat(),
+             'air_source': 'sonarr', 'date_added': ''}
+            for n, days in ((1, 5), (2, 40), (3, 200))
+        ]
+
+    def rule(self, days, queued=None):
+        rule = {'id': 'r1', 'keep_days': days, 'keep_episodes': None, 'keep_seasons': None,
+                'combine': 'earliest', 'include_specials': None, 'queue': {'monitor_new': queued}}
+        return rule
+
+    def state_for(self, rule):
+        from core import classify_monitoring
+        return classify_monitoring(self.episodes, rule, self.settings)
+
+    def test_widening_offers_only_what_the_widening_added(self):
+        """A rule widened to ninety days did not ask for the thirty it always had."""
+        rule = self.rule(90, {'from': {'keep_days': 30, 'keep_episodes': None,
+                                       'keep_seasons': None, 'combine': 'earliest'}})
+        rows = self.main.newly_scoped_rows(self.settings, rule, self.episodes, self.state_for(rule))
+        self.assertEqual([row['episode_id'] for row in rows], [2])
+
+    def test_a_new_series_counts_its_whole_window(self):
+        rule = self.rule(90, {'from': None})
+        rows = self.main.newly_scoped_rows(self.settings, rule, self.episodes, self.state_for(rule))
+        self.assertEqual(sorted(row['episode_id'] for row in rows), [1, 2])
+
+    def test_nothing_happens_unless_it_was_asked_for(self):
+        rule = self.rule(90)
+        self.assertEqual(self.main.newly_scoped_rows(self.settings, rule, self.episodes,
+                                                     self.state_for(rule)), [])
+        self.assertEqual(self.main.pending_monitor_pass(self.settings, rule, {'newly_scoped_rows': [1]}), [])
+
+    def test_the_pass_is_read_from_the_state_the_check_worked_out(self):
+        rule = self.rule(90, {'from': None})
+        state = {'newly_scoped_rows': [{'episode_id': 7}]}
+        self.assertEqual(self.main.pending_monitor_pass(self.settings, rule, state),
+                         [{'episode_id': 7}])
+
+    def test_an_episode_arriving_after_the_save_lands_in_the_right_window(self):
+        # The window is stored, not a list of episode ids, so an episode that appears
+        # between the save and the run is judged by where it falls.
+        rule = self.rule(90, {'from': {'keep_days': 30, 'keep_episodes': None,
+                                       'keep_seasons': None, 'combine': 'earliest'}})
+        self.episodes.append({'episode_id': 4, 'season': 1, 'episode': 4, 'title': 'New',
+                              'has_file': True, 'monitored': False, 'size': 1, 'path': '/tv/S01E04.mkv',
+                              'air_date': (dt.date.today() - dt.timedelta(days=60)).isoformat(),
+                              'air_source': 'sonarr', 'date_added': ''})
+        rows = self.main.newly_scoped_rows(self.settings, rule, self.episodes, self.state_for(rule))
+        self.assertEqual(sorted(row['episode_id'] for row in rows), [2, 4])
