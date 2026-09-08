@@ -643,9 +643,8 @@ class Interface(unittest.TestCase):
         self.assertIn('`[Default] ${globalSpecials}`', self.js)
         self.assertIn('`[Default] ${globalMonitoring}`', self.js)
 
-    def test_posters_are_fitted_rather_than_cropped(self):
-        self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-poster-row img \{ object-fit: contain')
-        # And connected is a whole border in poster view, not a bar down one side.
+    def test_connected_is_a_whole_border_in_poster_view(self):
+        # A bar down one side read as a printing fault under artwork.
         self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-rule\.ok \{ border-color: var\(--tvr-good\)')
 
     def test_opening_a_series_opens_its_settings(self):
@@ -666,3 +665,20 @@ class Interface(unittest.TestCase):
                          r'\.tvr-details \{ position: sticky; top: 0; max-height: 100%; overflow-y: auto'):
             self.assertRegex(self.css, selector)
         self.assertRegex(self.css, r'\.tvr-topbar \{ position: sticky; top: 0')
+
+    def test_a_poster_is_fitted_everywhere_or_nowhere(self):
+        """There were three rules for one thing, two of them cropping.
+
+        Which won depended on where in the file it sat, so a poster fitted in the list and
+        was cut in the grid for no reason anyone could see from the markup.
+        """
+        import re
+        fits = re.findall(r'object-fit:\s*(\w+)', self.css)
+        self.assertEqual(set(fits), {'contain'}, 'a poster is cropped somewhere')
+        self.assertEqual(len(fits), 1, 'one rule, so ordering cannot decide it')
+
+    def test_the_panel_heading_is_opaque(self):
+        # A translucent sticky heading lets its own contents scroll through it.
+        head = self.css.split('.tvr-details-head {')[1].split('}')[0]
+        self.assertIn('background: var(--background-color', head)
+        self.assertIn('z-index', head)

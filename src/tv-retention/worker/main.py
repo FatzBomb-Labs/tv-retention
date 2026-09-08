@@ -870,6 +870,23 @@ def recompute_plans(settings: dict, health: dict) -> int:
         changed += 1
     return changed
 
+def log_settings_change(settings: dict, previous: dict, updated: dict) -> None:
+    """Say what a save actually changed, so the log answers "when did this become true?"."""
+    for key in ('schedule', 'retention', 'logging', 'notifications', 'health', 'alerts',
+                'state_dir', 'log_retention_runs', 'instances', 'profiles', 'rules', 'tmdb'):
+        if canonical_json(previous.get(key)) == canonical_json(updated.get(key)):
+            continue
+        if key == 'schedule':
+            log_line(settings, 'info', 'schedule saved: '
+                     + (schedules.describe(updated.get('schedule') or {})
+                        if (updated.get('schedule') or {}).get('enabled') else 'disabled'))
+        elif key in ('instances', 'profiles', 'rules'):
+            log_line(settings, 'info', f'{key} changed: {len(previous.get(key) or [])} '
+                                       f'-> {len(updated.get(key) or [])}')
+        else:
+            log_line(settings, 'info', f'{key} settings saved')
+
+
 def announce_alerts(settings: dict, previous: list, current: list) -> list:
     """Notify about problems that were not there before.
 

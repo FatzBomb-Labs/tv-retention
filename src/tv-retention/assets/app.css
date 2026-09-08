@@ -494,7 +494,11 @@
   border: 1px solid var(--tvr-line); border-radius: 6px; align-items: start; }
 .tvr-poster { width: 62px; height: 92px; border-radius: 4px; overflow: hidden; display: grid;
   place-items: center; background: var(--tvr-soft); font-size: 22px; opacity: .95; }
-.tvr-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* One rule for every poster, everywhere. There were three, two of them cropping, and
+   which won depended on where in the file they sat — so a poster fitted in one view and
+   was cut in another for no reason anyone could see. Fitted: the whole image, always, in
+   a box of the same size, letterboxed when its shape does not match. */
+.tvr-poster img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .tvr-card-series-body { display: grid; gap: 2px; align-content: start; min-width: 0; }
 .tvr-card-series-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tvr-card-series-sub { font-size: 11px; opacity: .6; }
@@ -521,16 +525,17 @@
 
 .tvr-details { position: sticky; top: 8px; border: 1px solid var(--tvr-line); border-radius: 6px;
   max-height: calc(100vh - 120px); overflow-y: auto; display: grid; align-content: start;
-  background: var(--tvr-soft); }
+  /* Opaque, not a tint: a translucent panel lets the list show through it, and a
+     translucent sticky heading lets its own contents scroll through it. */
+  background: var(--background-color, #1c1c1c); }
 .tvr-details-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-  border-bottom: 1px solid var(--tvr-line); position: sticky; top: 0; background: inherit; }
+  border-bottom: 1px solid var(--tvr-line); position: sticky; top: 0; z-index: 2;
+  background: var(--background-color, #1c1c1c); }
 .tvr-details-head h3 { margin: 0; font-size: 14px; }
 .tvr-details-body { padding: 10px; display: grid; gap: 8px; }
 .tvr-details .tvr-actions { padding: 10px; border-top: 1px solid var(--tvr-line); margin: 0; }
 .tvr-details-facts { font-size: 12px; opacity: .8; }
 .tvr-details-overview { font-size: 12px; opacity: .7; margin: 0; }
-.tvr-poster-wide { width: 100%; height: 150px; }
-.tvr-poster-wide img { object-position: top; }
 #tv-retention .tvr-details .tvr-h3 { margin: 6px 0 2px; }
 
 @media (max-width: 1100px) {
@@ -544,7 +549,7 @@
 .tvr-rule { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: start; }
 .tvr-rule-main { min-width: 0; display: grid; gap: 3px; }
 .tvr-poster-row { width: 46px; height: 68px; }
-.tvr-poster-row img { object-fit: contain; background: var(--tvr-soft); }
+.tvr-poster-row img { background: var(--tvr-soft); }
 #tv-retention .tvr-rule.loose { border-left-color: var(--tvr-line); opacity: .92; }
 .tvr-connected { display: inline-grid; place-items: center; font-size: 12px; }
 .tvr-connected.yes { color: var(--tvr-good); }
@@ -554,7 +559,6 @@
 .tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
 .tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; }
 .tvr-rules-grid .tvr-poster-row { width: 100%; height: 210px; }
-.tvr-rules-grid .tvr-poster-row img { object-fit: cover; }
 .tvr-rules-grid .tvr-rule-title { white-space: normal; }
 
 /* One number for "is anything wrong", next to the one for "is anything scheduled". */
@@ -587,8 +591,6 @@
 
 /* Posters are fitted, never cropped: a 2:3 poster and a square one both show whole, in a
    box of the same size, so a wall of them lines up without lying about any of them. */
-.tvr-rules-grid .tvr-poster-row img { object-fit: contain; }
-.tvr-poster img { object-fit: contain; }
 
 /* Connected, in poster view: a border all the way round rather than a bar down one side,
    which under a poster read as a printing fault. */

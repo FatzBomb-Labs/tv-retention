@@ -209,3 +209,24 @@ class Acknowledgement(unittest.TestCase):
                                      {'no-recycle-bin:i1': self.alerts.fingerprint(
                                          self.alerts.make('no-recycle-bin', instance_id='i1'))})
         self.assertEqual(self.alerts.header_worthy(found, self.settings), [])
+
+
+class AcrossModules(unittest.TestCase):
+    """Every `main.something` the RPC surface reaches for actually exists.
+
+    The static scan catches a bare name that has gone; it cannot see `main.thing`, because
+    that is an attribute lookup and only fails when the line runs. `log_settings_change`
+    was deleted by an edit that replaced the block around it, and the only symptom was
+    "Unexpected backend error" the next time settings were saved.
+    """
+
+    def test_actions_only_calls_into_main_for_things_main_has(self):
+        import ast
+        import main
+        tree = ast.parse((WORKER / 'actions.py').read_text())
+        wanted = sorted({node.attr for node in ast.walk(tree)
+                         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                         and node.value.id == 'main'})
+        self.assertTrue(wanted, 'the scan must be seeing real references')
+        missing = [name for name in wanted if not hasattr(main, name)]
+        self.assertEqual(missing, [], 'actions.py reaches for something main does not have')
