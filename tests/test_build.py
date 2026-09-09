@@ -740,7 +740,7 @@ class Interface(unittest.TestCase):
     def test_the_panel_heading_is_opaque(self):
         # A translucent sticky heading lets its own contents scroll through it.
         head = self.css.split('.tvr-details-head {')[1].split('}')[0]
-        self.assertIn('background: var(--background-color', head)
+        self.assertIn('background: var(--tvr-bg)', head)
         self.assertIn('z-index', head)
 
     def test_the_library_reloads_itself_when_it_is_invalidated(self):
@@ -963,3 +963,61 @@ class Interface(unittest.TestCase):
         # querySelector returns null and .click() on null throws, so each of these was a
         # dead button waiting for someone to press it.
         self.assertNotIn('.tvr-tabs', self.js)
+
+
+class Theme(unittest.TestCase):
+    """Light and dark, and the reader's choice winning over their system's."""
+
+    @classmethod
+    def setUpClass(cls):
+        source = ROOT / 'src' / 'tv-retention'
+        cls.css = (source / 'assets' / 'app.css').read_text()
+        cls.js = (source / 'assets' / 'app.js').read_text()
+        cls.html = (source / 'include' / 'interface.html').read_text()
+
+    def test_the_page_sets_its_own_type_and_colour(self):
+        """It used to inherit both from the WebGUI.
+
+        Standing on its own it inherited a serif on white with dark panels drawn over it,
+        which is what happens when nothing above you is setting anything.
+        """
+        body = self.css.split('\nbody {')[1].split('}')[0]
+        for named in ('background: var(--tvr-bg)', 'color: var(--tvr-fg)',
+                      'font-family: var(--tvr-font)'):
+            self.assertIn(named, body)
+
+    def test_no_colour_is_defined_only_in_the_dark(self):
+        """Every token gets a light value on bare :root first.
+
+        A colour whose only definition lives inside a media query has no value at all for
+        a reader who is not in that query.
+        """
+        import re
+        light = set(re.findall(r'(--tvr-[a-z-]+):', self.css.split(':root {')[1].split('}')[0]))
+        dark = set(re.findall(r'(--tvr-[a-z-]+):',
+                              self.css.split(':root[data-theme="dark"] {')[1].split('}')[0]))
+        self.assertEqual(dark - light, set(), 'defined dark but never light')
+
+    def test_a_choice_beats_the_system_in_both_directions(self):
+        """`prefers-color-scheme` alone cannot be overridden by an attribute that loses to it.
+
+        Someone on a dark desktop must still be able to choose light, which is why the
+        media-query block is guarded rather than unconditional.
+        """
+        self.assertIn(':root:not([data-theme="light"])', self.css)
+        self.assertIn(':root[data-theme="dark"]', self.css)
+
+    def test_the_control_offers_following_the_system_as_an_answer(self):
+        # Three states: auto is a real choice, not the absence of one.
+        block = self.js.split('const THEMES = [')[1].split('];')[0]
+        for state in ("'auto'", "'light'", "'dark'"):
+            self.assertIn(state, block)
+        self.assertIn("delete document.documentElement.dataset.theme", self.js)
+        self.assertIn('id="tvr-theme"', self.html)
+
+    def test_text_on_a_filled_badge_follows_the_theme(self):
+        # A badge filled with the warning colour had #1a1a1a on it, which assumed the page
+        # behind it was dark.
+        self.assertIn('--tvr-on-fill', self.css)
+        for assumed in ('color: #1a1a1a', 'background: var(--tvr-info); color: #fff'):
+            self.assertNotIn(assumed, self.css)

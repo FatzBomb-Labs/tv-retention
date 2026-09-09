@@ -823,6 +823,30 @@
     try { return localStorage.getItem(`tvr.${name}`) || fallback; } catch (error) { return fallback; }
   };
   let layout = remembered('layout', 'list');
+
+  // Three states, because "follow the system" is a real answer rather than the absence of
+  // one — and the two explicit ones have to win in both directions, or somebody on a dark
+  // desktop can never choose light. The attribute goes on <html>: the body's background is
+  // painted from the same tokens, and it is outside this element.
+  const THEMES = [
+    ['auto', 'fa-adjust', 'Theme: follows your system. Click for light.'],
+    ['light', 'fa-sun-o', 'Theme: light. Click for dark.'],
+    ['dark', 'fa-moon-o', 'Theme: dark. Click to follow your system.'],
+  ];
+  function applyTheme(name) {
+    const [chosen, icon, title] = THEMES.find(([value]) => value === name) || THEMES[0];
+    if (chosen === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = chosen;
+    const button = $('tvr-theme');
+    button.replaceChildren(el('i', { className: `fa ${icon}` }));
+    button.title = title;
+    remember('theme', chosen);
+  }
+  applyTheme(remembered('theme', 'auto'));
+  $('tvr-theme').addEventListener('click', () => {
+    const at = THEMES.findIndex(([value]) => value === remembered('theme', 'auto'));
+    applyTheme(THEMES[(at + 1) % THEMES.length][0]);
+  });
   let library = null;          // every series Sonarr holds, from the stored reading
   let libraryLoading = false;
   const LIBRARY_LIMIT = 150;

@@ -1,12 +1,84 @@
-/* TV Retention. Scoped to #tv-retention so nothing leaks into the Unraid WebGUI, and colours
-   are inherited from the active Unraid theme wherever possible. */
-#tv-retention { --tvr-line: rgba(128,128,128,.32); --tvr-soft: rgba(128,128,128,.10);
-  --tvr-warn: #d9822b; --tvr-bad: #c0392b; --tvr-good: #2e9e5b; --tvr-accent: #ff8c2b;
-  --tvr-notice: #c9a227; --tvr-info: #6a7f97; --tvr-action: #3d7ebf;
-  /* The page is the width of the window. A max-width put a margin on one side only,
-     because the WebGUI already indents the left. */
-  --tvr-panel: rgba(128,128,128,.07);
-  width: 100%; font-size: 13px; line-height: 1.28; }
+/* TV Retention.
+
+   The palette used to be inherited: the page lived inside Unraid's WebGUI, took its
+   background and its typeface from whatever theme was active, and named only the few
+   colours it needed on top. Standing on its own it inherited a serif on white with dark
+   panels drawn over it, which is what happens when nothing above you is setting anything.
+
+   So: one set of tokens, defined light, redefined dark. Light is the bare :root so a colour
+   always has a value; dark arrives either because the reader's system asks for it or
+   because they chose it, and the choice wins in both directions. No colour is ever defined
+   only inside a media query. */
+:root {
+  color-scheme: light dark;
+  --tvr-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+              "Helvetica Neue", Arial, sans-serif;
+  --tvr-mono-font: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --tvr-bg: #f5f6f7;
+  --tvr-fg: #23262a;
+  --tvr-panel: rgba(0,0,0,.035);
+  --tvr-soft: rgba(0,0,0,.055);
+  --tvr-line: rgba(0,0,0,.17);
+  --tvr-well: rgba(0,0,0,.05);
+  /* Semantic, and darker in light mode: the dark-theme values are chosen to glow against
+     near-black and are unreadable as text on paper. */
+  --tvr-accent: #cf6a12;
+  --tvr-action: #2b6cb0;
+  --tvr-good: #256d43;
+  --tvr-warn: #9c6212;
+  --tvr-bad: #b02b1e;
+  --tvr-notice: #86690a;
+  --tvr-info: #55697f;
+  /* What sits on a filled badge of the colour above. */
+  --tvr-on-fill: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tvr-bg: #1b1c1e;
+    --tvr-fg: #e2e4e6;
+    --tvr-panel: rgba(255,255,255,.045);
+    --tvr-soft: rgba(255,255,255,.07);
+    --tvr-line: rgba(160,160,160,.3);
+    --tvr-well: rgba(0,0,0,.25);
+    --tvr-accent: #ff8c2b;
+    --tvr-action: #5b9bd5;
+    --tvr-good: #3fae69;
+    --tvr-warn: #e0952f;
+    --tvr-bad: #e0574a;
+    --tvr-notice: #d3b03a;
+    --tvr-info: #8298ad;
+    --tvr-on-fill: #16171a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --tvr-bg: #1b1c1e;
+  --tvr-fg: #e2e4e6;
+  --tvr-panel: rgba(255,255,255,.045);
+  --tvr-soft: rgba(255,255,255,.07);
+  --tvr-line: rgba(160,160,160,.3);
+  --tvr-well: rgba(0,0,0,.25);
+  --tvr-accent: #ff8c2b;
+  --tvr-action: #5b9bd5;
+  --tvr-good: #3fae69;
+  --tvr-warn: #e0952f;
+  --tvr-bad: #e0574a;
+  --tvr-notice: #d3b03a;
+  --tvr-info: #8298ad;
+  --tvr-on-fill: #16171a;
+}
+
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { color-scheme: dark; } }
+
+body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
+       font-family: var(--tvr-font); }
+
+#tv-retention { width: 100%; font-size: 13px; line-height: 1.28;
+  font-family: var(--tvr-font); color: var(--tvr-fg); }
 #tv-retention * { box-sizing: border-box; }
 /* An author display rule outranks the browser's [hidden] { display: none }, so any element
    this page hides in script needs the attribute to win explicitly. */
@@ -37,7 +109,7 @@
 #tv-retention button.tvr-tree-caret {
   text-transform: none; letter-spacing: normal; text-align: left; }
 #tv-retention button.tvr-primary { background: var(--tvr-accent); border-color: var(--tvr-accent);
-  color: #1a1a1a; font-weight: 600; }
+  color: var(--tvr-on-fill); font-weight: 600; }
 #tv-retention button.tvr-primary:hover:not([disabled]) { filter: brightness(1.08); }
 #tv-retention button.tvr-danger { border-color: var(--tvr-bad); color: var(--tvr-bad); }
 #tv-retention button[disabled] { opacity: .45; cursor: not-allowed; }
@@ -75,10 +147,10 @@
 .tvr-tab-badge { display: inline-grid; place-items: center; box-sizing: border-box;
   width: auto; height: 18px; min-width: 18px; padding: 0 5px; margin-left: 5px;
   border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1;
-  vertical-align: middle; background: var(--tvr-info); color: #fff; }
+  vertical-align: middle; background: var(--tvr-info); color: var(--tvr-on-fill); }
 .tvr-tab-badge.error { background: var(--tvr-bad); }
 .tvr-tab-badge.warning { background: var(--tvr-warn); }
-.tvr-tab-badge.notice { background: var(--tvr-notice); color: #1a1a1a; }
+.tvr-tab-badge.notice { background: var(--tvr-notice); color: var(--tvr-on-fill); }
 
 .tvr-spacer { flex: 1; }
 .tvr-lede { max-width: 90ch; opacity: .8; margin-bottom: 8px; }
@@ -143,16 +215,16 @@
 .tvr-table th, .tvr-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--tvr-line); vertical-align: top; }
 .tvr-table th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; opacity: .65; }
 .tvr-scroll { overflow-x: auto; }
-.tvr-mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; word-break: break-all; }
+.tvr-mono { font-family: var(--tvr-mono-font); font-size: 11.5px; word-break: break-all; }
 .tvr-list { margin: 6px 0 0 18px; }
 
 .tvr-log { height: 60vh; overflow: auto; margin: 0; padding: 10px 12px; border: 1px solid var(--tvr-line);
-  border-radius: 6px; background: rgba(0,0,0,.22); font-family: ui-monospace, Menlo, Consolas, monospace;
+  border-radius: 6px; background: var(--tvr-well); font-family: var(--tvr-mono-font);
   font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 
 
 .tvr-dialog { border: 1px solid var(--tvr-line); border-radius: 8px; padding: 0; width: min(820px, 94vw);
-  color: inherit; background: var(--background-color, #1c1c1c); }
+  color: inherit; background: var(--tvr-bg); }
 .tvr-dialog::backdrop { background: rgba(0,0,0,.55); }
 #tvr-dialog-body { padding: 16px 18px; display: grid; gap: 8px; max-height: 74vh; overflow: auto; }
 .tvr-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; margin: 0; padding: 12px 18px;
@@ -161,7 +233,7 @@
 
 .tvr-busy { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 9999; }
 .tvr-busy-box { display: flex; gap: 10px; align-items: center; padding: 14px 20px; border-radius: 8px;
-  border: 1px solid var(--tvr-line); background: var(--background-color, #1c1c1c); }
+  border: 1px solid var(--tvr-line); background: var(--tvr-bg); }
 .tvr-spinner { width: 16px; height: 16px; border: 2px solid var(--tvr-line); border-top-color: var(--tvr-accent);
   border-radius: 50%; animation: tvr-spin .8s linear infinite; flex: 0 0 16px; }
 @keyframes tvr-spin { to { transform: rotate(360deg); } }
@@ -188,9 +260,9 @@
 #tv-retention .tvr-dot-badge.unknown { opacity: .4; }
 #tv-retention .tvr-dot-badge.checking { border-color: var(--tvr-accent); background: var(--tvr-accent);
   animation: tvr-pulse 1.2s ease-in-out infinite; }
-#tv-retention .tvr-dot-badge.error { border-color: var(--tvr-bad); background: var(--tvr-bad); color: #fff; }
-#tv-retention .tvr-dot-badge.warning { border-color: var(--tvr-warn); background: var(--tvr-warn); color: #1a1a1a; }
-#tv-retention .tvr-dot-badge.notice { border-color: var(--tvr-notice); background: var(--tvr-notice); color: #1a1a1a; }
+#tv-retention .tvr-dot-badge.error { border-color: var(--tvr-bad); background: var(--tvr-bad); color: var(--tvr-on-fill); }
+#tv-retention .tvr-dot-badge.warning { border-color: var(--tvr-warn); background: var(--tvr-warn); color: var(--tvr-on-fill); }
+#tv-retention .tvr-dot-badge.notice { border-color: var(--tvr-notice); background: var(--tvr-notice); color: var(--tvr-on-fill); }
 #tv-retention .tvr-dot-badge.blocked { box-shadow: 0 0 0 2px rgba(192,57,43,.35); }
 @keyframes tvr-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { #tv-retention .tvr-dot-badge.checking { animation: none; } }
@@ -246,7 +318,7 @@
 /* An action, not more prose. Orange is the page's own accent and reads as decoration
    next to an orange warning, so a fix is blue and says what it will do. */
 #tv-retention button.tvr-action { background: var(--tvr-action); border-color: var(--tvr-action);
-  color: #fff; font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
+  color: var(--tvr-on-fill); font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
 #tv-retention button.tvr-action:hover { filter: brightness(1.1); background: var(--tvr-action); }
 
 /* Heading, search, sort, filters and layout on one line — they are one question, and each
@@ -290,7 +362,7 @@
    that costs nothing — because nothing has happened yet. */
 .tvr-rule.queued { border-left-color: var(--tvr-bad); opacity: .95; }
 .tvr-queued-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
-  border-radius: 50%; background: var(--tvr-bad); color: #fff; font-weight: 700; font-size: 13px; line-height: 1; }
+  border-radius: 50%; background: var(--tvr-bad); color: var(--tvr-on-fill); font-weight: 700; font-size: 13px; line-height: 1; }
 .tvr-queued-lines { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 12px; opacity: .85; }
 .tvr-queued-danger { color: var(--tvr-bad); font-weight: 600; }
 
@@ -495,10 +567,10 @@
   max-height: calc(100vh - 120px); overflow-y: auto; display: grid; align-content: start;
   /* Opaque, not a tint: a translucent panel lets the list show through it, and a
      translucent sticky heading lets its own contents scroll through it. */
-  background: var(--background-color, #1c1c1c); }
+  background: var(--tvr-bg); }
 .tvr-details-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
   border-bottom: 1px solid var(--tvr-line); position: sticky; top: 0; z-index: 2;
-  background: var(--background-color, #1c1c1c); }
+  background: var(--tvr-bg); }
 .tvr-details-head h3 { margin: 0; font-size: 14px; }
 .tvr-details-body { padding: 10px; display: grid; gap: 8px; }
 /* Thin, and the pane's own: it names what the pane holds rather than what the form does,
@@ -709,8 +781,8 @@
   min-width: 19px; padding: 0; border: none; border-radius: 50%; font-size: 10px; font-weight: 700;
   color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
 #tv-retention button.tvr-card-alert.error { background: var(--tvr-bad); }
-#tv-retention button.tvr-card-alert.warning { background: var(--tvr-warn); color: #1a1a1a; }
-#tv-retention button.tvr-card-alert.notice { background: var(--tvr-notice); color: #1a1a1a; }
+#tv-retention button.tvr-card-alert.warning { background: var(--tvr-warn); color: var(--tvr-on-fill); }
+#tv-retention button.tvr-card-alert.notice { background: var(--tvr-notice); color: var(--tvr-on-fill); }
 
 .tvr-card-changes { position: absolute; top: 4px; left: 4px; display: grid; gap: 3px; z-index: 2;
   justify-items: start; }

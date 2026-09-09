@@ -71,3 +71,21 @@
   -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.3 1.9l10.8 10.8-1.4 1.4L1.9 3.3z'/><path d='M14.1 3.3L3.3 14.1l-1.4-1.4L12.7 1.9z'/></svg>");
   mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.3 1.9l10.8 10.8-1.4 1.4L1.9 3.3z'/><path d='M14.1 3.3L3.3 14.1l-1.4-1.4L12.7 1.9z'/></svg>");
 }
+
+/* The theme control: what it will switch *to*, not what is on. Three states, because
+   "follow the system" is a real answer and not the absence of one. */
+.fa-sun-o {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='3.2'/><g stroke='black' stroke-width='1.6' stroke-linecap='round'><path d='M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3.1 3.1l1.3 1.3M11.6 11.6l1.3 1.3M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3'/></g></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='3.2'/><g stroke='black' stroke-width='1.6' stroke-linecap='round'><path d='M8 1v1.8M8 13.2V15M1 8h1.8M13.2 8H15M3.1 3.1l1.3 1.3M11.6 11.6l1.3 1.3M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3'/></g></svg>");
+}
+
+.fa-moon-o {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.4 10.3A5.8 5.8 0 0 1 5.7 2.6 6.2 6.2 0 1 0 13.4 10.3z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M13.4 10.3A5.8 5.8 0 0 1 5.7 2.6 6.2 6.2 0 1 0 13.4 10.3z'/></svg>");
+}
+
+/* Follow the system: a disc lit on one side. */
+.fa-adjust {
+  -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1a7 7 0 1 0 0 14z'/><path fill='none' stroke='black' stroke-width='1.6' d='M8 1.8a6.2 6.2 0 1 1 0 12.4A6.2 6.2 0 0 1 8 1.8z'/></svg>");
+  mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 1a7 7 0 1 0 0 14z'/><path fill='none' stroke='black' stroke-width='1.6' d='M8 1.8a6.2 6.2 0 1 1 0 12.4A6.2 6.2 0 0 1 8 1.8z'/></svg>");
+}
