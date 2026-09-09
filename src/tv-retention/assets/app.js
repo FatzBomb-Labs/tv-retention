@@ -2810,6 +2810,9 @@
     };
     $('tvr-monitoring').onchange = describeMonitoring;
     describeMonitoring();
+    const automation = settings.automation || {};
+    $('tvr-exclude-seasons').value = (automation.exclude_seasons || []).join(', ');
+    $('tvr-exclude-matching').value = (automation.exclude_matching || []).join('\n');
     $('tvr-tmdb-key').value = (settings.tmdb || {}).api_key || '';
     $('tvr-history-size').value = settings.log_retention_runs;
     $('tvr-log-level').value = (settings.logging || {}).level || 'info';
@@ -2823,6 +2826,11 @@
     });
   }
 
+  // A typed list, one per line or one per comma. Blank lines are how a list is edited, not
+  // an entry, so they go — including the trailing one every textarea ends with.
+  const typedList = (value, separator) => (value || '').split(separator)
+    .map((entry) => entry.trim()).filter((entry) => entry !== '');
+
   function collectSettings() {
     const notifications = {};
     NOTIFICATIONS.forEach(([name]) => { notifications[name] = notifyInputs[name].checked; });
@@ -2832,6 +2840,10 @@
         allow_estimated_dates: $('tvr-estimated-dates').checked,
         search_after_monitor: $('tvr-search-after').checked,
         monitoring: $('tvr-monitoring').value,
+      },
+      automation: {
+        exclude_seasons: typedList($('tvr-exclude-seasons').value, ','),
+        exclude_matching: typedList($('tvr-exclude-matching').value, '\n'),
       },
       tmdb: { api_key: $('tvr-tmdb-key').value },
       log_retention_runs: $('tvr-history-size').value,
@@ -2868,7 +2880,7 @@
   const settingsDirty = (on) => {
     document.querySelectorAll('.tvr-dirty-mark').forEach((mark) => { mark.hidden = !on; });
   };
-  document.querySelectorAll('.tvr-view[id^="tvr-view-settings"]').forEach((view) => {
+  document.querySelectorAll('.tvr-view:has(.tvr-save)').forEach((view) => {
     view.addEventListener('change', (event) => {
       if (event.target.closest('#tvr-instances')) return;   // instance cards save themselves
       if (event.target.closest('#tvr-view-settings-schedule')) return;  // and so does the schedule

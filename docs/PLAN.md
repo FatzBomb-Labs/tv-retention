@@ -96,6 +96,32 @@ question — authentication — that is still open.
 
 ## Still to build
 
+### Automation, in the order it is being built
+
+The exclusion primitive and the Automation page that carries it are done — `core.py`
+decides an exclusion before it decides anything else, and *Media management → Automation*
+holds monitoring, specials, air dates, automatic search and the two exclusion lists.
+What is left:
+
+1. **What is being done to this series, in the series pane.** A plain list of the
+   automations that apply to it — the excluded seasons, the phrases that matched, the
+   monitoring mode — and an **Edit** button that opens that series' own list beside them.
+   Automatic exclusions read in one colour and hand-picked ones in another, because "why
+   is this episode not being deleted" must be answerable without visiting another page.
+2. **`Exclusions [n/n]` in the series editor**, opening the same picker the monitoring
+   tree already uses.
+3. **A staged run.** Read everything, decide everything, then write everything — rather
+   than deciding and writing per series as it goes. A run that fails halfway currently
+   leaves Sonarr in a state no single decision produced.
+4. **The air-date invariant.** A series with unresolved air dates cannot be kept by age:
+   refuse `keep_days` on it, checked when the editor opens and again on save, and say so
+   rather than silently processing nothing. Then TVMaze and AniList as providers behind
+   Sonarr and TMDB, each switchable.
+5. **Persistence, with an intent ledger** — what was decided, what was written, and what
+   is still owed, so a run interrupted mid-write can be finished rather than repeated.
+
+### Elsewhere
+
 **A smaller schedule.** Shows air at most once a day, and the interface offers hourly,
 daily, weekly, monthly by date, monthly by nth weekday, and a custom cron expression — six
 frequencies for a decision that is realistically *daily at an hour, or off*. Reduce the
@@ -122,6 +148,42 @@ with the values coming from somewhere the form never mentioned.
 
 Still worth doing: **New preset** from inside the series editor, so promoting one series'
 values into a shared preset is not a detour through another section.
+
+## Settled by investigation, not yet built
+
+**Telling Plex and Jellyfin what was deleted: don't.** Investigated at length and the
+answer moved twice, so the reasoning matters more than the conclusion.
+
+Sonarr can already notify both, on an `onEpisodeFileDelete` trigger that is off by default
+— but its Plex connection triggers a **full library scan**, not a path-scoped one.
+[Sonarr #6141](https://github.com/Sonarr/Sonarr/issues/6141) asks for the partial version
+and is still open, and that gap is the entire reason Autoscan exists. So "just tick the
+box" is advice that breaks a deliberate arrangement for anyone who turned it off on
+purpose.
+
+But Plex and Jellyfin now do partial updates from their own file watchers, which makes
+Autoscan largely redundant and makes notification unnecessary for most people. The
+remaining gap is real but narrow: watchers can be switched off, and — the part nobody
+accounts for — **inotify does not cross a network mount**, so on NFS, SMB or rclone the
+watcher is enabled, looks correct, and never fires.
+
+What that is worth: a **media-changed webhook**, carrying the series path and the deleted
+episode paths, shaped like Sonarr's `EpisodeFileDelete` so Autoscan and Notifiarr take it
+unmodified. Eighty lines, no new integration, generically useful. Not a Plex client and not
+a Jellyfin client.
+
+**Plex and Jellyfin as air-date sources: later, and for one reason only.** Not speed — a
+TMDB lookup is one call keyed on an id Sonarr already gave us, while asking Plex means
+finding the library, the series, the season and the episode, then matching on title. Not
+independence either: their agents scrape TMDB and TVDB, so they are a cache of the sources
+we would otherwise ask directly.
+
+The one case that survives is **sidecar and plugin metadata**. Somebody with curated `.nfo`
+files or a metadata plugin may hold a date no online database has. That is a real source,
+and it is the only argument for building either client.
+
+**TVDB is excluded outright.** Sonarr's primary metadata source *is* TVDB: if Sonarr has no
+air date, TVDB has none, and asking again costs a paid v4 key to learn nothing.
 
 ## Wanted, not yet designed
 

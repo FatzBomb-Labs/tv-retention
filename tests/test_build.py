@@ -595,6 +595,31 @@ class Interface(unittest.TestCase):
                 continue
             self.assertIn(identifier, wired, f'{identifier} is on the schedule panel but never saved')
 
+    def test_every_automation_control_is_wired_to_save(self):
+        """The same bug the schedule panel already has a guard for.
+
+        Automation is where a control is most likely to be added and least likely to be
+        noticed if it does nothing: every setting on it is global, so nothing on a series
+        card contradicts a value that was never saved.
+        """
+        panel = self.html.split('id="tvr-view-media-automation"')[1].split('</section>')[0]
+        collect = self.js.split('function collectSettings()')[1].split('\n  }')[0]
+        render = self.js.split('function renderSettings()')[1].split('\n  }\n')[0]
+        for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
+            if 'help' in identifier or 'field' in identifier:
+                continue
+            self.assertIn(identifier, collect, f'{identifier} is on Automation but never saved')
+            self.assertIn(identifier, render, f'{identifier} is on Automation but never filled in')
+
+    def test_the_unsaved_mark_reaches_every_view_that_can_save(self):
+        """It was bound to views whose id began "tvr-view-settings".
+
+        Automation and Presets each carry a Save button and neither id starts that way, so
+        changing something on either left the page dirty with nothing on screen saying so.
+        """
+        self.assertIn(".tvr-view:has(.tvr-save)", self.js)
+        self.assertNotIn('.tvr-view[id^="tvr-view-settings"]', self.js)
+
     def test_the_badge_is_as_tall_as_it_is_round(self):
         # Height came from line-height while width came from padding, so it rendered as a
         # squashed oval rather than a badge.

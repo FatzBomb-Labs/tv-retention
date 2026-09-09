@@ -61,7 +61,7 @@
         <button type="button" class="tvr-side-item" data-view="media-presets">Presets
           <span class="tvr-side-count" id="tvr-count-presets">0</span>
           <span class="tvr-tab-badge" id="tvr-badge-media-presets" hidden></span></button>
-        <button type="button" class="tvr-side-item" data-view="media-rules">Global rules</button>
+        <button type="button" class="tvr-side-item" data-view="media-automation">Automation</button>
         <button type="button" class="tvr-side-item" data-view="media-schedule">Schedule
           <span class="tvr-tab-badge" id="tvr-badge-media-schedule" hidden></span></button>
         <button type="button" class="tvr-side-item" data-view="media-radarr">Radarr specials
@@ -223,8 +223,9 @@
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-<section id="tvr-view-media-rules" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Retention</h2></div>
+<section id="tvr-view-media-automation" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Automation</h2></div>
+    <p class="tvr-lede">What a run decides on its own, for every series at once. Each series can override the first three; the exclusions below are added to whatever that series excludes by hand, and an excluded episode is never deleted whatever its rule says.</p>
     <h3 class="tvr-h3">Monitoring</h3>
     <div class="tvr-card">
       <div class="tvr-inline-row">
@@ -238,14 +239,33 @@
       <small>Unmonitoring happens either way, including episodes with no file: those are never deleted, so nothing else would ever reach them, and Sonarr would go on fetching what the next run removes. Any series can override this.</small>
     </div>
 
-    <h3 class="tvr-h3">Global rules</h3>
+    <h3 class="tvr-h3">Specials</h3>
     <div class="tvr-card">
       <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-include-specials"><span class="tvr-slider"></span><span class="tvr-switch-text">Include specials (season 0)</span></label>
-      <small>Applies to deletion and to the monitoring comparison together. Each series can override it.</small>
+      <small>Applies to deletion and to the monitoring comparison together, because they are one decision. Each series can override it. There is deliberately no exclusion rule for specials: this is the same question asked better.</small>
+    </div>
+
+    <h3 class="tvr-h3">Air dates</h3>
+    <div class="tvr-card">
       <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-estimated-dates"><span class="tvr-slider"></span><span class="tvr-switch-text">Estimate missing air dates from neighbouring episodes</span></label>
-      <small>Sonarr's air date is used first, then TMDB. With this off, an episode none of those can date is never deleted.</small>
+      <small>Sonarr's air date is used first, then TMDB. With this off, an episode none of those can date is never deleted — which means a series nothing can date is never processed at all by a rule that keeps by age.</small>
+    </div>
+
+    <h3 class="tvr-h3">Automatic search</h3>
+    <div class="tvr-card">
       <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-search-after"><span class="tvr-slider"></span><span class="tvr-switch-text">Search for newly monitored episodes</span></label>
       <small>When a run monitors an episode, ask Sonarr to look for it rather than waiting for its next RSS pass. Monitoring many at once means downloading many at once.</small>
+    </div>
+
+    <h3 class="tvr-h3">Exclusions</h3>
+    <div class="tvr-card">
+      <small>Evaluated on every run rather than written into each series, so changing a line here changes every series at once. A list frozen when a series was added would drift silently as these changed.</small>
+      <label class="tvr-field"><span>Exclude these seasons</span>
+        <input type="text" id="tvr-exclude-seasons" spellcheck="false" placeholder="0, 1">
+        <small>Season numbers, separated by commas. Sonarr has no season names to match on — its season object carries a number, a monitored flag and statistics, nothing else.</small></label>
+      <label class="tvr-field"><span>Exclude anything matching</span>
+        <textarea id="tvr-exclude-matching" rows="4" spellcheck="false" placeholder="christmas special&#10;behind the scenes"></textarea>
+        <small>One phrase per line, matched without regard to case against both the episode title and its file path — so a folder name is caught by the same box that catches a title.</small></label>
     </div>
     <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
       <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>

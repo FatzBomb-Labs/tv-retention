@@ -146,3 +146,41 @@ class OneRulePerSeries(unittest.TestCase):
     def test_one_matched_and_one_not_are_not_compared_at_all(self):
         document = base(rules=[self.rule('r1'), self.rule('r2', series_id=None)])
         self.assertEqual(len(validate_settings(document)['rules']), 2)
+
+
+class AutomationFromTheForm(unittest.TestCase):
+    """The Automation page posts what somebody typed, so validation gets strings.
+
+    Both fields are free text — a comma list of season numbers and a line per phrase — and
+    the browser has no way to know a season number from a word. Everything that makes them
+    a list rather than a paragraph is done here.
+    """
+
+    def automation(self, **over):
+        return validate_settings(base(automation=over))['automation']
+
+    def test_season_numbers_arrive_as_strings_and_are_sorted(self):
+        found = self.automation(exclude_seasons=['2', '0', '2'])
+        self.assertEqual(found['exclude_seasons'], [0, 2])
+
+    def test_a_word_where_a_season_number_belongs_is_refused(self):
+        with self.assertRaises(Rejected) as caught:
+            self.automation(exclude_seasons=['specials'])
+        self.assertIn('whole number', str(caught.exception))
+
+    def test_phrases_keep_the_order_they_were_typed_in(self):
+        # A pattern list is read top to bottom by whoever wrote it. Sorting it would make
+        # the box disagree with itself the first time it was saved.
+        found = self.automation(exclude_matching=['christmas special', 'behind the scenes'])
+        self.assertEqual(found['exclude_matching'], ['christmas special', 'behind the scenes'])
+
+    def test_the_same_phrase_twice_is_stored_once(self):
+        found = self.automation(exclude_matching=['pilot', 'pilot'])
+        self.assertEqual(found['exclude_matching'], ['pilot'])
+
+    def test_a_document_with_no_automation_at_all_still_gets_the_keys(self):
+        # Settings written before the section existed. Every reader indexes both lists.
+        document = base()
+        document.pop('automation', None)
+        found = validate_settings(document)['automation']
+        self.assertEqual(found, {'exclude_seasons': [], 'exclude_matching': []})
