@@ -98,22 +98,14 @@ question — authentication — that is still open.
 
 ### Automation, in the order it is being built
 
-The exclusion primitive and the Automation page that carries it are done — `core.py`
-decides an exclusion before it decides anything else, and *Media management → Automation*
-holds monitoring, specials, air dates, automatic search and the two exclusion lists.
-What is left:
+The exclusion primitive is done, the Automation page that carries it is done, and the
+series pane now reads out what applies to the series in front of you, with a picker behind
+an **Edit** button. What is left:
 
-1. **What is being done to this series, in the series pane.** A plain list of the
-   automations that apply to it — the excluded seasons, the phrases that matched, the
-   monitoring mode — and an **Edit** button that opens that series' own list beside them.
-   Automatic exclusions read in one colour and hand-picked ones in another, because "why
-   is this episode not being deleted" must be answerable without visiting another page.
-2. **`Exclusions [n/n]` in the series editor**, opening the same picker the monitoring
-   tree already uses.
-3. **A staged run.** Read everything, decide everything, then write everything — rather
+1. **A staged run.** Read everything, decide everything, then write everything — rather
    than deciding and writing per series as it goes. A run that fails halfway currently
    leaves Sonarr in a state no single decision produced.
-4. **The air-date invariant.** A series with unresolved air dates cannot be kept by age:
+2. **The air-date invariant.** A series with unresolved air dates cannot be kept by age:
    refuse `keep_days` on it, checked when the editor opens and again on save, and say so
    rather than silently processing nothing. Then TVMaze and AniList as providers behind
    Sonarr and TMDB, each switchable.
@@ -128,7 +120,7 @@ What is left:
    undated in TVDB — and specials are excluded by default. So the realistic trigger is
    somebody who has deliberately switched them on, which is a good place for the invariant
    to speak up rather than a nuisance.
-5. **Persistence, with an intent ledger** — what was decided, what was written, and what
+3. **Persistence, with an intent ledger** — what was decided, what was written, and what
    is still owed, so a run interrupted mid-write can be finished rather than repeated.
 
 ### Elsewhere
