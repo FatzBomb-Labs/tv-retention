@@ -444,11 +444,6 @@ def action_stats(settings, request):
     }
 
 
-def action_health(settings, request):
-    """Refresh the cached health, on demand or because the page found it stale."""
-    return {'health': trim_health(main.run_health_check(scheduled=False, force=bool(request.get('force'))))}
-
-
 def action_progress(settings, request):
     """Cheap poll: what a running check is doing, plus the current cached results."""
     return {'progress': read_progress(settings), 'health': trim_health(load_health(settings))}
@@ -521,10 +516,16 @@ def action_series(settings, request):
     """The series list behind the library, answered from the stored reading."""
     instance_id = str(request.get('instance_id') or '')
     catalogue = main.catalogue_for(settings, instance_id, force=bool(request.get('force')))
-    used = {r['path'] for r in settings.get('rules', []) if r['id'] != str(request.get('except_rule') or '')}
+    # By the binding a rule actually holds, and per instance: a bare set of folders said
+    # "already used" about a series a different Sonarr owns, and said nothing about a
+    # series whose folder had moved since the rule was written.
+    except_rule = str(request.get('except_rule') or '')
+    used = {(r['instance_id'], r['series_id']) for r in settings.get('rules', [])
+            if r['id'] != except_rule and r.get('series_id')}
+    taken = lambda entry: (entry['instance_id'], entry['series_id']) in used
     return {'series': [dict({key: entry.get(key) for key in LIST_FIELDS},
-                            in_use=entry['path'] in used,
-                            **describe_selectability(entry, entry['path'] in used))
+                            in_use=taken(entry),
+                            **describe_selectability(entry, taken(entry)))
                        for entry in catalogue]}
 
 
@@ -542,13 +543,6 @@ def action_test_instance(settings, request):
     }
 
 
-
-
-def action_monitoring(settings, request):
-    """Status for the requested rules. The UI asks per card, or for all of them at once."""
-    wanted = set(request.get('rule_ids') or [])
-    rules = [r for r in settings.get('rules', []) if not wanted or r['id'] in wanted]
-    return {'monitoring': [main.monitoring_for(settings, rule) for rule in rules]}
 
 
 def action_log(settings, request):
@@ -689,7 +683,6 @@ def action_clear_history(settings, request):
 
 ACTIONS = {
     'snapshot': action_snapshot,
-    'health': action_health,
     'progress': action_progress,
     'log': action_log,
     'alerts': action_alerts,
@@ -708,7 +701,6 @@ ACTIONS = {
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,
-    'monitoring': action_monitoring,
     'browse': action_browse,
     'match': action_match,
     'preview': action_preview,

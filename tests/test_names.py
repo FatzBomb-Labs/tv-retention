@@ -11,6 +11,7 @@ branches no test reaches, and it costs nothing to run.
 """
 import ast
 import builtins
+import re
 import unittest
 from pathlib import Path
 
@@ -261,3 +262,44 @@ class AcrossModules(unittest.TestCase):
         self.assertTrue(wanted, 'the scan must be seeing real references')
         missing = [name for name in wanted if not hasattr(main, name)]
         self.assertEqual(missing, [], 'actions.py reaches for something main does not have')
+
+
+class Unused(unittest.TestCase):
+    """The other half of the reachability question.
+
+    `unreachable_names` catches a name a module *uses* and cannot reach. It says nothing
+    about a name defined and never used, which is how six dead functions and two extension
+    lists survived a rewrite that removed everything calling them — including
+    `MEDIA_EXTENSIONS` and `SIDECAR_EXTENSIONS`, sitting in the module documented as
+    touching no filesystem and implying a capability the project had given up.
+    """
+
+    ROOTS = sorted(WORKER.glob('*.py')) + sorted((WORKER.parents[2] / 'tests').glob('*.py'))
+
+    @classmethod
+    def setUpClass(cls):
+        cls.everything = '\n'.join(path.read_text() for path in cls.ROOTS
+                                   + [WORKER.parents[2] / 'tools' / 'build.py'])
+
+    def mentions(self, name):
+        return len(re.findall(rf'\b{re.escape(name)}\b', self.everything))
+
+    def test_no_worker_module_defines_something_nothing_uses(self):
+        orphans = []
+        for path in sorted(WORKER.glob('*.py')):
+            tree = ast.parse(path.read_text())
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef) and not node.name.startswith('__'):
+                    # One mention is the definition itself.
+                    if self.mentions(node.name) <= 1:
+                        orphans.append(f'{path.name}: {node.name}()')
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id.isupper():
+                            if self.mentions(target.id) <= 1:
+                                orphans.append(f'{path.name}: {target.id}')
+        self.assertEqual(orphans, [], 'defined and never used anywhere, tests included')
+
+    def test_the_scan_would_notice_something_left_behind(self):
+        # Proof it is looking: a name this suite mentions nowhere else.
+        self.assertEqual(self.mentions('a_name_nothing_in_this_project_uses'), 1)

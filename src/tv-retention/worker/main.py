@@ -339,14 +339,6 @@ def scope_pass(settings: dict, rule: dict, monitor_new: bool = False,
     return {'monitored': len(result['monitored']), 'unmonitored': len(result['unmonitored'])}
 
 
-def rule_flag(settings: dict, rule: dict, name: str, default=True) -> bool:
-    """A per-series override, falling back to the global value when not set."""
-    value = rule.get(name)
-    if value is None:
-        return bool((settings.get('retention') or {}).get(name, default))
-    return bool(value)
-
-
 def apply_removals(settings: dict, rules, dry_run: bool) -> list:
     """Carry out the removals queued against series, before anything else runs.
 
@@ -1115,18 +1107,6 @@ def system_alerts(settings: dict, health: dict) -> list:
     return found
 
 
-def store_alerts(settings: dict, current: list) -> dict:
-    """Persist the current set, keeping first-seen dates and reporting what cleared."""
-    health = load_health(settings)
-    existing = health.get('alerts') or []
-    gone = alerts.resolved(existing, current)
-    health['alerts'] = alerts.merge(existing, current)
-    write_cache(settings, 'health.json', health)
-    for alert in gone:
-        log_line(settings, 'warning', f'resolved: {alert["title"]} — {alert.get("detail", "")}')
-    return health
-
-
 def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
     """Verify instances, matches, folders, and monitoring, and cache the results.
 
@@ -1191,12 +1171,12 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
         log_line(settings, 'warning', f'resolved: {alert["title"]} — {alert.get("detail", "")}')
     reportable = alerts.managed_only(health['alerts'], settings)
     summary = alerts.summarise(reportable)
-    if summary['error']:
-        headline = [a for a in reportable if a['severity'] == alerts.ERROR]
-        notify(settings, f'TV Retention: {summary["error"]} problem(s) need attention',
-               ' | '.join(f'{a["title"]}: {a["detail"]}' for a in headline)[:600],
-               'warning', event='health_problems')
-    elif scheduled:
+    # One notification per problem, the first time it appears. The summary this replaced
+    # was re-sent by every sweep for as long as the problem stayed true, so a Sonarr that
+    # had been unreachable since Tuesday said so again every day — which teaches people to
+    # ignore the notification that matters.
+    announced = announce_alerts(settings, alerts.managed_only(previous, settings), reportable)
+    if not announced and not summary['error'] and scheduled:
         notify(settings, 'TV Retention health check passed',
                f'{checked} rule(s) verified against Sonarr.', event='health_ok')
     log_line(settings, 'warning' if summary['error'] else 'verbose',

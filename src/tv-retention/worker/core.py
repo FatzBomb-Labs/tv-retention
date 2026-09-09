@@ -18,7 +18,7 @@ from pathlib import Path
 
 import schedules
 
-VERSION = '2026.09.08'
+VERSION = '2026.09.09'
 SETTINGS_VERSION = 7
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
@@ -27,10 +27,6 @@ CACHE_SCHEMA = 8
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
-MEDIA_EXTENSIONS = ['mkv', 'mp4', 'avi', 'mov', 'm4v', 'ts', 'wmv', 'mpg', 'mpeg']
-# Sidecars are removed only when they sit beside a deleted episode and share its stem.
-SIDECAR_EXTENSIONS = ['jpg', 'jpeg', 'png', 'nfo', 'txt', 'srt', 'sub', 'idx', 'ass', 'ssa', 'vtt', 'sup']
-
 COMBINE_MODES = ['earliest', 'latest', 'any']
 
 # How the plugin treats Sonarr's monitored flags. Two values, not three: "leave Sonarr
@@ -320,18 +316,6 @@ def validate_profile(raw) -> dict:
                 name=_text(raw.get('name'), 'Preset name', 80, required=True))
 
 
-def profile_label(profile: dict) -> str:
-    """A short description of a preset, for menus and reports."""
-    parts = []
-    if profile.get('keep_days'):
-        parts.append(f'{profile["keep_days"]}d')
-    if profile.get('keep_episodes'):
-        parts.append(f'{profile["keep_episodes"]} eps')
-    if profile.get('keep_seasons'):
-        parts.append(f'{profile["keep_seasons"]} seasons')
-    return f'{profile.get("name", "")} ({", ".join(parts)}, {profile.get("combine", "earliest")})'
-
-
 def effective_rule(rule: dict, profiles) -> dict:
     """Resolve a rule to the conditions a run should apply.
 
@@ -477,8 +461,18 @@ def validate_settings(raw, previous=None) -> dict:
             raise Rejected('Duplicate rule id')
         rule_ids.add(rule['id'])
         rules.append(rule)
-    paths = [r['path'] for r in rules]
-    if len(set(paths)) != len(paths):
+    # A rule binds to one Sonarr series, so the binding is what must be unique. Keyed on
+    # the folder instead, a rule stored before Sonarr moved the series and one added
+    # afterwards carried different paths, bound to the same series, and were both
+    # processed — two keep windows deleting each other's episodes. The folder key was also
+    # instance-blind, so two Sonarrs sharing a root could not both be managed.
+    bound = [(r['instance_id'], r['series_id']) for r in rules if r.get('series_id')]
+    if len(set(bound)) != len(bound):
+        raise Rejected('Two rules point at the same Sonarr series; merge them instead')
+    # A rule that has never matched has no series id to be unique by, so where it points
+    # is still the only thing identifying it.
+    folders = [(r['instance_id'], r['path']) for r in rules if not r.get('series_id')]
+    if len(set(folders)) != len(folders):
         raise Rejected('Two rules point at the same folder; merge them instead')
 
     schedule_raw = raw.get('schedule') or {}

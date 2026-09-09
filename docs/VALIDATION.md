@@ -10,7 +10,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 378 tests, all pass |
+| `python3 -m unittest discover -s tests` | 388 tests, all pass |
 | `python3 tools/build.py` | package and manifest built, rebuild is byte-identical |
 | `php -l src/tv-retention/include/api.php` | no syntax errors |
 | `php -l` on the PHP section of `TVRetention.page` | no syntax errors |
@@ -21,7 +21,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | File | Tests | What it holds |
 |---|---|---|
-| `test_build.py` | 118 | The package, and the interface as a build artefact |
+| `test_build.py` | 120 | The package, and the interface as a build artefact |
 | `test_monitoring.py` | 33 | The two modes, the keep frame, and what each one asks Sonarr to do |
 | `test_freshness.py` | 31 | Reading ages, staleness, what may be shown as current |
 | `test_migration.py` | 30 | Settings v1 → v7, each step and the whole chain |
@@ -30,10 +30,10 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 | `test_mapping.py` | 19 | The Sonarr payload as it actually arrives, through the real client |
 | `test_cache.py` | 16 | Cache keys derived from the mapping's shape |
 | `test_queue.py` | 15 | Queued removals and the check queue |
-| `test_settings.py` | 15 | Validation, redaction, injection and traversal rejection |
-| `test_names.py` | 14 | Names each module can actually reach, plus alert display rules |
+| `test_settings.py` | 19 | Validation, redaction, injection and traversal rejection, one rule per series |
+| `test_names.py` | 16 | Names each module can reach, names nothing uses, alert display rules |
 | `test_presets.py` | 10 | Shared values, and what a preset may not do |
-| `test_progress.py` | 10 | The progress marker and the banner over it |
+| `test_progress.py` | 12 | The progress marker, the banner over it, and what the header totals |
 | `test_sonarr.py` | 9 | Rule-to-series matching, and ambiguity refused rather than guessed |
 | `test_unaired.py` | 9 | Unaired seasons, and the next episode due |
 
@@ -81,9 +81,6 @@ Against the running `Sonarr-Series` container, from a `/tmp` staging directory w
 - **A live monitoring write.** The selection has been exercised; Sonarr's `PUT` has not.
 - **The plugin installed through the WebGUI**, and the generated cron entry firing.
 - **TMDB air-date filling** — no API key configured.
-- **Unraid notifications** — no notification has been observed arriving.
-- **`main.announce_alerts`** has no caller. It is the "tell me the first time, and never
-  again" path, keyed so a condition true since Tuesday is not announced on Wednesday.
-  Notifications currently come from the health check's summary instead, which re-notifies
-  whenever an error is present at check time. Wire it up or delete it; as it stands it is
-  a designed behaviour that does not run.
+- **Unraid notifications** — no notification has been observed arriving. `announce_alerts`
+  is now wired into the sweep, so the first appearance of a problem is what sends one; that
+  path has unit coverage but has never been watched end to end on this server.

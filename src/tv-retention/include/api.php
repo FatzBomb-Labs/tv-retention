@@ -30,6 +30,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && isset($_GET['poster'])) {
     $series = (int)($_GET['poster'] ?? 0);
     $wanted = (string)($_GET['instance'] ?? '');
     if ($series <= 0) fail_request(400, 'No series');
+    // Instance ids are generated (12 hex characters) and this one becomes part of a
+    // filename, so it is checked for shape before it is used as one — the lookup below
+    // would reject anything unknown anyway, but a path is not the place to find out.
+    if (!preg_match('/^[a-f0-9]{1,32}$/', $wanted)) fail_request(400, 'No such Sonarr instance');
 
     $settings = json_decode((string)@file_get_contents(TVR_SETTINGS), true);
     if (!is_array($settings)) fail_request(503, 'Settings are unreadable');
@@ -40,9 +44,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && isset($_GET['poster'])) {
     if ($instance === null) fail_request(404, 'No such Sonarr instance');
 
     $dir = rtrim((string)($settings['state_dir'] ?? '/mnt/user/appdata/tv-retention'), '/') . '/posters';
-    $cached = $dir . '/' . $wanted . '-' . $series . '.jpg';
+    // The stamp is Sonarr's own artwork path, which carries its last-write marker. Hashed
+    // into the filename so a new picture is a new file: keyed on the series alone, the
+    // first poster ever fetched was served for ever, and a day of browser caching on top
+    // of it. Hashed rather than used directly because it arrives from a query string and
+    // is about to become a path.
+    $stamp = substr(md5((string)($_GET['stamp'] ?? '')), 0, 12);
+    $prefix = $dir . '/' . $wanted . '-' . $series;
+    $cached = $prefix . '-' . $stamp . '.jpg';
     if (!is_file($cached) || filesize($cached) === 0) {
         @mkdir($dir, 0755, true);
+        // Whatever this series looked like before. Left behind, every artwork change
+        // would add a file and remove none.
+        foreach (glob($prefix . '-*.jpg') ?: [] as $stale) @unlink($stale);
         // 250px: eight kilobytes against sixty for the full size, and a card is smaller
         // than either. The larger ones stay in Sonarr, where they already are.
         $url = rtrim((string)$instance['url'], '/') . '/api/v3/mediacover/' . $series . '/poster-250.jpg';

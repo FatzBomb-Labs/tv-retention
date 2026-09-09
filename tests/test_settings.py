@@ -103,3 +103,46 @@ class Settings(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OneRulePerSeries(unittest.TestCase):
+    """A rule binds to one Sonarr series, so that binding is what must be unique.
+
+    Keyed on the folder instead, a rule stored before Sonarr moved the series and one
+    added afterwards carried different paths, bound to the same series, and were both
+    processed — two keep windows deleting each other's episodes.
+    """
+
+    def rule(self, rid, **over):
+        entry = {'id': rid, 'instance_id': 'i1', 'series_id': 5, 'series_title': 'Show',
+                 'tvdb_id': 99, 'path': '/mnt/user/media/TV/Show', 'keep_days': 30}
+        entry.update(over)
+        return entry
+
+    def test_two_rules_on_one_series_are_refused_whatever_their_folders_say(self):
+        document = base(rules=[self.rule('r1'),
+                               self.rule('r2', path='/mnt/user/media/TV/Show (2019)')])
+        with self.assertRaises(Rejected) as caught:
+            validate_settings(document)
+        self.assertIn('same Sonarr series', str(caught.exception))
+
+    def test_two_sonarrs_may_share_a_folder(self):
+        # The old folder key was instance-blind, so two Sonarrs over one tree could not
+        # both be managed. Different series, same path, and nothing is ambiguous.
+        document = base(instances=[
+            {'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32},
+            {'id': 'i2', 'name': 'Anime', 'url': 'http://sonarr:8990', 'api_key': 'b' * 32}])
+        document['rules'] = [self.rule('r1'), self.rule('r2', instance_id='i2', series_id=6)]
+        self.assertEqual(len(validate_settings(document)['rules']), 2)
+
+    def test_a_rule_that_never_matched_is_still_identified_by_where_it_points(self):
+        # No series id to be unique by, so the folder is all there is.
+        document = base(rules=[self.rule('r1', series_id=None),
+                               self.rule('r2', series_id=None)])
+        with self.assertRaises(Rejected) as caught:
+            validate_settings(document)
+        self.assertIn('same folder', str(caught.exception))
+
+    def test_one_matched_and_one_not_are_not_compared_at_all(self):
+        document = base(rules=[self.rule('r1'), self.rule('r2', series_id=None)])
+        self.assertEqual(len(validate_settings(document)['rules']), 2)

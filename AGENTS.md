@@ -8,7 +8,7 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 There is no Python or PHP in the Webtop development container. Run
 `./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
 `python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 378 tests with no expected failures.
+there. The suite is 388 tests with no expected failures.
 
 ## Layout
 
@@ -58,12 +58,21 @@ Sonarr and decides things, plus the tick and the CLI.
   must still arrive with it, or the interface has nowhere to put the value.
 - Sonarr reads happen in the background, per show. They must never raise the busy overlay,
   and must never hold a show other than the one being read.
-- A widened rule offers a one-time pass over the episodes the widening brought into scope,
-  and offers it only then. The window as it was travels with the request, so "newly scoped"
-  stays answerable later: episodes move, and a remembered list of ids does not. Monitoring
-  is the only half offered, because it is the only half that is a choice — a run unmonitors
-  everything outside the window regardless, so saving does it too rather than leaving Sonarr
-  a day to fetch what that run would delete.
+- A rule is unique by the series it binds to — `(instance_id, series_id)` — not by its
+  folder. Keyed on the folder, a rule written before Sonarr moved the series and one added
+  afterwards bound to the same series and were both processed. A rule that has never
+  matched has no series id, so for that one the folder is still the only identity it has.
+- The editor offers a one-time monitoring pass over whatever the keep window holds, not
+  only over what a widening brought in: the window's contents are always worth showing, and
+  whether they are worth changing is the operator's business. The window as it was still
+  travels with the request, so "newly scoped" stays answerable later — episodes move, and a
+  remembered list of ids does not. Monitoring is the only half offered, because it is the
+  only half that is a choice: a run unmonitors everything outside the window regardless, so
+  saving does it too rather than leaving Sonarr a day to fetch what that run would delete.
+- Every action on the RPC surface is one the interface actually asks for, and a test says
+  so. An action the page cannot reach is still reachable by anything that can post to the
+  bridge, and the one that had gone unreachable read every bound series from Sonarr
+  synchronously in a single request.
 - Both object caches are keyed by the shape of what Sonarr's mapping produces, not only by
   a schema number. Listing a field in `SERIES_FIELDS` or `EPISODE_FIELDS` *is* the cache
   bump, and a test fails if the mapping produces a key the list does not name.
@@ -76,6 +85,10 @@ Sonarr and decides things, plus the tick and the CLI.
   visible half would leave Unraid notifications firing about a series no run will touch.
 - Test against isolated fixtures. Live checks against Sonarr must be read-only, run from
   a `/tmp` staging directory with `TVR_CONFIG` pointed away from `/boot`.
+- A problem is notified once, when it first appears, and again only if what it says
+  changes. `announce_alerts` decides that by key; the summary it replaced was re-sent by
+  every sweep for as long as the problem stayed true, which teaches people to ignore the
+  notification that matters.
 
 ## The WebGUI's cascade
 

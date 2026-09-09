@@ -128,13 +128,6 @@
     return { node, input, caption };
   }
 
-  // A "?" the reader can ask, rather than a paragraph under every row shouting at once.
-  function hint(explanation) {
-    const mark = el('button', { type: 'button', className: 'tvr-hint', textContent: '?',
-                                title: explanation, 'aria-label': explanation });
-    mark.addEventListener('click', (event) => { event.preventDefault(); window.alert(explanation); });
-    return mark;
-  }
 
   function field(label, control, note) {
     const wrapper = el('label', { className: 'tvr-field' }, [el('span', { textContent: label }), control]);
@@ -798,49 +791,6 @@
     return parts;
   }
 
-  function keepWindow(rule) {
-    // One comparable number for "how much is kept", so series with different conditions
-    // still order sensibly. Days dominate; episodes and seasons approximate.
-    const source = presetFor(rule) || rule;
-    const candidates = [];
-    if (source.keep_days) candidates.push(Number(source.keep_days));
-    if (source.keep_episodes) candidates.push(Number(source.keep_episodes) * 7);
-    if (source.keep_seasons) candidates.push(Number(source.keep_seasons) * 365);
-    return candidates.length ? Math.min(...candidates) : Number.MAX_SAFE_INTEGER;
-  }
-
-  function sortRules(rules) {
-    const byTitle = (a, b) => (a.series_title || a.path).localeCompare(b.series_title || b.path,
-                                                                      undefined, { sensitivity: 'base' });
-    const mode = $('tvr-sort').value;
-    const sorted = rules.slice();
-    if (mode === 'title') return sorted.sort(byTitle);
-    if (mode === 'title-desc') return sorted.sort((a, b) => byTitle(b, a));
-    if (mode === 'checked') {
-      return sorted.sort((a, b) => {
-        const at = (monitoring[a.id] || {}).checked_at || '';
-        const bt = (monitoring[b.id] || {}).checked_at || '';
-        if (!at !== !bt) return at ? 1 : -1;   // never checked first: least known, not most recent
-        return at.localeCompare(bt) || byTitle(a, b);
-      });
-    }
-    if (mode === 'keep') return sorted.sort((a, b) => keepWindow(a) - keepWindow(b) || byTitle(a, b));
-    if (mode === 'preset') {
-      return sorted.sort((a, b) => ((presetFor(a) || {}).name || '').localeCompare((presetFor(b) || {}).name || '')
-        || byTitle(a, b));
-    }
-    if (mode === 'instance') {
-      const name = (rule) => ((settings.instances || []).find((i) => i.id === rule.instance_id) || {}).name || '';
-      return sorted.sort((a, b) => name(a).localeCompare(name(b)) || byTitle(a, b));
-    }
-    return sorted.sort((a, b) => {
-      const rank = (rule) => (isBlocked(rule.id) ? -1 : ATTENTION_RANK[worstSeverity(seriesAlerts(rule.id))] ?? 3);
-      return rank(a) - rank(b) || byTitle(a, b);
-    });
-  }
-
-  // Enabling a series is the most frequent change anyone makes, so it lives on the card.
-  // It saves immediately and reverts visibly if the save is refused.
   // A small round badge, left of the title, the way a count belongs. It carries the worst
   // severity present and nothing else: the detail is one click away and does not need to
   // compete with the series name for space.
@@ -984,8 +934,13 @@
   function posterNode(series, className) {
     const art = el('div', { className: className || 'tvr-poster' });
     if (series.poster) {
+      // Sonarr's own path for the artwork, carried through as a stamp rather than read:
+      // it changes when the artwork does, and it is the only thing that can tell the
+      // cache the picture is a different picture. Without it the proxy kept the first
+      // poster it ever fetched, for good.
       art.append(el('img', { loading: 'lazy', alt: '',
                              src: `${API}?poster=${series.series_id}&instance=${encodeURIComponent(series.instance_id)}`
+                                  + `&stamp=${encodeURIComponent(series.poster)}`
                                   + `&csrf_token=${encodeURIComponent(CSRF)}` }));
     } else {
       art.textContent = (series.title || '?').slice(0, 1);
@@ -2232,22 +2187,7 @@
              profile_id: rule.profile_id || '' };
   }
 
-  // Whether a save can only have grown the window. A preset changing either way is treated
-  // as widening, because the preset's values are not in front of us to compare.
-  function widensScope(before, after) {
-    if (!before) return true;
-    if (before.profile_id !== after.profile_id || after.profile_id) return true;
-    const grew = (was, now) => (was == null ? now != null : (now != null && Number(now) > Number(was)));
-    const shrank = (was, now) => (was != null && (now == null || Number(now) < Number(was)));
-    const keys = ['keep_days', 'keep_episodes', 'keep_seasons'];
-    if (keys.some((key) => shrank(before[key], after[key]))) return keys.some((key) => grew(before[key], after[key]));
-    return keys.some((key) => grew(before[key], after[key])) || before.combine !== after.combine;
-  }
 
-  // -- add series --------------------------------------------------------
-  // Everything Sonarr holds that has no rule yet, from the stored reading. A search rather
-  // than a wall: three thousand cards is not a list anyone reads.
-  const ADD_LIMIT = 60;
 
 
   const REMOVAL_ACTIONS = [
@@ -2272,7 +2212,6 @@
   };
 
   const queuedRemoval = (rule) => (rule.queue || {}).removal || null;
-  const queuedFixes = (rule) => ((rule.queue || {}).fixes || []).map((entry) => entry.kind);
 
   // A queued series states its intent on the card and can be taken back until a run
   // applies it. Nothing has happened yet, so the card says exactly what will.

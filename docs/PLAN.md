@@ -19,20 +19,15 @@ frequencies for a decision that is realistically *daily at an hour, or off*. Red
 underneath: it catches up a run missed while the server was off and holds one until Sonarr
 answers, and neither of those is something a simpler surface should lose.
 
-**Tooltips.** Most settings should carry a `?` that explains them, rather than the
-explanation always being present in small type under the control. `hint()` in `app.js` is
-written and **has no caller** — it is half of this item sitting in the file. Either use it
-across the settings views or delete it; a helper nothing calls is not a plan, it is debris.
+**Tooltips.** Most settings should carry an explanation on hover rather than in small type
+under the control. The library's row is the pattern and the whole of the technique: *Hide
+ended* carries its entire rule in a `title`, and the switch reads as two words. A control
+does not need to explain itself to be understood, only to be trusted, and hovering is where
+trust is cheap.
 
-The library's own row already works this way and is the pattern to follow: *Hide ended*
-carries the whole rule on hover rather than in its label. A control does not need to
-explain itself to be understood, only to be trusted, and hovering is where trust is cheap.
-
-**Wire up or delete `announce_alerts`.** `main.announce_alerts` has no caller. It is the
-"notify the first time a problem appears, and never again" path — keyed, so a condition
-true since Tuesday is not announced on Wednesday. Notifications currently come from the
-health check's summary instead, which re-notifies whenever an error is present at check
-time. One of the two should go.
+The `hint()` helper written for this was deleted rather than kept — it rendered a `?` that
+opened a `window.alert`, which is a worse answer than the attribute the browser already
+has, and it had sat uncalled since it was written.
 
 ## Open questions
 

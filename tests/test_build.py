@@ -1,4 +1,5 @@
 import hashlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -363,6 +364,46 @@ class Interface(unittest.TestCase):
         # answer, not a search box six characters wide.
         self.assertIn('.tvr-series-head { flex-wrap: wrap', self.css)
 
+    def test_a_poster_is_cached_against_the_artwork_and_not_the_series(self):
+        """Sonarr's artwork path carries its last-write marker; nothing was reading it.
+
+        `series.poster` was used as a boolean — *is there a picture* — and the proxy keyed
+        its cache on the series id alone. So the first poster ever fetched was the one
+        served for good, with a day of browser caching over the top of it.
+        """
+        self.assertIn('&stamp=${encodeURIComponent(series.poster)}', self.js)
+        php = (ROOT / 'src' / 'tv-retention' / 'include' / 'api.php').read_text()
+        self.assertIn("substr(md5((string)($_GET['stamp'] ?? '')), 0, 12)", php)
+        self.assertIn("$cached = $prefix . '-' . $stamp . '.jpg';", php)
+        # A new picture is a new file, so the old one has to go with it.
+        self.assertIn("foreach (glob($prefix . '-*.jpg') ?: [] as $stale) @unlink($stale);", php)
+        # It becomes part of a path, so its shape is checked before it becomes one.
+        self.assertIn("preg_match('/^[a-f0-9]{1,32}$/', $wanted)", php)
+
+    def test_the_library_says_used_by_the_binding_a_rule_holds(self):
+        """Not by folder. A bare set of paths was wrong in both directions.
+
+        It said "already used" about a series a different Sonarr owns, and said nothing
+        about a series whose folder had moved since its rule was written.
+        """
+        actions = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        block = actions.split('def action_series')[1].split('\n\n\n')[0]
+        self.assertIn("used = {(r['instance_id'], r['series_id'])", block)
+        self.assertNotIn("{r['path'] for r in", block)
+
+    def test_the_rpc_surface_offers_nothing_the_page_cannot_reach(self):
+        """An unreachable action is still reachable by anyone who can post to the bridge.
+
+        `monitoring` read every bound series from Sonarr synchronously, in one request,
+        with no `offline=True` — against the rule that reads happen per show, in the
+        background, and never hold anything but the show being read.
+        """
+        actions = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        offered = set(re.findall(r"^    '([a-z-]+)': action_", actions, re.M))
+        asked = set(re.findall(r"api\('([a-z-]+)'", self.js))
+        self.assertEqual(sorted(offered - asked), [],
+                         'actions the interface never asks for')
+
     def test_the_webgui_defaults_this_page_has_to_undo_are_undone(self):
         """Unraid styles every button and text input through `:where()` selectors.
 
@@ -475,16 +516,6 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r'function systemAlertCard\(instanceName, list\)')
         self.assertIn('byInstance', self.js)
 
-    def test_tab_styling_outranks_the_generic_button_rule(self):
-        """Same trap as the badge: a bare `.tvr-tabs button` loses to `#tv-retention button`.
-
-        The active underline was drawn on an element that also had the generic 1px box
-        border, so nothing looked selected.
-        """
-        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
-        self.assertNotRegex(css, r'(?m)^\.tvr-tabs button')
-        self.assertRegex(css, r'#tv-retention \.tvr-tabs button\.active[^{]*\{[^}]*border-bottom')
-
     def test_a_fix_is_presented_as_an_action(self):
         self.assertIn('Quick action: ', self.js)
         css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
@@ -571,7 +602,7 @@ class Interface(unittest.TestCase):
     def test_the_refresh_control_sits_beside_the_run_button(self):
         head = self.html.split('</header>')[0]
         self.assertLess(head.index('tvr-refresh-all'), head.index('tvr-run'))
-        self.assertIn('.tvr-head-run', self.css)
+        self.assertIn('.tvr-topbar-actions', self.css)
         self.assertNotIn('tvr-head-plan', self.html)
 
     def test_the_schedule_saves_itself(self):

@@ -91,10 +91,6 @@ class StaleSelection(unittest.TestCase):
         self.assertEqual(self.main.stale_rule_ids(self.settings, self.health), [])
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class HealthPruning(unittest.TestCase):
     def test_results_for_removed_rules_do_not_linger(self):
         """Otherwise the cache grows for ever and its counts disagree with the show list."""
@@ -110,3 +106,32 @@ class HealthPruning(unittest.TestCase):
             live = {rule['id'] for rule in settings['rules']}
             health['rules'] = {rid: e for rid, e in health['rules'].items() if rid in live}
             self.assertEqual(sorted(health['rules']), ['r1', 'r2'])
+
+
+class PlanTotals(unittest.TestCase):
+    """What the header counts, and what a run would actually do, must be the same set."""
+
+    def setUp(self):
+        import actions
+        self.actions = actions
+
+    def totals(self, enabled):
+        settings = {'rules': [{'id': 'r1', 'enabled': enabled}]}
+        health = {'rules': {'r1': {'plan': {'delete': 4, 'delete_bytes': 40, 'unmonitor': 0,
+                                            'monitor': 0, 'newly_scoped': 0}}}}
+        return self.actions.plan_summary(settings, health)
+
+    def test_a_disabled_rule_counts_for_nothing(self):
+        # A run selects on `enabled`, so anything the header counted for a switched-off
+        # rule would be a number nothing was ever going to do.
+        self.assertEqual(self.totals(False)['actionable'], 0)
+        self.assertEqual(self.totals(True)['actionable'], 4)
+
+    def test_a_disabled_rule_is_not_counted_as_unknown_either(self):
+        # "Unknown" is what makes the plan untrustworthy and keeps the Run button visible.
+        # A rule nobody is running is not a gap in the picture.
+        self.assertTrue(self.totals(False)['trustworthy'])
+
+
+if __name__ == '__main__':
+    unittest.main()

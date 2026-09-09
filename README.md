@@ -297,6 +297,10 @@ has newly taken on, a series that has ended. **Never the retention itself.** Epi
 scheduled for deletion and monitoring being brought into line are the job, not the news —
 being told about them is what this plugin exists to avoid.
 
+Each problem is announced **once**, when it first appears, and again only if what it says
+changes. A Sonarr that has been unreachable since Tuesday is not news again on Wednesday,
+and a notification that repeats is one people learn to ignore.
+
 ## Sonarr instances
 
 Add each Sonarr with its URL and API key. **Test & save** confirms the version, counts the
@@ -417,7 +421,7 @@ because losing one produces no error.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 378 tests
+python3 -m unittest discover -s tests -v   # 388 tests
 python3 tools/build.py                     # writes dist/ and install/tv-retention.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```
