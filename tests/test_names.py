@@ -278,8 +278,7 @@ class Unused(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.everything = '\n'.join(path.read_text() for path in cls.ROOTS
-                                   + [WORKER.parents[2] / 'tools' / 'build.py'])
+        cls.everything = '\n'.join(path.read_text() for path in cls.ROOTS)
 
     def mentions(self, name):
         return len(re.findall(rf'\b{re.escape(name)}\b', self.everything))

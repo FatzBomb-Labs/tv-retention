@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 7
+SETTINGS_VERSION = 8
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -76,8 +76,23 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v6(document))
     if version < 7:
         document.update(_to_v7(document))
+    if version < 8:
+        document.update(_to_v8(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v8(document: dict) -> dict:
+    """Notifications go outward now, rather than into the host.
+
+    The plugin shelled out to Unraid's `notify` script, so there was nowhere to configure:
+    the destination was the machine it was installed on. A container has to be told, and
+    empty means nowhere — the flags that say *which* events matter are unchanged, and keep
+    whatever they were set to.
+    """
+    notifications = dict(document.get('notifications') or {})
+    notifications.setdefault('webhook_url', '')
+    return {'notifications': notifications}
 
 
 def _to_v7(document: dict) -> dict:

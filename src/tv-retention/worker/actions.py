@@ -22,7 +22,7 @@ from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   describe_selectability, effective_rule, new_id, next_episode, normalise,
                   redact, validate_settings)
 from sonarr import Sonarr, SonarrError
-from store import (CRON, SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
+from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
                    read_journal, read_log, read_progress, save_settings, save_state,
                    trim_health, write_cache)
@@ -89,7 +89,7 @@ def action_snapshot(settings, request):
     health = load_health(settings)
     # A page opening on a reading older than the interval syncs first, so "it is probably
     # up to date" is true rather than hopeful.
-    if main.array_ready() and main.sync_is_due(settings):
+    if main.sync_is_due(settings):
         with contextlib.suppress(Rejected, SonarrError):
             with main.run_lock():
                 main.sync_from_sonarr(settings, reason='opened stale')
@@ -97,10 +97,9 @@ def action_snapshot(settings, request):
     return {
         'version': VERSION,
         'settings': redact(settings),
-        'array_ready': main.array_ready(),
         'runs': list(reversed(state.get('runs', []))),
         'last_run': state.get('last_run'),
-        'schedule_active': CRON.exists(),
+        'schedule_active': bool((settings.get('schedule') or {}).get('enabled')),
         # Cached monitoring, rendered immediately. Every entry carries the moment it was
         # read, so nothing on screen pretends to be live.
         'health': trim_health(health),
@@ -119,7 +118,6 @@ def action_snapshot(settings, request):
 
 def action_sync(settings, request):
     """Read Sonarr now, because someone asked. The only unbounded wait in the interface."""
-    main.require_ready()
     with main.run_lock():
         report = main.sync_from_sonarr(settings, reason='asked for')
     health = load_health(settings)
@@ -135,16 +133,13 @@ def action_watch(settings, request):
     and the page follows. Anything that needs Sonarr waits for the daily sync, or for
     someone to press the button.
     """
-    if not main.array_ready():
-        return {'array_ready': False, 'stale_rules': []}
     health = load_health(settings)
     # Free, and the reason the page can call this every fifteen seconds: the plan is
     # arithmetic over episodes already in hand, and time alone can move a keep window.
     if main.recompute_plans(settings, health):
         write_cache(settings, 'health.json', health)
         health = load_health(settings)
-    return {'array_ready': True,
-            'progress': read_progress(settings),
+    return {'progress': read_progress(settings),
             'health': trim_health(health),
             'alerts': visible_alerts(settings, health),
             'stale_rules': main.stale_rule_ids(settings, health),
@@ -458,7 +453,6 @@ def action_check_rule(settings, request):
     if progress.get('running'):
         # A sweep is already covering this rule; asking again would only duplicate its work.
         return {'busy': True, 'progress': progress}
-    main.require_ready()
     health = load_health(settings)
     instance_state = (health.get('instances') or {}).get(rule['instance_id'])
     if not instance_state or age_seconds(instance_state.get('checked_at')) is None \
@@ -485,7 +479,6 @@ def action_check_rule(settings, request):
 def action_settings(settings, request):
     updated = validate_settings(request.get('settings') or {}, previous=settings)
     save_settings(updated)
-    main.write_cron(updated)
     main.log_settings_change(updated, settings, updated)
     # A changed URL, key or mapping makes the cached series list wrong in a way no
     # timestamp would catch, so it is dropped rather than aged out.
@@ -494,7 +487,8 @@ def action_settings(settings, request):
     # A rule that is gone must not leave its episodes behind; the store is keyed by rule.
     for gone in {rule['id'] for rule in settings.get('rules', [])} - {rule['id'] for rule in updated.get('rules', [])}:
         forget_episodes(updated, gone)
-    return {'settings': redact(updated), 'schedule_active': CRON.exists(),
+    return {'settings': redact(updated),
+            'schedule_active': bool((updated.get('schedule') or {}).get('enabled')),
             'schedule_text': schedules.describe(updated.get('schedule') or {}),
             }
 

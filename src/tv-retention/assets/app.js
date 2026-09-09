@@ -218,7 +218,7 @@
     render();
     const progress = snapshot.progress || {};
     if (progress.running) startPolling();
-    else if (snapshot.array_ready) queueChecks(snapshot.stale_rules || []);
+    else queueChecks(snapshot.stale_rules || []);
   }
 
   function applyHealth(health) {
@@ -336,14 +336,13 @@
 
   async function watchTick() {
     if (document.hidden || checkRunning || checkQueue.length || pollTimer) return;
-    if (!snapshot || !snapshot.array_ready) return;
+    if (!snapshot) return;
     let data;
     try {
       data = await api('watch', {}, '', true);
     } catch (error) {
       return;  // a heartbeat that misses a beat is not worth interrupting anyone for
     }
-    if (!data.array_ready) return;
     if ((data.progress || {}).running) { startPolling(); return; }
     snapshot.sync = data.sync || snapshot.sync;
     // Re-rendering on a timer would fight with whatever is being read on screen, so it
@@ -383,7 +382,6 @@
   function render() {
     $('tvr-version').textContent = snapshot.version || '';
     $('tvr-about-version').textContent = snapshot.version || '';
-    $('tvr-array').hidden = !!snapshot.array_ready;
     const banner = ((settings || {}).alerts || {}).test_banner || 'full';
     $('tvr-test-banner').hidden = !snapshot.test_mode || banner === 'chip';
     $('tvr-test-chip').hidden = !snapshot.test_mode || banner !== 'chip';
@@ -565,7 +563,7 @@
     $('tvr-changes-caret').hidden = nothing;
     button.disabled = nothing;
     // The run button is the play: nothing to run means nothing to press.
-    $('tvr-run').disabled = nothing || !snapshot.array_ready;
+    $('tvr-run').disabled = nothing;
     $('tvr-run').title = nothing ? 'Nothing is scheduled to change' : 'Run now';
 
     menu.hidden = true;

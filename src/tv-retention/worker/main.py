@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import urllib.parse
+import urllib.request
 import time
 from pathlib import Path
 
@@ -32,7 +33,7 @@ import alerts
 from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
 import schedules
-from store import (CONFIG, CRON, DEVELOPMENT, NAME, NOTIFY, RUNTIME, SCHEMA, UPDATE_CRON,
+from store import (CONFIG, DEVELOPMENT, NAME, RUNTIME, SCHEMA,
                    age_seconds, cache_path, clear_progress, episode_cache, forget_episodes,
                    invalidate_catalogue, job_state, journal, load_health, load_settings,
                    load_state, log_line, now_iso, read_cache, read_log, read_progress,
@@ -41,34 +42,20 @@ from store import (CONFIG, CRON, DEVELOPMENT, NAME, NOTIFY, RUNTIME, SCHEMA, UPD
 from tmdb import TMDB, TMDBError, fill_air_dates
 
 MAX_BROWSE_ENTRIES = 500
-# Every minute: the tick is cheap, and a finer resolution means an hourly schedule set to
-# :07 actually fires at :07 rather than at the next multiple of five.
 # Sonarr is confirmed reachable this often, and before anything that needs it.
 CONNECTIVITY_SECONDS = 300
+# The resident loop's heartbeat. The plugin published a one-minute cron entry and let the
+# worker decide what was due; a process that stays alive just sleeps. The reasons the tick
+# existed — catching up a run missed while the machine was off, holding one until Sonarr
+# answers — are now ordinary rather than carefully arranged.
+TICK_SECONDS = 30
 
-TICK_CRON = '* * * * *'
 
 
 
 # ---------------------------------------------------------------------------
 # Environment guards
 # ---------------------------------------------------------------------------
-
-def array_ready() -> bool:
-    if DEVELOPMENT:
-        return True
-    path = Path('/var/local/emhttp/var.ini')
-    if not path.exists():
-        return False
-    return any(line.strip().strip(';') in ('mdState="STARTED"',) for line in path.read_text().splitlines())
-
-
-def require_ready() -> None:
-    if not array_ready():
-        raise Rejected('The array is stopped. Start it before running TV Retention.')
-    if not DEVELOPMENT and not Path('/mnt/user').is_mount():
-        raise Rejected('Unraid user shares are not mounted.')
-
 
 @contextlib.contextmanager
 def run_lock(blocking: bool = False):
@@ -84,42 +71,36 @@ def run_lock(blocking: bool = False):
 
 def notify(settings: dict, subject: str, description: str, importance: str = 'normal',
            event: str = 'errors') -> None:
-    """Send an Unraid notification, if this kind of event is one the operator asked for."""
+    """Post one notification outward, if this kind of event is one the operator asked for.
+
+    A webhook rather than a call into the host: the plugin shelled out to Unraid's `notify`,
+    which reached exactly one audience. A JSON POST reaches anyone — Unraid users included,
+    through a two-line receiver — and needs nothing mounted from the machine underneath.
+
+    Failure is silent by design. A notification that cannot be delivered must never stop a
+    run, and the log already carries everything this would have said.
+    """
     wanted = (settings.get('notifications') or {}).get(event, True)
-    if not wanted or DEVELOPMENT or not Path(NOTIFY).exists():
+    url = ((settings.get('notifications') or {}).get('webhook_url') or '').strip()
+    if not wanted or not url or DEVELOPMENT:
         return
-    with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.run([NOTIFY, '-e', 'TV Retention', '-s', subject, '-d', description,
-                        '-i', importance], timeout=20, check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    payload = json.dumps({'event': event, 'importance': importance, 'subject': subject,
+                          'description': description, 'source': 'tv-retention',
+                          'sent_at': now_iso()}).encode('utf-8')
+    request = urllib.request.Request(url, data=payload, method='POST')
+    request.add_header('Content-Type', 'application/json')
+    request.add_header('User-Agent', 'TV-Retention')
+    try:
+        with urllib.request.urlopen(request, timeout=15):
+            pass
+    except Exception as error:  # noqa: BLE001 - delivery is best effort, never fatal
+        log_line(settings, 'warning', f'notification not delivered: {error}')
+
 
 
 # ---------------------------------------------------------------------------
 # Scheduling
 # ---------------------------------------------------------------------------
-
-def write_cron(settings: dict) -> None:
-    """Publish a fixed tick, and let the worker decide what is due.
-
-    A generated crontab cannot express "the first Monday of the month", cannot notice a run
-    missed while the server was off, and cannot hold a job back until Sonarr answers. The
-    tick costs a few milliseconds when nothing is due and removes all three limits.
-    """
-    worker = f'/usr/bin/python3 /usr/local/emhttp/plugins/{NAME}/worker/main.py'
-    try:
-        CRON.parent.mkdir(parents=True, exist_ok=True)
-        CRON.write_text(
-            '# Generated by the TV Retention plugin. Schedules are set in Tools > TV Retention;\n'
-            '# this entry only wakes the worker so it can decide what is due.\n'
-            f'{TICK_CRON} {worker} tick 2>&1 | /usr/bin/logger -t {NAME}\n')
-    except OSError as error:
-        raise Rejected(f'Could not update the schedule file ({error})')
-    if DEVELOPMENT or not Path(UPDATE_CRON).exists():
-        return
-    with contextlib.suppress(OSError, subprocess.SubprocessError):
-        subprocess.run([UPDATE_CRON], timeout=30, check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
 
 # ---------------------------------------------------------------------------
 # Sonarr helpers
@@ -542,7 +523,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
 
 def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     """Evaluate every enabled rule, and delete unless previewing or in dry-run mode."""
-    require_ready()
     settings = load_settings()
     log_line(settings, 'info',
              ('scheduled ' if scheduled else '') + ('preview' if preview else 'run') + ' started')
@@ -1114,7 +1094,6 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
     monitored flag. Progress is published rule by rule, so an interface open while this
     runs can show each show updating instead of waiting for the whole sweep.
     """
-    require_ready()
     settings = load_settings()
     started = now_iso()
     clock = time.monotonic()
@@ -1194,8 +1173,6 @@ def tick() -> int:
     two small files and comparing timestamps.
     """
     settings = load_settings()
-    if not array_ready():
-        return 0
     now = dt.datetime.now(dt.timezone.utc)
     state = job_state(settings)
     actions = []
@@ -1330,9 +1307,8 @@ def cli() -> int:
     sub.add_parser('preview', help='evaluate rules without deleting')
     check_parser = sub.add_parser('check', help='verify Sonarr, matches, folders and monitoring')
     check_parser.add_argument('--scheduled', action='store_true')
-    sub.add_parser('tick', help='decide what is due and run it (called every minute by cron)')
-    sub.add_parser('resume', help='re-publish the cron entry after a reboot or array start')
-    sub.add_parser('stop', help='no-op placeholder kept for symmetry with array events')
+    sub.add_parser('tick', help='decide what is due and run it, once')
+    sub.add_parser('serve', help='stay alive: decide what is due, sleep, decide again')
     args = parser.parse_args()
 
     if args.command == 'rpc':
@@ -1360,6 +1336,8 @@ def cli() -> int:
         for message in result['errors'] + result['blocked']:
             print(f'  ! {message}')
         return 0
+    if args.command == 'serve':
+        return serve_forever()
     if args.command == 'tick':
         return tick()
     if args.command == 'check':
@@ -1377,11 +1355,28 @@ def cli() -> int:
             if alert['severity'] != alerts.NOTICE:
                 print(f'  {alert["severity"]}: {alert["title"]} — {alert["detail"]}')
         return 0
-    if args.command == 'resume':
-        with contextlib.suppress(Rejected):
-            write_cron(load_settings())
-        return 0
     return 0
+
+
+def serve_forever() -> int:
+    """The process that stays alive: decide what is due, sleep, decide again.
+
+    This is the whole of what a container buys. The plugin published a one-minute cron
+    entry because it had no process of its own, and everything that made the tick clever —
+    catching up a run missed while the machine was off, holding one until Sonarr answers —
+    was arranging around that absence. Here it is a loop.
+
+    Nothing is expensive unless something is due: the common case is reading two small
+    files and comparing timestamps.
+    """
+    log_line(load_settings(), 'info', 'worker started')
+    while True:
+        try:
+            tick()
+        except Exception as error:  # noqa: BLE001 - a bad tick must never stop the loop
+            with contextlib.suppress(Exception):
+                log_line(load_settings(), 'error', f'tick failed: {error}')
+        time.sleep(TICK_SECONDS)
 
 
 if __name__ == '__main__':

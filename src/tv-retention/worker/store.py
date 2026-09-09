@@ -29,33 +29,26 @@ from sonarr import MAPPING_SCHEMA
 SCHEMA = f'{CACHE_SCHEMA}.{MAPPING_SCHEMA}'
 
 NAME = 'tv-retention'
-CONFIG = Path(os.environ.get('TVR_CONFIG', f'/boot/config/plugins/{NAME}/settings.json'))
-CRON = Path(os.environ.get('TVR_CRON', f'/boot/config/plugins/{NAME}/schedule.cron'))
-RUNTIME = Path(os.environ.get('TVR_RUNTIME', f'/var/run/{NAME}'))
+# One volume. Settings, caches, the journal and the poster cache all live under it, so a
+# backup is a directory and a migration is a copy. TVR_CONFIG stays overridable because
+# every test and every live read-only check points it somewhere disposable.
+CONFIG_DIR = Path(os.environ.get('TVR_CONFIG_DIR', '/config'))
+CONFIG = Path(os.environ.get('TVR_CONFIG', CONFIG_DIR / 'settings.json'))
+RUNTIME = Path(os.environ.get('TVR_RUNTIME', '/tmp/tv-retention'))
 DEVELOPMENT = os.environ.get('TVR_DEVELOPMENT') == '1'
-UPDATE_CRON = '/usr/local/sbin/update_cron'
-NOTIFY = '/usr/local/emhttp/webGui/scripts/notify'
 
 # ---------------------------------------------------------------------------
 # Configuration and state
 # ---------------------------------------------------------------------------
 
 def default_state_dir() -> str:
-    """Where to keep journals and caches on a fresh install.
+    """Where journals and caches go: beside the settings, inside the one volume.
 
-    Unraid records the appdata share in docker.cfg, which is where container and plugin
-    working data belongs on this server. The compiled-in default is only a fallback for a
-    system that has never configured Docker.
+    There is nothing to discover. The plugin read Unraid's docker.cfg to find the appdata
+    share because it had to place its working data on a system it did not own; a container
+    is given its volume.
     """
-    try:
-        for line in Path('/boot/config/docker.cfg').read_text().splitlines():
-            if line.startswith('DOCKER_APP_CONFIG_PATH='):
-                share = line.split('=', 1)[1].strip().strip('"').rstrip('/')
-                if share.startswith('/mnt/'):
-                    return f'{share}/{NAME}'
-    except OSError:
-        pass
-    return DEFAULTS['state_dir']
+    return str(CONFIG_DIR / 'state')
 
 
 def load_settings() -> dict:

@@ -13,13 +13,14 @@ import json
 import os
 import re
 import unicodedata
+import urllib.parse
 import uuid
 from pathlib import Path
 
 import schedules
 
 VERSION = '2026.09.09'
-SETTINGS_VERSION = 7
+SETTINGS_VERSION = 8
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -87,10 +88,13 @@ DEFAULTS = {
         'health_ok': False,
         'health_problems': True,
         'errors': True,
+        # Where a notification goes. Empty means nowhere, which is the default: a fresh
+        # install has no business posting to anything until someone says where.
+        'webhook_url': '',
     },
     'logging': {'level': 'info', 'max_bytes': 2 * 1024 * 1024},
     # Run journals, logs and caches live on the array, not on the flash device.
-    'state_dir': '/mnt/user/appdata/tv-retention',
+    'state_dir': '/config/state',
     'log_retention_runs': 50,
 }
 
@@ -221,10 +225,33 @@ def validate_path(value, field='Folder') -> str:
     return os.path.normpath(value)
 
 
-def validate_library_path(value, field='Folder') -> str:
+def validate_webhook(value, field='Notification webhook') -> str:
+    """Where notifications are posted, or nothing at all.
+
+    Only http and https, and only an absolute URL. A notification carries the series title
+    and what was deleted, so the destination is worth being strict about — this is the one
+    setting that sends anything out of the container.
+    """
+    url = _text(value, field, 512)
+    if not url:
+        return ''
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        raise Rejected(f'{field} must be an http:// or https:// URL')
+    return url
+
+
+def validate_state_dir(value, field='App storage folder') -> str:
+    """Somewhere absolute to keep caches and the journal.
+
+    The plugin required `/mnt/<share>/<folder>` because on Unraid that was the difference
+    between a user share and the flash device, and writing caches to flash wears it out.
+    A container is handed its volume, so the only thing left to insist on is that the path
+    is absolute — `validate_path` already refuses anything that could climb out of it.
+    """
     path = validate_path(value, field)
-    if not (path.startswith('/mnt/') and len(Path(path).parts) > 3):
-        raise Rejected(f'{field} must be a share path under /mnt, at least three levels deep')
+    if len(Path(path).parts) < 2:
+        raise Rejected(f'{field} must be a path, not the filesystem root')
     return path
 
 
@@ -519,8 +546,10 @@ def validate_settings(raw, previous=None) -> dict:
             'monitoring': _choice(retention_raw.get('monitoring') or DEFAULTS['retention']['monitoring'],
                                   MONITORING_MODES, 'Monitoring'),
         },
-        'notifications': {name: _flag(notify_raw.get(name, default))
-                          for name, default in DEFAULTS['notifications'].items()},
+        'notifications': dict({name: _flag(notify_raw.get(name, default))
+                               for name, default in DEFAULTS['notifications'].items()
+                               if name != 'webhook_url'},
+                              webhook_url=validate_webhook(notify_raw.get('webhook_url'))),
         'alerts': {
             'header': _choice(alerts_raw.get('header') or 'all', ['errors', 'warnings', 'all'],
                               'Header alerts'),
@@ -533,7 +562,7 @@ def validate_settings(raw, previous=None) -> dict:
             'level': level,
             'max_bytes': _whole(logging_raw.get('max_bytes', 2 * 1024 * 1024), 'Log size', 65536, 64 * 1024 * 1024, allow_none=False),
         },
-        'state_dir': validate_library_path(raw.get('state_dir') or DEFAULTS['state_dir'], 'App storage folder'),
+        'state_dir': validate_state_dir(raw.get('state_dir') or DEFAULTS['state_dir']),
         'log_retention_runs': _whole(raw.get('log_retention_runs', 50), 'History size', 1, 500, allow_none=False),
     }
     return settings

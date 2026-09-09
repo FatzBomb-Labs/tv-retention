@@ -1,67 +1,10 @@
-import hashlib
 import re
-import subprocess
-import sys
-import tarfile
 import unittest
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import context  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-class Build(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True,
-                       stdout=subprocess.DEVNULL)
-        cls.version = (ROOT / 'VERSION').read_text().strip()
-        cls.package = ROOT / 'dist' / f'tv-retention-{cls.version}-noarch-1.txz'
-        cls.manifest = ROOT / 'install' / 'tv-retention.plg'
-
-    def test_artifacts_exist(self):
-        self.assertTrue(self.package.is_file())
-        self.assertTrue(self.manifest.is_file())
-
-    def test_package_installs_under_the_plugin_path(self):
-        with tarfile.open(self.package) as archive:
-            names = archive.getnames()
-        self.assertIn('usr/local/emhttp/plugins/tv-retention/worker/main.py', names)
-        self.assertIn('usr/local/emhttp/plugins/tv-retention/TVRetention.page', names)
-        self.assertIn('install/slack-desc', names)
-        self.assertFalse([name for name in names if '__pycache__' in name])
-
-    def test_event_scripts_are_executable(self):
-        with tarfile.open(self.package) as archive:
-            member = archive.getmember('usr/local/emhttp/plugins/tv-retention/event/disks_mounted')
-        self.assertEqual(member.mode, 0o755)
-
-    def test_manifest_declares_the_package_checksum(self):
-        tree = ET.parse(self.manifest)
-        checksum = tree.getroot().findtext('.//SHA256').strip()
-        self.assertEqual(checksum, hashlib.sha256(self.package.read_bytes()).hexdigest())
-
-    def test_manifest_launches_the_tools_page(self):
-        root = ET.parse(self.manifest).getroot()
-        self.assertEqual(root.get('launch'), 'Tools/TVRetention')
-        self.assertEqual(root.get('version'), self.version)
-
-    def test_removal_preserves_settings(self):
-        text = self.manifest.read_text()
-        self.assertIn('removepkg tv-retention', text)
-        self.assertNotIn('rm -rf /boot/config/plugins/tv-retention', text)
-
-    def test_rebuild_is_reproducible(self):
-        first = hashlib.sha256(self.package.read_bytes()).hexdigest()
-        subprocess.run([sys.executable, str(ROOT / 'tools' / 'build.py')], check=True,
-                       stdout=subprocess.DEVNULL)
-        self.assertEqual(first, hashlib.sha256(self.package.read_bytes()).hexdigest())
-
-
-if __name__ == '__main__':
-    unittest.main()
 
 
 class Interface(unittest.TestCase):
@@ -85,32 +28,6 @@ class Interface(unittest.TestCase):
     def test_the_busy_overlay_starts_hidden(self):
         self.assertRegex(self.html, r'id="tvr-busy"[^>]*hidden')
 
-    def test_the_cache_key_comes_from_asset_contents(self):
-        """A timestamp-based key is worthless here.
-
-        The package ships every file with mtime 0 to keep builds reproducible, so a key
-        built from filemtime() is the same string for every release: after an upgrade the
-        browser keeps serving the previous script from cache. That presented as the whole
-        configuration vanishing, since a stale script cannot render the new data.
-        """
-        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
-        self.assertIn('md5_file', page)
-        self.assertNotIn('filemtime', page)
-        self.assertIn('app.js?v=', page)
-        self.assertIn('app.css?v=', page)
-
-    def test_the_package_ships_reproducible_timestamps(self):
-        # The reason the key cannot use mtime; asserted so the two stay consistent.
-        version = (ROOT / 'VERSION').read_text().strip()
-        with tarfile.open(ROOT / 'dist' / f'tv-retention-{version}-noarch-1.txz') as archive:
-            self.assertTrue(all(member.mtime == 0 for member in archive.getmembers()))
-
-    def test_the_package_ships_a_version_file(self):
-        version = (ROOT / 'VERSION').read_text().strip()
-        package = ROOT / 'dist' / f'tv-retention-{version}-noarch-1.txz'
-        with tarfile.open(package) as archive:
-            self.assertIn('usr/local/emhttp/plugins/tv-retention/VERSION', archive.getnames())
-
     def test_every_element_the_script_addresses_exists_in_the_markup(self):
         import re
         for identifier in sorted(set(re.findall(r"\$\('([a-z0-9-]+)'\)", self.js))):
@@ -122,19 +39,6 @@ class Interface(unittest.TestCase):
 
     def test_a_failed_start_clears_the_overlay(self):
         self.assertRegex(self.js, r"refresh\(\)\.catch")
-
-    def test_the_package_ships_a_readme_for_the_plugins_page(self):
-        # Unraid renders plugins/<name>/README.md as the description on the Plugins page,
-        # falling back to the bare slug when it is absent.
-        with tarfile.open(ROOT / 'dist' / f'tv-retention-{(ROOT / "VERSION").read_text().strip()}-noarch-1.txz') as archive:
-            self.assertIn('usr/local/emhttp/plugins/tv-retention/README.md', archive.getnames())
-        readme = (ROOT / 'src' / 'tv-retention' / 'README.md').read_text()
-        self.assertTrue(readme.lstrip().startswith('**TV Retention**'), 'the description must lead with the display name')
-
-    def test_the_manifest_declares_an_icon(self):
-        import xml.etree.ElementTree as ElementTree
-        root = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot()
-        self.assertTrue(root.get('icon'))
 
     def test_a_series_that_cannot_be_used_is_refused_on_save(self):
         """The picker is gone: the navigator says which series you mean.
@@ -265,26 +169,6 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r'plan\.trustworthy && !plan\.actionable')
 
 
-    def test_the_icon_is_a_font_awesome_name(self):
-        """A name is not enough: it has to resolve to a glyph.
-
-        Two icons were shipped that rendered as nothing. icon-trash is absent from Unraid's
-        font entirely; icon-bin appears in a stylesheet but has no `:before{content}` rule,
-        which looks identical in a grep and identical on screen. Font Awesome is loaded on
-        every Unraid page and is what twelve other plugins on this server use, so the icon
-        is required to be a plain FA name. tools/check-on-host.sh confirms the glyph exists.
-        """
-        import xml.etree.ElementTree as ElementTree
-        manifest_icon = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot().get('icon')
-        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
-        page_icon = next(line.split('=', 1)[1].strip().strip('"')
-                         for line in page.splitlines() if line.startswith('Icon='))
-        self.assertEqual(manifest_icon, page_icon, 'the Tools tile and Plugins row must agree')
-        self.assertFalse(manifest_icon.startswith('icon-'),
-                         'Unraid font names have silently rendered empty; use a Font Awesome name')
-        self.assertFalse(manifest_icon.endswith('.png'), 'no image is shipped with this plugin')
-        self.assertRegex(manifest_icon, r'^[a-z0-9-]+$')
-
     def test_switching_a_series_off_is_done_where_its_settings_are(self):
         """Not on the card. It is a setting, and settings live in the panel.
 
@@ -372,13 +256,6 @@ class Interface(unittest.TestCase):
         served for good, with a day of browser caching over the top of it.
         """
         self.assertIn('&stamp=${encodeURIComponent(series.poster)}', self.js)
-        php = (ROOT / 'src' / 'tv-retention' / 'include' / 'api.php').read_text()
-        self.assertIn("substr(md5((string)($_GET['stamp'] ?? '')), 0, 12)", php)
-        self.assertIn("$cached = $prefix . '-' . $stamp . '.jpg';", php)
-        # A new picture is a new file, so the old one has to go with it.
-        self.assertIn("foreach (glob($prefix . '-*.jpg') ?: [] as $stale) @unlink($stale);", php)
-        # It becomes part of a path, so its shape is checked before it becomes one.
-        self.assertIn("preg_match('/^[a-f0-9]{1,32}$/', $wanted)", php)
 
     def test_the_library_says_used_by_the_binding_a_rule_holds(self):
         """Not by folder. A bare set of paths was wrong in both directions.
@@ -424,17 +301,6 @@ class Interface(unittest.TestCase):
         self.assertIn('width: auto', fields)
         self.assertIn('.tvr-field > input, .tvr-field > select, .tvr-field > textarea '
                       '{ width: 100%; }', self.css)
-
-    def test_a_stylesheet_only_change_moves_the_cache_key(self):
-        """Joining two digests and taking twelve characters takes twelve from the first.
-
-        So the key followed app.js and ignored app.css entirely, and any release that
-        changed only the stylesheet shipped under the key the browser already held. The
-        page came back new and was styled by the file it had replaced.
-        """
-        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
-        self.assertIn('substr(md5($tvrScript . $tvrStyle), 0, 12)', page)
-        self.assertNotIn('substr($tvdAsset, 0, 12)', page)
 
     def test_a_sidebar_group_is_a_band_not_a_label(self):
         """Reaching the panel edge is what makes it a section rather than small type.
@@ -641,25 +507,6 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.css, r'\.tvr-tab-badge \{[^}]*height: 18px')
         self.assertRegex(self.css, r'\.tvr-tab-badge \{[^}]*min-width: 18px')
 
-    def test_the_manifest_does_not_advertise_what_was_removed(self):
-        """The first thing a new install prints has to be true.
-
-        The changelog on the Plugins page still described path mapping, deletion guards,
-        re-monitoring and dry run — four features removed across three versions — and the
-        install message named a mode the plugin had stopped having.
-        """
-        import xml.etree.ElementTree as ElementTree
-        root = ElementTree.parse(ROOT / 'install' / 'tv-retention.plg').getroot()
-        # The changelog and the install message only — never the embedded package, or a
-        # failure here would print a megabyte of base64 at whoever ran the tests.
-        spoken = (root.findtext('CHANGES') or '')
-        for node in root.iter('FILE'):
-            if node.get('Method') == 'install':
-                spoken += node.findtext('INLINE') or ''
-        for gone in ('path mapping', 'deletion guards', 're-monitoring', 'Dry run is ON'):
-            self.assertNotIn(gone, spoken, f'the manifest still advertises {gone}')
-        self.assertIn('Test Mode', spoken)
-
     def test_the_tab_list_is_not_a_second_copy_of_the_markup(self):
         """Removing a tab left a stale name in a hand-kept list.
 
@@ -727,16 +574,12 @@ class Interface(unittest.TestCase):
         for heavy in ("'overview'", "'seasons'"):
             self.assertNotIn(heavy, worker.split('LIST_FIELDS = (')[1].split(')')[0])
 
-    def test_the_icon_is_not_a_bin(self):
-        # The plugin is named for keeping things.
-        page = (ROOT / 'src' / 'tv-retention' / 'TVRetention.page').read_text()
-        self.assertIn('Icon="television"', page)
-        self.assertNotIn('trash', page)
-
     def test_what_stops_work_sits_above_the_chrome(self):
-        # A message about the array being down belongs over the page, not inside it.
+        # A banner about a sweep in progress, or about Test Mode, belongs over the page
+        # rather than inside it. The array warning went with the plugin: a container has
+        # no array to be told about.
         head = self.html.split('<header class="tvr-topbar">')[0]
-        for identifier in ('tvr-array', 'tvr-checking', 'tvr-test-banner'):
+        for identifier in ('tvr-checking', 'tvr-test-banner'):
             self.assertIn(f'id="{identifier}"', head, f'{identifier} is below the header')
 
     def test_no_two_elements_share_an_id(self):
