@@ -53,9 +53,12 @@ fact that there is currently nothing to audit but the interpreter.
   window, so the downloads it prevents are the ones that would happen before the run.
 - The plugin never deletes a series. It asks Sonarr to, so Sonarr's recycle bin and its
   bookkeeping apply. The plugin removes individual episode files, through Sonarr's API.
-- Test Mode governs the scheduler only: a scheduled run does everything except write. A
-  manual run is always live, so its confirmation must state the actual plan, and removing
-  a series is guarded by a typed confirmation rather than by a mode.
+- Test Mode means **nothing writes** — scheduled or manual, no exceptions. It governed only
+  the scheduler once, so a manual run deleted for real while the page said TEST MODE at the
+  top of it, and a paragraph in a confirmation dialog was the only thing reconciling the
+  two. To delete something, turn Test Mode off. A run's confirmation still states the
+  actual plan rather than describing runs in general, and removing a series is guarded by a
+  typed confirmation rather than by a mode.
 - The Run button may only be hidden on a complete, current plan. A stale or partial
   reading must never be presented as "nothing to do".
 - Media files Sonarr does not know about are reported, never deleted.

@@ -150,6 +150,9 @@ def index_page(csrf: str) -> bytes:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TV Retention</title>
+<link rel="icon" href="/assets/icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="/assets/icon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" href="/assets/icon-180.png">
 <link rel="stylesheet" href="/assets/icons.css?v={key}">
 <link rel="stylesheet" href="/assets/app.css?v={key}">
 </head><body>
@@ -164,6 +167,7 @@ LOGIN_PAGE = '''<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TV Retention</title>
+<link rel="icon" href="/assets/icon-32.png" sizes="32x32" type="image/png">
 <style>
   :root { color-scheme: dark light; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center;

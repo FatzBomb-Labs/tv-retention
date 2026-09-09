@@ -3,8 +3,8 @@
 Work through these before turning **Test Mode** off. Each step is either read-only or
 reversible.
 
-Test Mode governs the **scheduler** only: a scheduled run does everything except write. A
-manual run is always live, so section 6 is the first thing here that can delete anything.
+Test Mode means nothing writes — scheduled or manual, no exceptions. Section 6 is where it
+gets turned off, and it is the first thing here that can delete anything.
 
 ## 1. Start it
 

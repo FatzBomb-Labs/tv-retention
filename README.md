@@ -375,9 +375,10 @@ rests on an estimate rather than a real air date.
 
 - **Mandatory Sonarr match** — a rule that does not resolve to exactly one series is
   skipped, with the reason shown.
-- **Test Mode** — on for a new install. A scheduled run does everything except write, marks
-  its output `[TEST MODE]`, and notifies as a real run would. It governs the scheduler only:
-  a manual run is always live, and its confirmation says so.
+- **Test Mode** — on for a new install, and it means **nothing writes**. Scheduled or
+  manual, no exceptions: a run does everything except write, marks its output `[TEST MODE]`
+  and notifies as a real run would. To delete something, turn it off. The Run button says
+  which of the two it is about to do.
 - **Typed confirmation** — removing a series' files requires typing `DELETE ALL`.
 - **Deleting always unmonitors** — not a setting, so no configuration can build a
   fetch-and-delete loop.

@@ -151,10 +151,10 @@ same document: point it at the plugin's `settings.json` once, let `migrate` run,
 the result into `/config`. The state folder is already on appdata. Nothing needs
 re-entering, including API keys.
 
-The one thing that does not carry: **Test Mode governs the scheduler**, and the scheduler
-is changing shape. The invariant survives — a scheduled run does everything except write —
-but the wording in AGENTS.md refers to a cron-driven design and needs revisiting when the
-loop replaces it.
+Test Mode changed meaning on the way across, and for the better. It governed the scheduler
+only, so a manual run deleted for real while the page said TEST MODE at the top of it. Now
+it means nothing writes at all, which is what the Run button had to be able to say without
+lying — and one rule with no exceptions is worth more than the flexibility it cost.
 
 ---
 

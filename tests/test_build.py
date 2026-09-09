@@ -157,12 +157,55 @@ class Interface(unittest.TestCase):
         self.assertNotRegex(self.js, r"api\('remove-series'")
         self.assertIn('Undo', self.js)
 
-    def test_test_mode_governs_the_scheduler_only(self):
-        # A manual run is always live, so the confirmation has to say so when Test Mode is
-        # on — that is exactly when someone would assume otherwise.
+    def test_test_mode_means_nothing_writes(self):
+        """Scheduled or manual, no exceptions.
+
+        It governed only the scheduler once, so a manual run deleted for real while the
+        page said TEST MODE at the top of it, and a paragraph in a confirmation dialog was
+        the only thing reconciling the two readings.
+        """
         self.assertIn('tvr-test-mode', self.js)
-        self.assertRegex(self.js, r'Test mode is active on the scheduler')
+        self.assertRegex(self.js, r'Test mode is on, so this changes nothing')
         self.assertNotIn("$('tvr-preview')", self.js)
+        worker = (ROOT / 'src' / 'tv-retention' / 'worker' / 'main.py').read_text()
+        self.assertIn("test_mode = bool((settings.get('schedule') or {}).get('test_mode', True))",
+                      worker)
+        self.assertNotIn('test_mode = scheduled and', worker)
+
+    def test_the_run_button_says_what_pressing_it_would_do(self):
+        """Three states, and the colour is the sentence.
+
+        Red is reserved for a fault that stops the whole run — no instance answering, or
+        none configured. One broken series among thirty-five healthy ones is skipped, not a
+        reason to call the button disabled.
+        """
+        block = self.js.split('const RUN_STATES = {')[1].split('};')[0]
+        self.assertIn("live: ['Run'", block)
+        self.assertIn("test: ['Run Test'", block)
+        self.assertIn("blocked: ['Disabled'", block)
+        state = self.js.split('function runState()')[1].split('\n  }')[0]
+        self.assertIn('systemAlerts.some((alert) => alert.blocking)', state)
+        self.assertNotIn('isBlocked', state, 'one broken series must not disable the button')
+        # Blocked stays pressable: it is the shortest route to the reason.
+        self.assertIn("if (runState() === 'blocked') return void showEverythingNeedingAttention();",
+                      self.js)
+        for tone in ('.tvr-run.live', '.tvr-run.test', '.tvr-run.blocked'):
+            self.assertIn(tone, self.css)
+
+    def test_the_top_bar_has_three_zones(self):
+        # The middle is centred on the window, which a flex spacer cannot do: it would
+        # centre on whatever is left after the other two.
+        self.assertRegex(self.css, r'\.tvr-topbar \{ display: grid; grid-template-columns: 1fr auto 1fr')
+        head = self.html.split('</header>')[0]
+        for zone in ('tvr-brand', 'tvr-topbar-middle', 'tvr-topbar-actions'):
+            self.assertIn(f'class="{zone}"', head)
+        self.assertLess(head.index('tvr-brand'), head.index('tvr-topbar-middle'))
+        self.assertLess(head.index('tvr-topbar-middle'), head.index('tvr-topbar-actions'))
+
+    def test_the_version_is_a_version(self):
+        # Not a date. A build stamp cannot say whether anything changed.
+        self.assertIn('`v${snapshot.version}`', self.js)
+        self.assertRegex((ROOT / 'VERSION').read_text().strip(), r'^\d+\.\d+\.\d+$')
 
     def test_the_run_button_hides_only_on_a_complete_answer(self):
         # Hiding it on a stale or partial reading would be a promise the cache cannot keep.
@@ -731,7 +774,7 @@ class Interface(unittest.TestCase):
         shell = self.css.split('.tvr-shell { display: grid;')[1].split('}')[0]
         self.assertNotIn('border:', shell)
         self.assertNotIn('border-radius', shell)
-        topbar = self.css.split('.tvr-topbar { display: flex;')[1].split('}')[0]
+        topbar = self.css.split('.tvr-topbar { display: grid;')[1].split('}')[0]
         self.assertNotIn('border-radius', topbar)
 
     def test_a_poster_is_bounded_rather_than_sized(self):

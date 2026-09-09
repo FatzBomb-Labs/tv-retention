@@ -3,14 +3,16 @@
 <div id="tvr-checking" class="tvr-banner" hidden></div>
 <div id="tvr-test-banner" class="tvr-banner" hidden><strong>Test mode is on.</strong> The schedule runs and reports exactly what it would do, but changes nothing. Manual runs are not affected. Turn it off under <em>Media management → Schedule</em> once you are satisfied.</div>
 
+<!-- Three zones rather than two ends: what this is on the left, what needs attention in
+     the middle, what you can do about it on the right. -->
 <header class="tvr-topbar">
   <div class="tvr-brand">
-    <i class="fa fa-television" aria-hidden="true"></i>
-    <span class="tvr-brand-name">TV Retention</span>
+    <img class="tvr-brand-icon" src="/assets/icon-32.png" alt="" width="22" height="22">
+    <span class="tvr-brand-name">FatzBomb's TV Retention</span>
     <span class="tvr-version" id="tvr-version"></span>
-    <span class="tvr-test-chip" id="tvr-test-chip" hidden title="A scheduled run reports and changes nothing">TEST MODE</span>
+    <span class="tvr-test-chip" id="tvr-test-chip" hidden title="Nothing writes while this is on — scheduled or manual">TEST MODE</span>
   </div>
-  <div class="tvr-topbar-actions">
+  <div class="tvr-topbar-middle">
     <button type="button" id="tvr-alert-total" class="tvr-alert-total" hidden></button>
     <div class="tvr-changes" id="tvr-changes">
       <button type="button" id="tvr-changes-button" class="tvr-changes-button" aria-expanded="false">
@@ -19,11 +21,13 @@
       </button>
       <div class="tvr-changes-menu" id="tvr-changes-menu" hidden></div>
     </div>
-    <button type="button" id="tvr-theme" class="tvr-icon-button tvr-icon-large"><i class="fa fa-adjust"></i></button>
+  </div>
+  <div class="tvr-topbar-actions">
+    <span class="tvr-synced" id="tvr-synced"></span>
     <button type="button" id="tvr-refresh-all" class="tvr-icon-button tvr-icon-large"
             title="Sync with Sonarr now — everything else on this page is answered from the last sync"><i class="fa fa-refresh"></i></button>
-    <button type="button" id="tvr-run" class="tvr-icon-button tvr-icon-large tvr-run"
-            title="Run now"><i class="fa fa-play"></i></button>
+    <button type="button" id="tvr-theme" class="tvr-icon-button tvr-icon-large"></button>
+    <button type="button" id="tvr-run" class="tvr-run"><i class="fa fa-play"></i><span id="tvr-run-label">Run</span></button>
   </div>
 </header>
 

@@ -464,12 +464,36 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 /* Chrome and page are two surfaces, not one. The tint is translucent rather than a
    colour, so it reads as one shade off the page under every Unraid theme — a fixed grey
    would be right on black and wrong on white. */
-.tvr-topbar { display: flex; align-items: center; gap: 12px; padding: 4px 10px;
-  border-bottom: 1px solid var(--tvr-line); background: var(--tvr-panel); flex: none; }
-.tvr-brand { display: flex; align-items: baseline; gap: 8px; }
-.tvr-brand .fa { font-size: 15px; opacity: .75; align-self: center; }
-.tvr-brand-name { font-size: 15px; font-weight: 600; }
-.tvr-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+/* Three zones, as a grid rather than two ends with a spacer: the middle has to be centred
+   on the *window*, and flex would centre it on whatever is left after the other two. */
+.tvr-topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 12px; padding: 4px 10px; border-bottom: 1px solid var(--tvr-line);
+  background: var(--tvr-panel); flex: none; }
+.tvr-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tvr-brand-icon { display: block; border-radius: 4px; flex: none; }
+.tvr-brand-name { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.tvr-topbar-middle { display: flex; align-items: center; gap: 8px; justify-self: center; }
+.tvr-topbar-actions { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.tvr-synced { font-size: 11px; opacity: .55; white-space: nowrap; }
+@media (max-width: 900px) {
+  .tvr-topbar { grid-template-columns: 1fr auto; row-gap: 4px; }
+  .tvr-topbar-middle { grid-column: 1 / -1; justify-self: start; }
+  .tvr-synced { display: none; }
+}
+
+/* The colour is the sentence, so it is a filled button rather than an icon: green changes
+   things, orange reports and changes nothing, red is stopping every run and opens the
+   reason. */
+#tv-retention button.tvr-run { display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; font-weight: 600; border: 1px solid transparent; color: var(--tvr-on-fill); }
+#tv-retention button.tvr-run .fa { font-size: 11px; }
+#tv-retention button.tvr-run.live { background: var(--tvr-good); }
+#tv-retention button.tvr-run.test { background: var(--tvr-accent); }
+#tv-retention button.tvr-run.blocked { background: var(--tvr-bad); }
+#tv-retention button.tvr-run:hover:not([disabled]) { filter: brightness(1.1); }
+/* Disabled means "nothing to do", which is not a fault: it goes quiet rather than red. */
+#tv-retention button.tvr-run[disabled] { background: none; color: inherit;
+  border-color: var(--tvr-line); opacity: .5; }
 
 /* The count is the control: it says how much is scheduled and opens what it counts.
    With nothing scheduled it stays, greyed, rather than vanishing — an element that
@@ -494,8 +518,6 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention button.tvr-changes-row.unmonitor { color: var(--tvr-warn); }
 #tv-retention button.tvr-changes-row.monitor { color: var(--tvr-good); }
 .tvr-changes-foot { padding: 4px 8px; font-size: 11px; opacity: .55; }
-#tv-retention button.tvr-run { color: var(--tvr-good); }
-#tv-retention button.tvr-run[disabled] { color: inherit; }
 
 .tvr-shell { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 0;
   align-items: stretch; flex: 1; min-height: 0; }

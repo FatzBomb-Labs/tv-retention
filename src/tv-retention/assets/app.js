@@ -354,7 +354,7 @@
   }
 
   function render() {
-    $('tvr-version').textContent = snapshot.version || '';
+    $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
     $('tvr-about-version').textContent = snapshot.version || '';
     const banner = ((settings || {}).alerts || {}).test_banner || 'full';
     $('tvr-test-banner').hidden = !snapshot.test_mode || banner === 'chip';
@@ -520,6 +520,37 @@
     return stamp ? `synced with Sonarr ${ago(stamp)}` : '';
   }
 
+  // Three states, and the colour is the sentence. Green: this will change things. Orange:
+  // this will report and change nothing, because Test Mode is on — and Test Mode now means
+  // nothing writes at all, so the button can say so without lying. Red: something is
+  // stopping every run, and pressing it shows you what rather than doing nothing.
+  //
+  // Red is reserved for a fault that stops the *whole* run — no instance answering, or no
+  // instance at all. One broken series among thirty-five healthy ones is skipped, not a
+  // reason to call the button disabled.
+  function runState() {
+    if (!(settings.instances || []).length) return 'blocked';
+    if (systemAlerts.some((alert) => alert.blocking)) return 'blocked';
+    return snapshot.test_mode ? 'test' : 'live';
+  }
+
+  const RUN_STATES = {
+    live: ['Run', 'Run now. This deletes episode files through Sonarr.'],
+    test: ['Run Test', 'Test mode is on: this reports exactly what it would do and writes nothing.'],
+    blocked: ['Disabled', 'Something is stopping every run. Click to see what.'],
+  };
+
+  function renderRunButton(nothing) {
+    const state = runState();
+    const [text, why] = RUN_STATES[state];
+    const button = $('tvr-run');
+    button.className = `tvr-run ${state}`;
+    $('tvr-run-label').textContent = text;
+    // Blocked stays pressable on purpose: it is the shortest route to the reason.
+    button.disabled = state !== 'blocked' && nothing;
+    button.title = button.disabled ? 'Nothing is scheduled to change' : why;
+  }
+
   // The top bar carries one number and opens what it counts. Nothing drops when there is
   // nothing scheduled: an empty menu is a promise the plugin cannot keep.
   function renderTopBar() {
@@ -536,9 +567,8 @@
     button.classList.toggle('quiet', nothing);
     $('tvr-changes-caret').hidden = nothing;
     button.disabled = nothing;
-    // The run button is the play: nothing to run means nothing to press.
-    $('tvr-run').disabled = nothing;
-    $('tvr-run').title = nothing ? 'Nothing is scheduled to change' : 'Run now';
+    $('tvr-synced').textContent = syncedAgo();
+    renderRunButton(nothing);
 
     menu.hidden = true;
     menu.replaceChildren();
@@ -616,8 +646,10 @@
     total.className = `tvr-alert-total ${worstSeverity(counted) || 'notice'}`;
   }
 
-  // The one overview left: what is wrong, and where to go and fix it.
-  $('tvr-alert-total').addEventListener('click', () => {
+  // The one overview left: what is wrong, and where to go and fix it. Two things open it —
+  // the count, and the Run button when something is stopping every run — because "why can
+  // I not run?" and "what is wrong?" are the same question.
+  function showEverythingNeedingAttention() {
     const everything = seriesAlertList().concat(systemAlerts);
     dialog('Everything needing attention', (body) => {
       if (!everything.length) { body.append(el('p', { textContent: 'Nothing.' })); return {}; }
@@ -633,7 +665,8 @@
       });
       return {};
     }, null, 'Close');
-  });
+  }
+  $('tvr-alert-total').addEventListener('click', showEverythingNeedingAttention);
 
   function changeList(result, title, kind) {
     const wanted = kind && kind !== 'all' ? kind : null;
@@ -727,17 +760,16 @@
   }));
 
   $('tvr-run').addEventListener('click', () => guarded('', async () => {
+    if (runState() === 'blocked') return void showEverythingNeedingAttention();
     const runnable = (settings.rules || []).filter((rule) => rule.enabled && !isBlocked(rule.id));
     if (!runnable.length) throw new Error('There are no enabled series ready to run.');
     const plan = snapshot.plan || {};
-    // The confirmation states the actual plan, because a manual run is always live and
-    // this dialog is the only thing standing in front of it.
+    // The confirmation states the actual plan rather than describing runs in general.
     let warning = `Run ${plural(runnable.length, 'series')} now?\n\n`;
     warning += plan.actionable ? `This will ${planText(plan)}.\n\n` : 'No changes are currently expected.\n\n';
     if (snapshot.test_mode) {
-      warning += 'Test mode is active on the scheduler, so this is NOT what the schedule would do — '
-        + 'a manual run makes real changes to your files and to Sonarr.\n\n'
-        + 'Cancel and choose "Show scheduled changes" if you wanted to look first.';
+      warning += 'Test mode is on, so this changes nothing: it reports exactly what it would '
+        + 'have done and writes neither to your files nor to Sonarr.';
     } else {
       warning += 'This deletes episode files through Sonarr and cannot be undone from here.';
     }

@@ -525,9 +525,13 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     settings = load_settings()
     log_line(settings, 'info',
              ('scheduled ' if scheduled else '') + ('preview' if preview else 'run') + ' started')
-    # A manual run is always live; Test Mode governs the scheduler alone, and the preview
-    # flag is the read-only plan behind "Show scheduled changes".
-    test_mode = scheduled and bool((settings.get('schedule') or {}).get('test_mode', True))
+    # Test Mode means nothing writes. Not "the scheduler does not write" — everything. It
+    # governed only scheduled runs once, so a manual run deleted for real while the
+    # interface said TEST MODE at the top of the page, and the only thing standing between
+    # the two readings was a paragraph in a confirmation dialog. One rule with no
+    # exceptions is worth more here than the flexibility it costs: to delete something,
+    # turn Test Mode off.
+    test_mode = bool((settings.get('schedule') or {}).get('test_mode', True))
     dry_run = preview or test_mode
     started = now_iso()
     clock = time.monotonic()
