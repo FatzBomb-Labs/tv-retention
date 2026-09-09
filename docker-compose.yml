@@ -1,0 +1,18 @@
+services:
+  tv-retention:
+    image: ghcr.io/fatzserver/tv-retention:latest
+    container_name: tv-retention
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      # The only volume. No media mount: this never opens a library file — Sonarr owns
+      # the filesystem, and deletion is an API call.
+      - ./config:/config
+    environment:
+      - TVR_USERNAME=admin
+      - TVR_PASSWORD=change-this-to-something-long
+      # Or, if nothing untrusted can reach the port — behind Tailscale or a VPN — and you
+      # would rather have no login at all:
+      # - TVR_AUTH=none
+      - TZ=Etc/UTC

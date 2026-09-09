@@ -936,10 +936,11 @@
       // it changes when the artwork does, and it is the only thing that can tell the
       // cache the picture is a different picture. Without it the proxy kept the first
       // poster it ever fetched, for good.
+      // A GET on its own route, guarded by the session cookie the browser already sends.
       art.append(el('img', { loading: 'lazy', alt: '',
-                             src: `${API}?poster=${series.series_id}&instance=${encodeURIComponent(series.instance_id)}`
-                                  + `&stamp=${encodeURIComponent(series.poster)}`
-                                  + `&csrf_token=${encodeURIComponent(CSRF)}` }));
+                             src: `/poster?series=${series.series_id}`
+                                  + `&instance=${encodeURIComponent(series.instance_id)}`
+                                  + `&stamp=${encodeURIComponent(series.poster)}` }));
     } else {
       art.textContent = (series.title || '?').slice(0, 1);
     }

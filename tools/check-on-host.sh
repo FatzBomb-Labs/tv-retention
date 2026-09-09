@@ -13,7 +13,7 @@ tar -xf - -C "$staging"
 cd "$staging"
 printf "Development staging: %s\n" "$staging"
 python3 -m unittest discover -s tests -v
-python3 -c "import sys; sys.path.insert(0, \"src/tv-retention/worker\"); import main, actions" \
+python3 -c "import sys; sys.path.insert(0, \"src/tv-retention/worker\"); import main, actions, server" \
   && echo "worker imports OK"
 if command -v node >/dev/null; then
   node --check src/tv-retention/assets/app.js && echo "app.js syntax OK"
