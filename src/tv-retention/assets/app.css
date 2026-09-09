@@ -489,10 +489,10 @@
   border-right: 1px solid var(--tvr-line); border-radius: 0 0 0 6px; }
 .tvr-side::-webkit-scrollbar { width: 6px; }
 .tvr-side::-webkit-scrollbar-thumb { background: var(--tvr-line); border-radius: 3px; }
-.tvr-side-group { display: grid; gap: 0; margin-bottom: 5px; }
+.tvr-side-group { display: grid; gap: 0; margin-bottom: 7px; }
 #tv-retention button.tvr-side-item { display: flex; align-items: center; gap: 8px; width: 100%;
-  text-align: left; border: none; background: none; border-radius: 3px; padding: 0 8px;
-  font-size: 12px; line-height: 1.35; opacity: .8; border-left: 2px solid transparent; }
+  text-align: left; border: none; background: none; border-radius: 3px; padding: 1px 8px;
+  font-size: 12px; line-height: 1.45; opacity: .8; border-left: 2px solid transparent; }
 #tv-retention .tvr-side-item .tvr-tab-badge { height: 15px; min-width: 15px; font-size: 9px;
   margin-left: 4px; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
@@ -625,7 +625,7 @@
   letter-spacing: .1em; text-transform: uppercase; opacity: .6; font-weight: 700;
   /* Out past the panel's own padding: a heading that stops short of the edge is a label,
      and one that reaches it is a section. */
-  margin: 0 -4px 2px; padding: 2px 12px; background: var(--tvr-soft); }
+  margin: 0 -4px 3px; padding: 3px 12px; background: var(--tvr-soft); }
 
 /* Stats: a bar is easier to compare than four numbers in a column. */
 .tvr-bar-row { display: grid; grid-template-columns: 70px 1fr 90px; gap: 10px; align-items: center;

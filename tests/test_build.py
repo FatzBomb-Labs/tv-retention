@@ -408,7 +408,7 @@ class Interface(unittest.TestCase):
         # Out past the panel's own padding, which is what "full width" means here.
         panel = self.css.split('.tvr-side { display: block;')[1].split('}')[0]
         self.assertIn('padding: 4px 4px 8px', panel)
-        self.assertIn('margin: 0 -4px 2px', block)
+        self.assertIn('margin: 0 -4px', block)
 
     def test_the_layout_switch_is_two_square_icons(self):
         # A box around them made one control out of two buttons, and the padding inside it
