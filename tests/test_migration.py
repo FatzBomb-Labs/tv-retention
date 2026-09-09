@@ -193,3 +193,37 @@ class ToVersionSix(unittest.TestCase):
         from store import LOG_RANK
         from core import DEFAULTS
         self.assertLessEqual(LOG_RANK['info'], LOG_RANK[DEFAULTS['logging']['level']])
+
+
+class ToV9(unittest.TestCase):
+    """The volume is not a setting.
+
+    `state_dir` existed because the plugin had to be told where on somebody else's system
+    to put its working data. A container is given one volume, and a stored path pointing at
+    the host either fails inside the container or — worse — succeeds against the image's own
+    writable layer and loses everything on the next restart.
+    """
+
+    def test_a_host_path_does_not_survive_the_move(self):
+        moved = migrate({'settings_version': 8, 'state_dir': '/mnt/user/appdata/tv-retention'})
+        self.assertNotIn('state_dir', moved)
+        self.assertEqual(moved['settings_version'], 9)
+
+    def test_everything_else_is_left_alone(self):
+        before = {'settings_version': 8, 'state_dir': '/mnt/user/appdata/tv-retention',
+                  'rules': [{'id': 'r1', 'keep_days': 30}],
+                  'notifications': {'errors': False, 'webhook_url': 'https://example.invalid/hook'}}
+        after = migrate(before)
+        self.assertEqual(after['rules'], before['rules'])
+        self.assertEqual(after['notifications'], before['notifications'])
+
+    def test_nothing_asks_the_filesystem_anything_any_more(self):
+        """The folder picker was the last thing that read a directory.
+
+        With the volume no longer configurable there is nothing to pick, and *the plugin
+        touches no filesystem at all* is true without qualification for the first time.
+        """
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1] / 'src' / 'tv-retention'
+        self.assertNotIn('browseFolder', (root / 'assets' / 'app.js').read_text())
+        self.assertNotIn('action_browse', (root / 'worker' / 'actions.py').read_text())

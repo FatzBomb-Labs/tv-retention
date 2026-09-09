@@ -28,7 +28,6 @@ from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, fo
                    trim_health, write_cache)
 from tmdb import TMDB, TMDBError
 
-MAX_BROWSE_ENTRIES = 500
 
 # ---------------------------------------------------------------------------
 # RPC actions
@@ -619,29 +618,6 @@ def action_enable_recycle_bin(settings, request):
     return {'recycle_bin': path, 'ok_message': f'Sonarr will now move deleted files to {path}.'}
 
 
-def action_browse(settings, request):
-    """Directory listing for the folder picker. Read-only, and confined to /mnt."""
-    from core import validate_path
-    path = validate_path(request.get('path') or '/mnt/user', 'Folder')
-    if not (path == '/mnt' or path.startswith('/mnt/')):
-        raise Rejected('Browsing is limited to /mnt.')
-    directory = Path(path)
-    if not directory.is_dir():
-        raise Rejected(f'{path} is not a folder on this server.')
-    entries = []
-    try:
-        for child in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
-            if child.name.startswith('.') or not child.is_dir():
-                continue
-            entries.append({'name': child.name, 'path': normalise(child)})
-            if len(entries) >= MAX_BROWSE_ENTRIES:
-                break
-    except OSError as error:
-        raise Rejected(f'Cannot read {path} ({error})')
-    return {'path': normalise(directory), 'parent': normalise(directory.parent) if path != '/mnt' else None,
-            'entries': entries}
-
-
 def action_match(settings, request):
     return {'report': main.bind_rules(settings), 'settings': redact(load_settings())}
 
@@ -695,7 +671,6 @@ ACTIONS = {
     'settings': action_settings,
     'test-instance': action_test_instance,
     'series': action_series,
-    'browse': action_browse,
     'match': action_match,
     'preview': action_preview,
     'run': action_run,

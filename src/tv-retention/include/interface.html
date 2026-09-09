@@ -221,12 +221,7 @@
 <section id="tvr-view-system-storage" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Storage</h2></div>
     <div class="tvr-card">
-      <div class="tvr-inline-row">
-        <span class="tvr-inline-label">Folder</span>
-        <input type="text" id="tvr-state-dir" spellcheck="false">
-        <button type="button" id="tvr-browse-state">Browse…</button>
-      </div>
-      <small>Holds the reading taken from Sonarr, run journals, the log and cached artwork. Kept off the flash device.</small>
+      <p class="tvr-lede">Everything is under <code>/config</code> — settings at the top, and the reading taken from Sonarr, run journals, the log and cached artwork under <code>/config/state</code>. Mount that volume where you want it; there is nothing to configure here.</p>
       <div class="tvr-inline-row">
         <span class="tvr-inline-label">Runs kept in history</span>
         <input type="number" id="tvr-history-size" min="1" max="500">

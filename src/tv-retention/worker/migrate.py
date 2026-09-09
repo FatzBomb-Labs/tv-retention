@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 8
+SETTINGS_VERSION = 9
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -78,8 +78,17 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v7(document))
     if version < 8:
         document.update(_to_v8(document))
+    if version < 9:
+        document.pop('state_dir', None)
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+# v9 is a removal rather than a function: `state_dir` was a setting because the plugin had
+# to be told where on somebody else's system to put its working data. A container is given
+# one volume, and a stored path pointing at the host — `/mnt/user/appdata/tv-retention`, say
+# — either fails inside the container or, worse, succeeds against the image's own writable
+# layer and loses everything on the next restart. Dropping the key lets it re-default.
 
 
 def _to_v8(document: dict) -> dict:

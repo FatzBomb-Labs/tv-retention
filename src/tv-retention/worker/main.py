@@ -41,7 +41,6 @@ from store import (CONFIG, DEVELOPMENT, NAME, RUNTIME, SCHEMA,
                    store_episodes, trim_health, write_cache)
 from tmdb import TMDB, TMDBError, fill_air_dates
 
-MAX_BROWSE_ENTRIES = 500
 # Sonarr is confirmed reachable this often, and before anything that needs it.
 CONNECTIVITY_SECONDS = 300
 # The resident loop's heartbeat. The plugin published a one-minute cron entry and let the

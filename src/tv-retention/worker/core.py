@@ -20,7 +20,7 @@ from pathlib import Path
 import schedules
 
 VERSION = '2026.09.09'
-SETTINGS_VERSION = 8
+SETTINGS_VERSION = 9
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.

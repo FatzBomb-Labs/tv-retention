@@ -169,37 +169,6 @@
     box.showModal();
   }
 
-  // -- tabs --------------------------------------------------------------
-  function browseFolder(startPath, onPick) {
-    let current = startPath || '/mnt/user';
-    dialog('Choose a folder', (body) => {
-      const crumb = el('div', { className: 'tvr-mono' });
-      const list = el('div', { className: 'tvr-rules' });
-      const use = el('button', { type: 'button', className: 'tvr-primary', textContent: 'Use this folder' });
-      use.addEventListener('click', (event) => { event.preventDefault(); $('tvr-dialog').close('cancel'); onPick(current); });
-      body.append(crumb, list, use);
-      const load = (path) => guarded('', async () => {
-        const data = await api('browse', { path }, 'Reading folder…');
-        current = data.path;
-        crumb.textContent = data.path;
-        list.replaceChildren();
-        if (data.parent) {
-          const up = el('button', { type: 'button', textContent: 'Up one level' });
-          up.addEventListener('click', (event) => { event.preventDefault(); load(data.parent); });
-          list.append(up);
-        }
-        data.entries.forEach((entry) => {
-          const button = el('button', { type: 'button', textContent: entry.name, className: 'tvr-folder' });
-          button.addEventListener('click', (event) => { event.preventDefault(); load(entry.path); });
-          list.append(button);
-        });
-        if (!data.entries.length) list.append(el('p', { className: 'tvr-empty', textContent: 'No sub-folders here.' }));
-      });
-      load(current);
-      return {};
-    }, null, 'Close');
-  }
-
   // -- snapshot and background checking ----------------------------------
   const checking = new Set();
   const forced = new Set();
@@ -2540,7 +2509,6 @@
     $('tvr-monitoring').onchange = describeMonitoring;
     describeMonitoring();
     $('tvr-tmdb-key').value = (settings.tmdb || {}).api_key || '';
-    $('tvr-state-dir').value = settings.state_dir || '';
     $('tvr-history-size').value = settings.log_retention_runs;
     $('tvr-log-level').value = (settings.logging || {}).level || 'info';
     $('tvr-ttl-hours').value = String((settings.health || {}).ttl_hours || 24);
@@ -2565,7 +2533,6 @@
         monitoring: $('tvr-monitoring').value,
       },
       tmdb: { api_key: $('tvr-tmdb-key').value },
-      state_dir: $('tvr-state-dir').value.trim(),
       log_retention_runs: $('tvr-history-size').value,
       logging: Object.assign({}, settings.logging, { level: $('tvr-log-level').value }),
       alerts: {
@@ -2703,11 +2670,7 @@
       el('span', { className: 'tvr-inline-label', textContent: name }),
       el('span', { textContent: String(value) }),
     ])));
-  }
-  $('tvr-browse-state').addEventListener('click', () => {
-    browseFolder($('tvr-state-dir').value || '/mnt/user/appdata', (picked) => { $('tvr-state-dir').value = picked; });
-  });
-  $('tvr-tmdb-test').addEventListener('click', () => guarded('', async () => {
+  }  $('tvr-tmdb-test').addEventListener('click', () => guarded('', async () => {
     const result = $('tvr-tmdb-result');
     try {
       await api('test-tmdb', { tmdb: { api_key: $('tvr-tmdb-key').value } }, 'Contacting TMDB…');
