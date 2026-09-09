@@ -165,3 +165,79 @@ class Worker(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class KeepAlive(unittest.TestCase):
+    """Two requests down one connection, where the first one is rejected.
+
+    A string-matching test would not have found this. It needs a real socket, because the
+    fault is entirely in what is left in it.
+    """
+
+    def setUp(self):
+        import threading
+        from http.server import ThreadingHTTPServer
+        self.server_module = load(TVR_USERNAME='someone', TVR_PASSWORD='a-long-enough-password')
+        self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), self.server_module.Handler)
+        self.httpd.daemon_threads = True
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.port = self.httpd.server_address[1]
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def post(self, sock, reader, body):
+        """One request, and exactly one response read back off the stream.
+
+        Reading with a bare recv() is what makes this test lie: the response arrives in
+        whatever pieces the kernel felt like, so the next read picks up the tail of the
+        last one and the failure looks like the server's rather than the test's.
+        """
+        request = (f'POST /api HTTP/1.1\r\nHost: x\r\nContent-Type: '
+                   f'application/x-www-form-urlencoded\r\nContent-Length: {len(body)}\r\n\r\n{body}')
+        sock.sendall(request.encode())
+        status = reader.readline().decode('utf-8', 'replace')
+        length = 0
+        while True:
+            line = reader.readline().decode('utf-8', 'replace')
+            if line in ('\r\n', '\n', ''):
+                break
+            name, _, value = line.partition(':')
+            if name.strip().lower() == 'content-length':
+                length = int(value.strip())
+        return status, reader.read(length).decode('utf-8', 'replace')
+
+    def test_a_rejected_request_does_not_poison_the_next_one(self):
+        """The body of a 401 stayed in the socket and became the next request line.
+
+            Unsupported method ('csrf_token=...&payload=%7B...%7DGET')
+
+        Which is the leftover body with the following request stuck to the end of it. It
+        showed up the moment the container was restarted, because sessions live in memory
+        and every open page then had a cookie for a session that was gone.
+        """
+        import socket
+        body = 'csrf_token=stale&payload=%7B%22action%22%3A%22watch%22%7D'
+        with socket.create_connection(('127.0.0.1', self.port), timeout=5) as sock:
+            reader = sock.makefile('rb')
+            first, _ = self.post(sock, reader, body)
+            self.assertIn('401', first)
+            second, _ = self.post(sock, reader, body)
+        self.assertIn('401', second, 'the connection was left dirty')
+        self.assertNotIn('501', second)
+        self.assertNotIn('Unsupported method', second)
+
+    def test_the_page_is_told_the_session_is_gone_rather_than_that_something_broke(self):
+        import json as jsonlib
+        import socket
+        with socket.create_connection(('127.0.0.1', self.port), timeout=5) as sock:
+            _, body = self.post(sock, sock.makefile('rb'), 'csrf_token=stale&payload=%7B%7D')
+        self.assertTrue(jsonlib.loads(body)['expired'])
+        source = (context.ROOT / 'src' / 'tv-retention' / 'assets' / 'app.js').read_text()
+        self.assertIn("if (data.expired) { window.location.href = '/login';", source)
+
+    def test_an_oversized_body_closes_the_connection_instead_of_being_left_behind(self):
+        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        block = source.split('def read_form')[1].split('def ')[0]
+        self.assertIn('self.close_connection = True', block)

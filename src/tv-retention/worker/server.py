@@ -271,8 +271,21 @@ class Handler(BaseHTTPRequestHandler):
                   [('Cache-Control', 'no-store')])
 
     def read_form(self) -> dict:
+        """The whole body, always, before anything is decided about the request.
+
+        On a keep-alive connection an unread body is not discarded — it stays in the socket
+        and becomes the first bytes the server reads as the *next* request. A 401 that
+        returned without reading turned the following POST into
+
+            Unsupported method ('csrf_token=...&payload=%7B...%7DGET')
+
+        which is the leftover body with the next request line stuck to the end of it. So
+        this is called first and unconditionally, and an oversized body closes the
+        connection rather than leaving a megabyte of it behind.
+        """
         length = int(self.headers.get('Content-Length') or 0)
         if length > MAX_BODY:
+            self.close_connection = True
             return {}
         raw = self.rfile.read(length).decode('utf-8', 'replace') if length else ''
         return urllib.parse.parse_qs(raw)
@@ -320,12 +333,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = urllib.parse.urlparse(self.path).path
+        # Read first, decide second. See read_form: a body left unread poisons the next
+        # request on the same connection, and every early return below is a way to leave
+        # one behind.
+        form = self.read_form()
         if route == '/login':
-            return self.handle_login()
+            return self.handle_login(form)
         if route == '/logout':
             return self.handle_logout()
         if route == '/api':
-            return self.handle_api()
+            return self.handle_api(form)
         return self.send(404, b'Not found', 'text/plain; charset=utf-8')
 
     def serve_asset(self, name: str):
@@ -346,9 +363,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', '0')
         self.end_headers()
 
-    def handle_login(self):
+    def handle_login(self, form):
         global _failures
-        form = self.read_form()
         username = (form.get('username') or [''])[0]
         password = (form.get('password') or [''])[0]
         if OPEN or not credentials_match(username, password):
@@ -383,14 +399,17 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', '0')
         self.end_headers()
 
-    def handle_api(self):
+    def handle_api(self, form):
         session = self.session()
         if not session:
-            return self.send_json(401, {'ok': False, 'error': 'Session expired. Reload the page.'})
-        form = self.read_form()
+            # `expired: true` so the page can reload itself into the login rather than
+            # showing an error about a session the reader cannot do anything about.
+            return self.send_json(401, {'ok': False, 'expired': True,
+                                        'error': 'Session expired. Reload the page.'})
         token = (form.get('csrf_token') or [''])[0]
         if not OPEN and not hmac.compare_digest(token, session['csrf']):
-            return self.send_json(403, {'ok': False, 'error': 'Session token expired. Reload the page.'})
+            return self.send_json(403, {'ok': False, 'expired': True,
+                                        'error': 'Session token expired. Reload the page.'})
         try:
             request = json.loads((form.get('payload') or [''])[0] or '{}')
         except json.JSONDecodeError:

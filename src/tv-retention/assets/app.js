@@ -73,6 +73,11 @@
         data = { ok: false, error: `The backend replied with HTTP ${response.status} and no usable JSON. `
                                    + 'If this says 403, reload the Unraid page to refresh the session token.' };
       }
+      // A session that has gone — the container restarted, or it simply aged out — is not
+      // an error the reader can do anything with. Sessions live in memory on purpose, so
+      // this is the ordinary consequence of a restart and the page should just go and log
+      // in again.
+      if (data.expired) { window.location.href = '/login'; throw new Error('Signing in again…'); }
       if (!data.ok) throw new Error(data.error || 'Request failed');
       return data;
     } finally {
