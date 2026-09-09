@@ -15,6 +15,7 @@ by real episode metadata rather than a file timestamp.
 
 - [How it works](#how-it-works)
 - [Installing](#installing)
+- [Getting around](#getting-around)
 - [First run](#first-run)
 - [Rules](#rules)
 - [Retention presets](#retention-presets)
@@ -63,23 +64,47 @@ and history in place, so reinstalling picks up where you left off.
 
 Requirements: Unraid 7.0 or newer, and at least one reachable Sonarr v3/v4 instance.
 
+## Getting around
+
+The page is a sidebar and a content pane. **Series** is the library — one list of
+everything Sonarr holds, filtered to **All**, **Connected** (has a retention rule) or
+**Not connected**. **Media management** holds connections, the schedule, presets and the
+retention defaults. **System** holds storage, job history, logs, notifications, stats and
+alert settings. **Help** holds the about page and the help text.
+
+There is no separate "add" screen: a series with a rule and a series without are the same
+row in the same list, and clicking either opens the same editor in the pane beside it.
+
 ## First run
 
-1. **Settings** → add each Sonarr with its URL and API key. Press **Test & save**: it
-   reports the Sonarr version, how many series it holds, and whether Sonarr has a recycle
-   bin configured.
-2. **Series** → **Add series**, and pick the show from Sonarr.
+1. **Media management → Connections** → add each Sonarr with its URL and API key. Press
+   **Test & save**: it reports the Sonarr version, how many series it holds, and whether
+   Sonarr has a recycle bin configured.
+2. **Series → Not connected**, and click the show you want. Set its retention, then
+   **Save and enable** — or **Save**, which adds the rule switched off until you say
+   otherwise.
 3. Open **Show scheduled changes** in the header. Read what the next run would delete, and
    why, before anything is scheduled.
-4. When that looks right, set a schedule at the top of **Settings**. **Test Mode** is on for a
-   new install, so the first scheduled runs report exactly what they would do and change
-   nothing. Turn it off once you have watched one go through.
+4. When that looks right, set a schedule under **Media management → Schedule**. **Test
+   Mode** is on for a new install, so the first scheduled runs report exactly what they
+   would do and change nothing. Turn it off once you have watched one go through.
 
 ## Rules
 
-The list can be ordered by **needs attention** (the default — problems first, so two broken
-shows among thirty healthy ones are at the top), title, least recently checked, keep window,
-preset, or Sonarr instance. Search and filter sit on the same row.
+The library reads as a list or as a wall of posters. It can be ordered by **needs
+attention** (the default — problems first, so two broken shows among thirty healthy ones
+are at the top), title either way, recently added to Sonarr, largest on disk, most
+episodes, or shortest keep window. The title, the search box, the sort, both filters and
+the layout switch are one row: they are all one question, and each of them used to answer
+it from a line of its own.
+
+**Hide ended** drops series that have finished *and* have no rule — one that has a rule
+stays, and one with an alert always stays. **Alerts only** narrows to what needs
+addressing.
+
+In poster view the artwork is the card: alerts stack top-right, what the next run would do
+runs down the left as a badge and a count, and the retention appears along the bottom on
+hover. A rule that is switched off is a dashed frame and a dimmed poster.
 
 A rule holds any combination of three conditions:
 
@@ -114,23 +139,48 @@ Shows are added by picking a Sonarr series, and only that way. A rule binds to a
 and the folder follows from Sonarr — so there is nothing a folder-based rule could express
 that this does not.
 
-The picker is a search box, because a plain dropdown is unusable at three thousand series.
-Type a few letters; matches on the start of the title sort first. Each row shows either its
-folder or the reason it cannot be chosen:
+The library **is** the picker: search it, click the show, and the editor opens in the pane
+beside the list. Each row shows either its folder or the reason it cannot be chosen:
 
 | Row shows | Meaning |
 |---|---|
 | its folder path | Ready to use |
 | *awaiting first episode — no folder yet* | Selectable. Sonarr creates the folder on first import and the rule picks it up then. |
-| *already used by another rule* | Not selectable. One rule per series. |
 | *no folder configured in Sonarr* | Not selectable. Sonarr has no path for the series. |
+
+### The editor
+
+The pane is four bands and only one of them scrolls. Fixed at the top: the pane's own bar,
+carrying a refresh and a close; then the series — poster, title, year and network, the
+episode counts, when the next episode airs, and what the next run would do to it. The
+settings scroll between that and the buttons that commit them, so the plan those settings
+move is never scrolled out of view while you move it.
+
+The counts read *62 episodes (12 monitored)*, and the monitored figure is coloured by
+whether the episodes **the rule keeps** are monitored — green all, orange some, red none.
+Scope rather than the whole series, because a finished show with two seasons kept and six
+older ones unmonitored is exactly right. Hovering gives the breakdown.
+
+The next-run lines are answered against the values **in the form**, not the ones last
+saved, so changing a keep window visibly moves the deletion and monitoring counts above it.
+Each line hovers with its full wording and clicks through to the episodes.
+
+A rule that already exists carries a switch at the top right, and it acts when it is
+clicked rather than on **Update** — switching a series off is a thing you do, not a change
+you save. A series being added has no switch: **Save and enable** and **Save** are the two
+answers, and they are two buttons.
+
+Unsaved edits survive a look at another series. Clicking a second poster to check something
+and clicking back is browsing, not abandoning; leaving the library is leaving, and clears
+them.
 
 ## Retention presets
 
 Rather than typing the same numbers onto every show, create a named preset — *Keep 30
-days*, *Keep 2 seasons* — on the **Presets** tab. A show's retention is then a dropdown:
-pick a preset, or pick **Custom** and set values for that show alone. A show using a preset
-shows it as a single blue pill; only a custom rule spells its numbers out.
+days*, *Keep 2 seasons* — under **Media management → Presets**. A show's retention is then
+a dropdown: **Custom** is first and is what a new series starts on, because sharing values
+with other shows is a decision, not a default. A show using a preset shows it as a single
+blue pill; only a custom rule spells its numbers out.
 
 A preset is the single source of truth for every show pointing at it. Raise *Keep 30 days*
 to 90 and all of them widen at once, with no rule-by-rule editing. A preset still in use
@@ -215,19 +265,31 @@ The daily sweep is not redundant. Sonarr's history reports imports and deletions
 **monitoring toggled by hand in Sonarr is not a history event** and no cheap endpoint
 reveals it, so a full read is the only thing that catches it.
 
-Nothing cached is ever presented as live: every card names the age of the reading behind it
-(*Sonarr read 20 minutes ago*), and the plan above it is current arithmetic over that
-reading. While a sweep runs, each card's plan is replaced by *Reading from Sonarr…* rather
-than left standing, because a stale plan shown as current is worse than no plan.
+Nothing cached is ever presented as live: the editor names the age of the reading behind it
+(*Last refreshed: 40 min ago*), and everything above that line is current arithmetic over
+that reading. While a sweep runs, each card's plan is replaced by *Reading from Sonarr…*
+rather than left standing, because a stale plan shown as current is worse than no plan.
+
+The refresh beside that line re-reads **this** series. On one with a rule that is a full
+check; on one without, there is no rule to check, so it re-reads the series' own catalogue
+entry — title, seasons, next airing, artwork — and writes it back into the stored list, so
+the page is never left fresher than the cache behind it.
 
 A run always reads Sonarr for itself. A stored reading never stands behind a write.
 
 ## Alerts and notifications
 
-Problems with a **series** live on the Series tab, because that is where they are fixed: a
+Problems with a **series** live in the library, because that is where they are fixed: a
 badge on the card, and a roll-up above the list that filters to just those shows. Problems
-with the **installation** — Sonarr unreachable, no recycle bin — live on the Alerts tab.
-Neither counts the other's.
+with the **installation** — Sonarr unreachable, no recycle bin — live under **Media
+management → Connections**. Neither counts the other's; the count in the header opens
+both. **System → Alert settings** decides how loudly you are told, and nothing more.
+
+**A series that is switched off raises nothing.** It is not being managed, so nothing about
+it is a problem to report — no badge, no roll-up line, no notification. Nothing is deleted:
+switch it back on and every alert it had returns. That is not the same as muting, which is
+a decision about a *kind* of alert across every series and leaves a blocking alert
+blocking.
 
 Unraid notifications are for something structurally wrong: a series that cannot be found, a
 Sonarr that will not answer, deletions with no recycle bin to catch them, a series Sonarr
@@ -280,7 +342,7 @@ rests on an estimate rather than a real air date.
 
 ## Scheduling
 
-The **Schedule** tab offers hourly, daily, weekly, monthly by date, monthly by weekday
+**Media management → Schedule** offers hourly, daily, weekly, monthly by date, monthly by weekday
 (*the first Monday*, *the last Friday*), or a custom five-field cron expression.
 
 The crontab holds one fixed entry that wakes the worker every minute; the worker decides
@@ -303,7 +365,7 @@ as soon as it answers, and exactly one is ever queued.
 | `<state folder>/jobs.json` | When each scheduled job last ran. |
 | `<state folder>/tmdb-cache.json` | Cached TMDB air dates. |
 
-The **app storage folder** is set on the Settings tab. On a fresh install it defaults to a
+The **app storage folder** is set under **System → Storage**. On a fresh install it defaults to a
 `tv-retention` folder inside the appdata share this server has configured for Docker
 (`DOCKER_APP_CONFIG_PATH` in `docker.cfg`, `/mnt/user/appdata` here), deliberately off the
 flash device. If the array is down it falls back to the flash config folder.
@@ -317,7 +379,7 @@ mask, and echoing the mask back means "keep the stored key".
 src/tv-retention/
   TVRetention.page          Unraid Tools page; loads the interface and the assets
   include/api.php        Authenticated bridge: CSRF check, then one JSON call to the worker
-  include/interface.html Markup for the eight tabs
+  include/interface.html Markup for the sidebar shell and its thirteen views
   assets/app.js          UI logic; holds no authority, re-validates nothing itself
   assets/app.css         Styling, scoped to #tv-retention
   worker/core.py         Settings validation and the retention decision. Pure.
@@ -326,7 +388,7 @@ src/tv-retention/
   worker/tmdb.py         Optional air-date lookup with an on-disk cache
   worker/alerts.py       What needs attention, and whether it blocks or notifies
   worker/schedules.py    When a job is due, including what cron cannot express
-  worker/migrate.py      Settings upgrades, v1 through v5
+  worker/migrate.py      Settings upgrades, v1 through v7
   worker/main.py         Sonarr orchestration, the run executor, the tick, the CLI
   worker/actions.py      The RPC surface, one function per thing the interface can ask for
   event/*                Array start/stop hooks
@@ -345,10 +407,17 @@ Both object caches are keyed by the *shape* of what Sonarr's mapping produces, n
 schema number: listing a field in `SERIES_FIELDS` or `EPISODE_FIELDS` is the cache bump, and
 a test fails if the mapping produces a key the list does not name.
 
+`app.css` is scoped to `#tv-retention`, but scoping is not isolation. Unraid's own
+stylesheet reaches every `button`, `select` and `input` on the page through
+`:where(:not(.unapi *))` selectors, which contribute **no specificity** — so any property
+this plugin does not name simply applies. Margins, minimum widths and `width: 100%` on
+selects all arrived that way and are reset explicitly, with tests to keep them reset,
+because losing one produces no error.
+
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v   # 306 tests
+python3 -m unittest discover -s tests -v   # 378 tests
 python3 tools/build.py                     # writes dist/ and install/tv-retention.plg
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```

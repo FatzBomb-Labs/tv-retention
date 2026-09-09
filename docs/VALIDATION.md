@@ -1,12 +1,51 @@
 # Validation record
 
-Last run: 2026-09-07, from the Webtop development container against FatzServer
+Last run: 2026-09-09, from the Webtop development container against FatzServer
 (Unraid 7.3.2, Python 3.11.15, PHP 8).
+
+## Automated
+
+`./tools/check-on-host.sh` — source staged under `/tmp` on the host, removed afterwards.
+It installs nothing, touches no `/boot` path, reads no media, and contacts no Sonarr.
+
+| Check | Result |
+|---|---|
+| `python3 -m unittest discover -s tests` | 378 tests, all pass |
+| `python3 tools/build.py` | package and manifest built, rebuild is byte-identical |
+| `php -l src/tv-retention/include/api.php` | no syntax errors |
+| `php -l` on the PHP section of `TVRetention.page` | no syntax errors |
+| `node --check src/tv-retention/assets/app.js` | no syntax errors |
+| Icon check | `fa-television` resolves to a real glyph |
+
+### Coverage by area
+
+| File | Tests | What it holds |
+|---|---|---|
+| `test_build.py` | 118 | The package, and the interface as a build artefact |
+| `test_monitoring.py` | 33 | The two modes, the keep frame, and what each one asks Sonarr to do |
+| `test_freshness.py` | 31 | Reading ages, staleness, what may be shown as current |
+| `test_migration.py` | 30 | Settings v1 → v7, each step and the whole chain |
+| `test_schedules.py` | 26 | When a job is due, including what cron cannot express |
+| `test_retention.py` | 23 | Every condition, every combine mode, air-date precedence, the guards |
+| `test_mapping.py` | 19 | The Sonarr payload as it actually arrives, through the real client |
+| `test_cache.py` | 16 | Cache keys derived from the mapping's shape |
+| `test_queue.py` | 15 | Queued removals and the check queue |
+| `test_settings.py` | 15 | Validation, redaction, injection and traversal rejection |
+| `test_names.py` | 14 | Names each module can actually reach, plus alert display rules |
+| `test_presets.py` | 10 | Shared values, and what a preset may not do |
+| `test_progress.py` | 10 | The progress marker and the banner over it |
+| `test_sonarr.py` | 9 | Rule-to-series matching, and ambiguity refused rather than guessed |
+| `test_unaired.py` | 9 | Unaired seasons, and the next episode due |
+
+`test_build.py` is the largest because the interface is checked statically: it is the file
+with no runtime under test, so the guards that would otherwise be a browser sit here.
+Among them — every element the script hides exists in the markup, every id is unique,
+braces and parentheses balance, and every WebGUI default this page has to undo is undone.
 
 ## Live, read-only, against 3022 series and 36 rules
 
-Staged under `/tmp` with `TVR_CONFIG` pointed away from `/boot`, and every Sonarr call
-asserted to be a GET.
+Measured 2026-09-07. Staged under `/tmp` with `TVR_CONFIG` pointed away from `/boot`, and
+every Sonarr call asserted to be a GET.
 
 | Measurement | Result |
 |---|---|
@@ -20,68 +59,31 @@ asserted to be a GET.
 | Plan under Unmonitor only | 186 deletions, 0 monitoring changes |
 | Plan under Full sync | 186 deletions, 290 episodes monitored |
 
-## Automated
+The three zero-call rows are the point of the design: re-deciding a rule is arithmetic over
+episodes already held, so editing a keep window, raising a preset or a day passing costs
+nothing at all.
 
-`./tools/check-on-host.sh` — source staged under `/tmp` on the host, removed afterwards.
+## Earlier live checks
 
-| Check | Result |
-|---|---|
-| `python3 -m unittest discover -s tests` | 300 tests, all pass |
-| `python3 tools/build.py` | package and manifest built, rebuild is byte-identical |
-| `php -l src/tv-retention/include/api.php` | no syntax errors |
-| `php -l` on the PHP section of `TVRetention.page` | no syntax errors |
-| `node --check src/tv-retention/assets/app.js` | no syntax errors |
-
-Coverage by area:
-
-- **Settings** (17 tests) — cron field validation and shell-injection rejection, path
-  traversal rejection, library paths confined to `/mnt`, duplicate-folder rejection,
-  unknown-instance rejection, masked API keys preserved on save and refused when nothing
-  is stored, redaction, guard bounds, sidecar extensions that would match video files.
-- **Retention** (20 tests) — each condition alone; all three combine modes including the
-  cases that distinguish *latest* from *any*; air-date precedence (Sonarr → TMDB →
-  mtime) and the fallback switched off; specials excluded and included; the minimum file
-  age; the per-rule percentage guard both blocking and permitting; every decision
-  carrying a reason.
-- **Presets** (10 tests) — a rule driven by a preset stores no numbers of its own; presets
-  need a name and a condition; names are unique; an unknown preset is rejected at save
-  time and refused at run time rather than guessed; raising one preset widens every rule
-  using it; custom rules are unaffected.
-- **Re-monitoring** (6 tests) — a widened window puts an episode back; one still outside
-  it stays gone; episode-count and season conditions consider the missing episodes in
-  their proper order; the per-rule deletion guard does not suppress the comparison.
-- **Mapping detection** (6 tests) — a Sonarr root resolves to its Docker mount; unrelated
-  volumes such as `/config` are not proposed; several roots yield several mappings; the
-  most specific mount wins; nothing is invented when no mount matches.
-- **Paths** (14 tests) — container-to-host mapping, longest-prefix precedence, partial
-  names not treated as prefixes, round trips, Unicode NFC/NFD equivalence, trailing
-  slashes; sidecar matching restricted to one episode's own stem; media scanning;
-  empty-directory detection that never returns the show folder.
-- **Matching** (8 tests) — match by stored series id, by TVDB id after an id change, by
-  folder path; ambiguity refused rather than guessed; unknown folders reported.
-- **Build** (7 tests) — install paths, executable event scripts, manifest checksum,
-  launch target, removal that preserves settings, reproducible rebuilds.
-
-## Live, read-only
-
-Against the running `Sonarr-Series` container (`/tv` → `/mnt/user/media/TV`), from a
-`/tmp` staging directory with `TVR_CONFIG` pointed at `/tmp`. GET requests only; no
-deletion and no `/boot` write. The re-monitor check used a temporary state folder under
-appdata, seeded with a synthetic ledger, and removed afterwards.
+Against the running `Sonarr-Series` container, from a `/tmp` staging directory with
+`TVR_CONFIG` pointed at `/tmp`. GET requests only.
 
 | Check | Result |
 |---|---|
-| `test-instance` | Sonarr answered; every mapped series folder resolved on disk |
-| `detect-mappings` | Identified the `Sonarr-Series` container by the port in its URL, read its four root folders (`/tv/Series`, `/tv/Kids`, `/tv/News & Talk`, `/tv/Reality`), and derived the single mapping `/tv` → `/mnt/user/media/TV`, confirmed present |
-| `match` | The folder `News & Talk/Daily Show, The (1996) {tvdb-71256}` matched "The Daily Show" by folder path |
-| `preview`, preset-driven | A rule pointing at a "Keep 180 days" preset resolved correctly: 66 episodes considered, 1 selected with a real Sonarr air date (2026-03-06), 65 kept, 0 unknown to Sonarr |
-| `preview` with re-monitoring on | Of two seeded ledger entries, the one that aired inside the widened window was reported for re-monitoring and the 2015 one was not; the ledger was left unchanged by the dry run |
+| `test-instance` | Sonarr answered, and reported its recycle-bin setting |
+| `match` | The folder `News & Talk/Daily Show, The (1996) {tvdb-71256}` matched "The Daily Show" |
+| `preview`, preset-driven | A rule pointing at a "Keep 180 days" preset resolved correctly: 66 episodes considered, 1 selected with a real Sonarr air date (2026-03-06), 65 kept |
 
 ## Not yet exercised
 
-- A live deletion (dry run off). See [ACCEPTANCE.md](ACCEPTANCE.md).
-- A live re-monitor write — only the selection has been exercised, not the Sonarr `PUT`.
-- The plugin installed through the WebGUI, and the generated cron entry firing.
-- TMDB air-date filling — no API key configured yet.
-- The plugin-managed recycle folder and its retention purge.
-- Unraid notifications.
+- **A live deletion.** Test Mode has never been turned off on this server. See
+  [ACCEPTANCE.md](ACCEPTANCE.md).
+- **A live monitoring write.** The selection has been exercised; Sonarr's `PUT` has not.
+- **The plugin installed through the WebGUI**, and the generated cron entry firing.
+- **TMDB air-date filling** — no API key configured.
+- **Unraid notifications** — no notification has been observed arriving.
+- **`main.announce_alerts`** has no caller. It is the "tell me the first time, and never
+  again" path, keyed so a condition true since Tuesday is not announced on Wednesday.
+  Notifications currently come from the health check's summary instead, which re-notifies
+  whenever an error is present at check time. Wire it up or delete it; as it stands it is
+  a designed behaviour that does not run.

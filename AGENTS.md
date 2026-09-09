@@ -8,7 +8,7 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 There is no Python or PHP in the Webtop development container. Run
 `./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
 `python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 318 tests with no expected failures.
+there. The suite is 378 tests with no expected failures.
 
 ## Layout
 
@@ -69,8 +69,31 @@ Sonarr and decides things, plus the tick and the CLI.
   bump, and a test fails if the mapping produces a key the list does not name.
 - Test the Sonarr mapping from a Sonarr-shaped payload, not from the shape a consumer
   wants: a consumer reading a key the mapping never set is invisible to the latter.
+- A rule that is switched off raises no alerts. It is not being managed, so nothing about
+  it is a problem to report — and switching it on brings every one back, because nothing
+  was deleted. `alerts.managed_only` is the one filter, applied both where the interface
+  reads alerts and where the health check decides what to notify about; hiding only the
+  visible half would leave Unraid notifications firing about a series no run will touch.
 - Test against isolated fixtures. Live checks against Sonarr must be read-only, run from
   a `/tmp` staging directory with `TVR_CONFIG` pointed away from `/boot`.
+
+## The WebGUI's cascade
+
+Unraid's `default-base.css` styles bare `button`, `select` and `input` through
+`:where(:not(.unapi *))` selectors. `:where()` contributes **no specificity**, so those
+rules never *conflict* with anything in `app.css` — every property this plugin does not
+name simply applies, and nothing about the cascade looks wrong while it happens. What
+arrived that way, and is now reset explicitly in `#tv-retention button` and the field rule:
+`margin: 10px 12px 10px 0`, `min-width: 86px`, `white-space: nowrap` on every button, and
+`width: 100%` on every select — which in a flex row means "all of it". Assume any WebGUI
+default not named in this file is in force. Tests guard the resets, because dropping one
+produces no error, only air.
+
+`TVRetention.page` hashes `app.js` and `app.css` **together** for the asset cache key.
+Joining the two digests and truncating takes every character from the first, so the key
+followed the script and ignored the stylesheet: four consecutive CSS-only releases shipped
+under the key the browser already held, and the page came back new styled by the file it
+had replaced.
 
 ## Planned work
 

@@ -4,8 +4,9 @@ What is agreed and **not yet built**. Delete from this file as things land, so i
 describes what is left rather than what was ever discussed.
 
 The interface rebuild is done: the sidebar shell, the top bar with its scheduled-change
-menu, the Add view, the richer Sonarr fields behind it, and the series list with a details
-pane that edits in place. What follows is what remains.
+menu, one library with All / Connected / Not-connected filters, the richer Sonarr fields
+behind it, and the details pane that edits in place. So is the density pass over it. What
+follows is what remains.
 
 ---
 
@@ -19,7 +20,19 @@ underneath: it catches up a run missed while the server was off and holds one un
 answers, and neither of those is something a simpler surface should lose.
 
 **Tooltips.** Most settings should carry a `?` that explains them, rather than the
-explanation always being present in small type under the control.
+explanation always being present in small type under the control. `hint()` in `app.js` is
+written and **has no caller** — it is half of this item sitting in the file. Either use it
+across the settings views or delete it; a helper nothing calls is not a plan, it is debris.
+
+The library's own row already works this way and is the pattern to follow: *Hide ended*
+carries the whole rule on hover rather than in its label. A control does not need to
+explain itself to be understood, only to be trusted, and hovering is where trust is cheap.
+
+**Wire up or delete `announce_alerts`.** `main.announce_alerts` has no caller. It is the
+"notify the first time a problem appears, and never again" path — keyed, so a condition
+true since Tuesday is not announced on Wednesday. Notifications currently come from the
+health check's summary instead, which re-notifies whenever an error is present at check
+time. One of the two should go.
 
 ## Open questions
 
@@ -65,3 +78,19 @@ cron, and the `.page`.
 **No live connection.** No SignalR, no held sockets, no daemon. Sonarr is read once a day,
 on demand from the button, and immediately before a run. Everything the interface shows is
 answered from that reading, and its age is stated rather than hidden.
+
+**A series that is switched off raises nothing.** Not a display filter — one filter,
+`alerts.managed_only`, applied both where the interface reads alerts and where the health
+check decides what to notify about. Hiding only the visible half would leave Unraid
+notifications firing about a series no run will touch. Nothing is deleted; the facts stay
+in the health cache and come back the moment it is switched on.
+
+**Adding a series and switching it on are two decisions.** So they are two buttons —
+*Save and enable* and *Save* — rather than a switch that has to be found first. A rule that
+already exists keeps its switch, and that one acts when it is clicked rather than on
+Update, because switching a series off is a thing you do and not a change you save.
+
+**The panel is answered against the form, not the last save.** `scope-counts` re-decides
+the saved rule with the editor's values in place and returns the plan, from the same stored
+episodes it already counts against. Nothing touches Sonarr and nothing is written, so
+changing a keep window moves the deletion and monitoring counts while you change it.
