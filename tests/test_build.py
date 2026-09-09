@@ -149,7 +149,7 @@ class Interface(unittest.TestCase):
         self.assertIn("'delete-series': 'DELETE'", self.js)
         self.assertIn("'delete-series-files': 'DELETE ALL'", self.js)
         self.assertIn('Queue removal', self.js)
-        self.assertIn('function queuedCard', self.js)
+        self.assertIn('function queuedBanner', self.js)
         self.assertRegex(self.js, r'Ask Sonarr to delete the series')
 
     def test_nothing_on_a_card_acts_immediately(self):
@@ -786,9 +786,54 @@ class Interface(unittest.TestCase):
         self.assertIn('`[Default] ${globalSpecials}`', self.js)
         self.assertIn('`[Default] ${globalMonitoring}`', self.js)
 
-    def test_connected_is_a_whole_border_in_poster_view(self):
-        # A bar down one side read as a printing fault under artwork.
-        self.assertRegex(self.css, r'\.tvr-rules-grid \.tvr-rule\.ok \{ border-color: var\(--tvr-good\)')
+    def test_the_border_says_one_thing_and_says_it_in_both_layouts(self):
+        """Ranked, because a border can only say one thing.
+
+        What you are looking at, then what is wrong with it, then whether it is yours,
+        then that it is merely known about. A bar down one side read as a printing fault
+        under artwork, and as noise beside a 25px poster, so the whole frame carries it.
+        """
+        base = self.css.split('\n.tvr-rule { border:')[1].split('}')[0]
+        self.assertIn('2px solid', base)
+        for tone, token in (('loose', '--tvr-line'), ('watched', '--tvr-action'),
+                            ('alert-notice', '--tvr-notice'), ('alert-warning', '--tvr-warn'),
+                            ('alert-error', '--tvr-bad')):
+            self.assertRegex(self.css, rf'\.tvr-rule\.{tone} \{{ border-color: var\({token}\)')
+        # Selected is thicker and the one colour nothing else uses.
+        self.assertRegex(self.css, r'\.tvr-rule\.selected \{ border-color: var\(--tvr-fg\); border-width: 3px')
+        # And the ranking lives in one place rather than in the cascade.
+        block = self.js.split('function cardTone(row)')[1].split('\n  }')[0]
+        self.assertLess(block.index('isOpen'), block.index('worstSeverity'))
+        self.assertLess(block.index('worstSeverity'), block.index("return 'loose'"))
+
+    def test_a_card_says_what_is_happening_to_the_series_itself(self):
+        """Ended, queued and switched off are states of the series, not of its border.
+
+        Queued used to replace the whole card, which made a series about to be removed the
+        one thing in the library you could not see the poster of.
+        """
+        self.assertRegex(self.css, r'\.tvr-rule\.ended \.tvr-poster img \{ filter: grayscale')
+        self.assertRegex(self.css, r'\.tvr-rule\.queued \{ opacity: \.5')
+        self.assertIn('.tvr-queued-x', self.css)
+        self.assertIn("className: 'tvr-queued-x'", self.js)
+        # Dashed and dimmed, keeping whatever colour it had: the colour is the truth about
+        # the series, the dashes are the truth about the rule.
+        disabled = self.css.split('.tvr-rule.disabled {')[1].split('}')[0]
+        self.assertIn('border-style: dashed', disabled)
+        self.assertNotIn('border-color', disabled)
+
+    def test_a_switched_off_series_is_offered_rather_than_listed(self):
+        """It raises nothing, so it is not in the section about things to do.
+
+        But "I turned that off and forgot" is a real way to lose track of a problem, so it
+        is counted and offered — and that is the one case where the band appears with
+        nothing under it, because the offer is the only thing there is to show.
+        """
+        block = self.js.split('const alerting = visibleLibrary(true);')[1].split('const cardBox')[0]
+        self.assertIn('row.rule && row.rule.enabled', block)
+        self.assertIn('row.rule && !row.rule.enabled', block)
+        self.assertIn('if (attention.length || sleeping.length) {', self.js)
+        self.assertIn("`Show ${plural(sleeping.length, 'disabled series')}`", self.js)
 
     def test_opening_a_series_opens_its_settings(self):
         """A read-only card with an Edit button was a step that only ever had one answer.
@@ -841,7 +886,7 @@ class Interface(unittest.TestCase):
         percentage resolution, so the image fell back to its own size and the box clipped
         the bottom off it. That cost three wrong fixes.
         """
-        rule = self.css.split('.tvr-poster img {')[1].split('}')[0]
+        rule = self.css.split('\n.tvr-poster img {')[1].split('}')[0]
         # Positioned against the box's edges: its size is the box's size by construction,
         # with no alignment step to depend on and no percentage that can fail to resolve.
         self.assertIn('position: absolute', rule)

@@ -127,13 +127,14 @@ def blocking(alerts) -> bool:
 
 
 def summarise(alerts) -> dict:
-    """Counts by severity, for the badges."""
+    """Counts by severity, for the badges. Never counts a series nobody is managing."""
     counts = {severity: 0 for severity in SEVERITIES}
-    for alert in alerts or []:
+    for alert in (a for a in alerts or [] if not a.get('unmanaged')):
         if alert.get('severity') in counts:
             counts[alert['severity']] += 1
     counts['total'] = sum(counts[severity] for severity in SEVERITIES)
-    counts['blocking'] = sum(1 for alert in alerts or [] if alert.get('blocking'))
+    counts['blocking'] = sum(1 for alert in alerts or []
+                             if alert.get('blocking') and not alert.get('unmanaged'))
     return counts
 
 
@@ -169,19 +170,26 @@ def managed_only(alerts, settings: dict) -> list:
 
 
 def annotate(alerts, settings: dict, acknowledged: dict) -> list:
-    """Mark what has been acknowledged and drop what has been muted.
+    """Mark what has been acknowledged, mark what nobody is managing, drop what is muted.
 
     Muting is a display decision and nothing more: a muted alert still blocks a series if
     its kind blocks, because the two are not the same question.
+
+    An alert against a switched-off series is *marked* rather than dropped. It still counts
+    for nothing — not in the header, not in a badge, and never in a notification, which is
+    what "a series that is off raises nothing" was always about. But the interface can now
+    offer to show them on request, and dropping them here left it with nothing to offer.
     """
     options = settings.get('alerts') or {}
     muted = set(options.get('muted') or [])
+    off = {rule.get('id') for rule in settings.get('rules') or [] if not rule.get('enabled')}
     shown = []
-    for alert in managed_only(alerts, settings):
+    for alert in alerts or []:
         if alert.get('kind') in muted:
             continue
         seen = (acknowledged or {}).get(alert['key'])
-        shown.append(dict(alert, acknowledged=bool(seen and seen == fingerprint(alert))))
+        shown.append(dict(alert, acknowledged=bool(seen and seen == fingerprint(alert)),
+                          unmanaged=alert.get('rule_id') in off))
     return shown
 
 
@@ -197,4 +205,5 @@ def header_worthy(alerts, settings: dict) -> list:
     wanted = (settings.get('alerts') or {}).get('header', 'all')
     ranked = {'errors': [ERROR], 'warnings': [ERROR, WARNING]}.get(wanted, SEVERITIES)
     return [alert for alert in alerts or []
-            if alert.get('severity') in ranked and not alert.get('acknowledged')]
+            if alert.get('severity') in ranked and not alert.get('acknowledged')
+            and not alert.get('unmanaged')]

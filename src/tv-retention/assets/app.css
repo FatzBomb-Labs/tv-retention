@@ -182,10 +182,33 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-inline { align-items: flex-end; }
 
 .tvr-rules, .tvr-instances { display: grid; gap: 4px; }
-.tvr-rule { border: 1px solid var(--tvr-line); border-left-width: 4px; border-radius: 6px; padding: 6px 10px; }
-.tvr-rule.ok { border-left-color: var(--tvr-good); }
-.tvr-rule.blocked { border-left-color: var(--tvr-bad); }
-.tvr-rule.disabled { opacity: .58; border-left-color: var(--tvr-line); }
+/* The border is the state, and one border can say one thing, so they are ranked: what you
+   are looking at, then what is wrong with it, then whether it is yours, then that it is
+   merely known about. The whole frame carries it in both layouts — a bar down one side
+   read as a printing fault under artwork, and as noise beside a 25px poster. */
+.tvr-rule { border: 2px solid var(--tvr-line); border-radius: 6px; padding: 6px 10px; }
+.tvr-rule.loose { border-color: var(--tvr-line); opacity: .92; }
+.tvr-rule.watched { border-color: var(--tvr-action); }
+.tvr-rule.alert-notice { border-color: var(--tvr-notice); }
+.tvr-rule.alert-warning { border-color: var(--tvr-warn); }
+.tvr-rule.alert-error { border-color: var(--tvr-bad); }
+/* Thicker, and the one colour nothing else uses. */
+#tv-retention .tvr-rule.selected { border-color: var(--tvr-fg); border-width: 3px; }
+
+/* Switched off keeps whatever its border was saying and stops asserting it: the colour is
+   still the truth about the series, the dashes are the truth about the rule. */
+#tv-retention .tvr-rule.disabled { border-style: dashed; opacity: .62; }
+
+/* Finished, in the sense that nothing more is coming. The artwork goes quiet rather than
+   the card going away — an ended series is where retention matters most. */
+.tvr-rule.ended .tvr-poster img { filter: grayscale(1); }
+
+/* About to be removed, and nothing has happened yet. Half there, with the mark over the
+   artwork rather than in place of it. */
+.tvr-rule.queued { opacity: .5; }
+.tvr-queued-x { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
+  color: var(--tvr-bad); font-size: calc(var(--poster-w, 60px) * 0.7); font-weight: 300;
+  line-height: 1; text-shadow: 0 1px 4px rgba(0,0,0,.6); pointer-events: none; }
 .tvr-rule-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .tvr-rule-title { font-size: 15px; font-weight: 600; }
 .tvr-rule-body { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
@@ -367,7 +390,6 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 
 /* A series waiting to be removed. Red frame, its intent in three plain lines, and an undo
    that costs nothing — because nothing has happened yet. */
-.tvr-rule.queued { border-left-color: var(--tvr-bad); opacity: .95; }
 .tvr-queued-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
   border-radius: 50%; background: var(--tvr-bad); color: var(--tvr-on-fill); font-weight: 700; font-size: 13px; line-height: 1; }
 .tvr-queued-lines { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 12px; opacity: .85; }
@@ -551,8 +573,12 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-side-count { font-size: 11.5px; }
 /* Two lists, one page. The band names what the group below it is, and is only there when
    there are two groups to tell apart. */
-#tv-retention .tvr-band { margin: 2px 0 0; padding-bottom: 3px;
-  border-bottom: 1px solid var(--tvr-line); }
+#tv-retention .tvr-band { display: flex; align-items: center; gap: 10px; margin: 2px 0 0;
+  padding-bottom: 3px; border-bottom: 1px solid var(--tvr-line); }
+/* The one control that lives on a band: what it offers is about the band it sits on. */
+.tvr-band-switch { margin-left: auto; text-transform: none; letter-spacing: normal;
+  font-weight: normal; opacity: .8; }
+.tvr-band-switch:hover { opacity: 1; }
 /* A sub-heading inside a page that now holds two things at once. */
 .tvr-sub-head { margin-top: 4px; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
@@ -605,7 +631,6 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 .tvr-rules-grid .tvr-rule-head { flex-wrap: wrap; }
 .tvr-rules-grid .tvr-retention { margin-left: 0; }
-#tv-retention .tvr-rule.selected { border-color: var(--tvr-action); background: rgba(61,126,191,.06); }
 #tv-retention .tvr-rule { cursor: pointer; }
 #tv-retention input.tvr-pick { width: 14px; height: 14px; flex: 0 0 14px; margin: 0; cursor: pointer; }
 
@@ -654,7 +679,6 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-rule-main { min-width: 0; display: grid; gap: 2px; }
 .tvr-poster-row { width: var(--poster-w); height: var(--poster-h); }
 .tvr-poster-row img { background: var(--tvr-soft); object-fit: cover; }
-#tv-retention .tvr-rule.loose { border-left-color: var(--tvr-line); opacity: .92; }
 .tvr-connected { display: inline-grid; place-items: center; font-size: 12px; }
 .tvr-connected.yes { color: var(--tvr-good); }
 .tvr-connected.no { opacity: .35; }
@@ -715,11 +739,6 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 
 /* Connected, in poster view: a border all the way round rather than a bar down one side,
    which under a poster read as a printing fault. */
-.tvr-rules-grid .tvr-rule { border-left-width: 1px; }
-.tvr-rules-grid .tvr-rule.ok { border-color: var(--tvr-good); }
-.tvr-rules-grid .tvr-rule.blocked { border-color: var(--tvr-bad); }
-.tvr-rules-grid .tvr-rule.loose { border-color: var(--tvr-line); }
-.tvr-rules-grid .tvr-rule.selected { border-color: var(--tvr-action); }
 
 /* The panel takes precedence: it is what you are working on, and it was the thing being
    squeezed. The list gives way; the panel does not get cut off. */
@@ -872,5 +891,3 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-rules-grid .tvr-rule:hover .tvr-card-pill { opacity: 1; }
 
 /* A rule that is switched off, said by the frame rather than a control on the card. */
-#tv-retention .tvr-rule.disabled { opacity: 1; border-style: dashed; border-color: var(--tvr-line); }
-.tvr-rules-grid .tvr-rule.disabled .tvr-poster-row img { opacity: .45; }

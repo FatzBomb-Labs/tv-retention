@@ -223,7 +223,12 @@
     const schedule = (settings || {}).schedule;
     return schedule ? !!schedule.test_mode : !!(snapshot || {}).test_mode;
   };
-  const seriesAlertList = () => Object.values(alertsByRule).reduce((all, list) => all.concat(list), []);
+  // What is counted. A switched-off series still carries its alerts — the card needs them
+  // to colour its own border — but it contributes to no count and no badge, which is what
+  // "a series that is off raises nothing" has always meant.
+  const seriesAlertList = () => Object.values(alertsByRule)
+    .reduce((all, list) => all.concat(list), [])
+    .filter((alert) => !alert.unmanaged);
   const isBlocked = (ruleId) => seriesAlerts(ruleId).some((alert) => alert.blocking);
   const worstSeverity = (list) => (list.some((a) => a.severity === 'error') ? 'error'
     : list.some((a) => a.severity === 'warning') ? 'warning'
@@ -1009,8 +1014,12 @@
     return Number(active.keep_days || active.keep_episodes || active.keep_seasons || Number.MAX_SAFE_INTEGER);
   };
 
-  function posterNode(series, className) {
+  function posterNode(series, className, rule) {
     const art = el('div', { className: className || 'tvr-poster' });
+    if (rule && queuedRemoval(rule)) {
+      art.append(el('span', { className: 'tvr-queued-x', textContent: '×',
+                              title: 'Queued for removal at the next run' }));
+    }
     if (series.poster) {
       // Sonarr's own path for the artwork, carried through as a stamp rather than read:
       // it changes when the artwork does, and it is the only thing that can tell the
@@ -1036,6 +1045,7 @@
   // Three is the size the type was drawn for, so it is 100% and the rest step around it.
   const FONT_SCALE = [0.8, 0.9, 1, 1.1, 1.2];
   let scale = Math.min(5, Math.max(1, Number(remembered('scale', '3')) || 3));
+  let showSleeping = !!remembered('sleeping', '');
 
   function applyScale(container) {
     const [width, height] = SCALES[layout === 'grid' ? 'grid' : 'list'][scale - 1];
@@ -1044,10 +1054,7 @@
     container.style.setProperty('--card-font', String(FONT_SCALE[scale - 1]));
   }
 
-  function cardsInto(box, rows) {
-    rows.forEach((row) => box.append(
-      row.rule && queuedRemoval(row.rule) ? queuedCard(row.rule) : libraryCard(row)));
-  }
+  const cardsInto = (box, rows) => rows.forEach((row) => box.append(libraryCard(row)));
 
   function renderLibrary() {
     const container = $('tvr-rules');
@@ -1067,18 +1074,34 @@
       return;
     }
     const rows = visibleLibrary(false);
-    const attention = visibleLibrary(true);
-    $('tvr-rules-empty').hidden = rows.length > 0 || attention.length > 0;
+    const alerting = visibleLibrary(true);
+    // A switched-off series raises nothing, so it is not in the section about things that
+    // need doing — but it is still counted, and offered, because "I turned that off and
+    // forgot" is a real way to lose track of a problem.
+    const attention = alerting.filter((row) => row.rule && row.rule.enabled);
+    const sleeping = alerting.filter((row) => row.rule && !row.rule.enabled);
+    $('tvr-rules-empty').hidden = rows.length > 0 || alerting.length > 0;
     const cardBox = () => el('div', { className: layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules' });
 
     // Only when there is something to say. A heading reading "All" over the only list
-    // there is would be a label for a distinction that is not being drawn.
-    if (attention.length) {
-      container.append(el('h3', { className: 'tvr-h3 tvr-band', textContent: 'Needs attention' }));
+    // there is would be a label for a distinction that is not being drawn — and the one
+    // exception is a band with nothing under it, when everything that needs attention is
+    // switched off and the only thing to offer is the way to see it.
+    if (attention.length || sleeping.length) {
+      const band = el('h3', { className: 'tvr-h3 tvr-band' },
+                      [el('span', { textContent: 'Needs attention' })]);
+      if (sleeping.length) {
+        const show = toggle(`Show ${plural(sleeping.length, 'disabled series')}`, showSleeping,
+                            (on) => { showSleeping = on; remember('sleeping', on ? '1' : ''); renderLibrary(); },
+                            { className: 'tvr-band-switch' });
+        band.append(show.node);
+      }
+      container.append(band);
       const box = cardBox();
-      cardsInto(box, attention);
+      cardsInto(box, attention.concat(showSleeping ? sleeping : []));
       container.append(box);
-      container.append(el('h3', { className: 'tvr-h3 tvr-band', textContent: 'All' }));
+      container.append(el('h3', { className: 'tvr-h3 tvr-band' },
+                          [el('span', { textContent: 'All' })]));
     }
     const box = cardBox();
     // Three thousand cards is not a list anyone reads, and it is not a page any browser
@@ -1101,12 +1124,25 @@
   // The frame carries the state: green where a rule runs, dim where one is turned off,
   // plain where there is no rule yet. A tick saying "this has a rule" said the same thing
   // twice, and the retention pill says it a third time on hover.
+  // The border is the state, and only one thing can be said at a time, so they are ranked:
+  // what you are looking at, then what is wrong with it, then whether it is yours, then
+  // that it is merely known about. Severity orders itself within the second.
+  function cardTone(row) {
+    const { series, rule } = row;
+    if (isOpen(rule)) return 'selected';
+    const worst = rule ? worstSeverity(seriesAlerts(rule.id)) : '';
+    if (worst) return `alert-${worst}`;
+    if (rule) return 'watched';
+    return 'loose';
+  }
+
   function cardShell(row) {
     const { series, rule } = row;
-    const blocked = rule ? isBlocked(rule.id) : false;
-    const card = el('div', { className: `tvr-rule ${rule ? (blocked ? 'blocked' : 'ok') : 'loose'}`
-                                        + (rule && !rule.enabled ? ' disabled' : '')
-                                        + (isOpen(rule) ? ' selected' : '') });
+    const marks = ['tvr-rule', cardTone(row)];
+    if (rule && !rule.enabled) marks.push('disabled');
+    if (rule && queuedRemoval(rule)) marks.push('queued');
+    if (series.ended) marks.push('ended');
+    const card = el('div', { className: marks.join(' ') });
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
       if (isOpen(rule)) { editing = null; renderLibrary(); renderDetails(); return; }
@@ -1182,7 +1218,7 @@
   function gridCard(row) {
     const { series, rule } = row;
     const card = cardShell(row);
-    const art = posterNode(series, 'tvr-poster tvr-poster-row');
+    const art = posterNode(series, 'tvr-poster tvr-poster-row', rule);
     if (rule) {
       const state = monitoring[rule.id] || {};
       const plan = state.plan;
@@ -1202,7 +1238,7 @@
     const { series, rule } = row;
     const blocked = rule ? isBlocked(rule.id) : false;
     const card = cardShell(row);
-    card.append(posterNode(series, 'tvr-poster tvr-poster-row'));
+    card.append(posterNode(series, 'tvr-poster tvr-poster-row', rule));
     const main = el('div', { className: 'tvr-rule-main' });
 
     const head = el('div', { className: 'tvr-rule-head' });
@@ -2078,6 +2114,8 @@
       top.append(el('div', { className: 'tvr-form-banner',
                              textContent: existing ? 'Edit series' : 'Add series' }));
       if (existing) {
+        const queued = queuedBanner(rule);
+        if (queued) body.append(queued);
         const alertsHere = seriesAlerts(rule.id);
         if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
       }
@@ -2330,28 +2368,29 @@
 
   // A queued series states its intent on the card and can be taken back until a run
   // applies it. Nothing has happened yet, so the card says exactly what will.
-  function queuedCard(rule) {
+  // Queued removal, said where the rest of this series' state is said. It used to replace
+  // the whole card in the list, which meant a series about to be removed was the one thing
+  // in the library you could not see the poster of — and undo has to stay one click away,
+  // because nothing has happened yet and that is the whole point of queueing.
+  function queuedBanner(rule) {
     const queued = queuedRemoval(rule);
-    const card = el('div', { className: 'tvr-rule queued' });
-    card.append(el('div', { className: 'tvr-rule-head' }, [
-      el('span', { className: 'tvr-queued-mark', textContent: '×' }),
-      el('span', { className: 'tvr-rule-title', textContent: rule.series_title || rule.path }),
-      el('span', { className: 'tvr-alert-age', textContent: `queued ${ago(queued.created_at)}` }),
+    if (!queued) return null;
+    const box = el('div', { className: 'tvr-queued-box' });
+    box.append(el('div', { className: 'tvr-queued-lines' }, [
+      el('div', { textContent: `Queued for removal at the next run, ${ago(queued.created_at)}.` }),
+      el('div', { textContent: REMOVAL_SONARR[queued.action] || '' }),
+      el('div', { className: REMOVAL_FILES[queued.action] ? 'tvr-queued-danger' : '',
+                  textContent: REMOVAL_FILES[queued.action] || 'No files will be removed' }),
     ]));
-    const lines = el('div', { className: 'tvr-queued-lines' });
-    lines.append(el('div', { textContent: 'Queued for removal from TV Retention at the next run.' }));
-    lines.append(el('div', { textContent: REMOVAL_SONARR[queued.action] || '' }));
-    lines.append(el('div', { className: REMOVAL_FILES[queued.action] ? 'tvr-queued-danger' : '',
-                             textContent: REMOVAL_FILES[queued.action] || 'No files will be removed' }));
-    card.append(lines);
     const undo = el('button', { type: 'button', className: 'tvr-action', textContent: 'Undo' });
     undo.addEventListener('click', () => guarded('', async () => {
       const target = (settings.rules || []).find((other) => other.id === rule.id);
       target.queue = Object.assign({}, target.queue, { removal: null });
       await saveSettings('Removal cancelled.');
+      renderDetails();
     }));
-    card.append(el('div', { className: 'tvr-alert-foot' }, [undo]));
-    return card;
+    box.append(undo);
+    return box;
   }
 
   // Removing a series is an intent, not an act: it queues, and the two destructive Sonarr

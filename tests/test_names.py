@@ -195,36 +195,49 @@ class Acknowledgement(unittest.TestCase):
         kinds = [alert['kind'] for alert in self.alerts.annotate(both, settings, {})]
         self.assertEqual(kinds, ['no-recycle-bin'])
 
-    def test_a_series_that_is_switched_off_raises_nothing(self):
-        """Nothing about a series no run will touch is a problem worth reporting."""
+    def test_a_series_that_is_switched_off_counts_for_nothing(self):
+        """It is marked rather than dropped, and marked is what makes it count for nothing.
+
+        Dropping it left the interface unable to offer "show me the ones I switched off",
+        which is a real way to lose track of a problem — you turned it off and forgot.
+        """
         settings = {'rules': [{'id': 'r1', 'enabled': False}, {'id': 'r2', 'enabled': True}]}
         found = [self.alerts.make('ended-expired', rule_id='r1'),
                  self.alerts.make('unmatched', rule_id='r2'),
                  self.alerts.make('no-recycle-bin', instance_id='i1')]
         shown = self.alerts.annotate(found, settings, {})
-        self.assertEqual([alert['kind'] for alert in shown], ['unmatched', 'no-recycle-bin'],
+        unmanaged = {alert['kind']: alert['unmanaged'] for alert in shown}
+        self.assertEqual(unmanaged, {'ended-expired': True, 'unmatched': False,
+                                     'no-recycle-bin': False},
                          'a rule about the instance is not about a series')
+        # Counted nowhere: not in the header, not in a badge.
+        self.assertEqual(self.alerts.header_worthy(shown, settings),
+                         [a for a in shown if not a['unmanaged']])
+        self.assertEqual(self.alerts.summarise(shown)['total'], 2)
 
-    def test_switching_it_back_on_brings_its_alerts_back(self):
+    def test_switching_it_back_on_makes_its_alerts_count_again(self):
         # Nothing was deleted: the facts stay in the cache and stop being ignored.
         found = [self.alerts.make('ended-expired', rule_id='r1')]
         off = {'rules': [{'id': 'r1', 'enabled': False}]}
         on = {'rules': [{'id': 'r1', 'enabled': True}]}
-        self.assertEqual(self.alerts.annotate(found, off, {}), [])
-        self.assertEqual(len(self.alerts.annotate(found, on, {})), 1)
+        self.assertEqual(self.alerts.summarise(self.alerts.annotate(found, off, {}))['total'], 0)
+        self.assertEqual(self.alerts.summarise(self.alerts.annotate(found, on, {}))['total'], 1)
 
     def test_muting_and_switching_off_are_not_the_same_question(self):
-        """Muting is about a kind across every series, and leaves a blocker blocking.
+        """Muting hides a kind across every series and leaves a blocker blocking.
 
-        Switching a series off is about that one series, and it is not blocked from a run
-        it is not part of.
+        Switching a series off is about that one series: its alerts still exist and can
+        still be looked at, they simply stop counting and stop blocking a run they are not
+        part of.
         """
         blocker = self.alerts.make('unmatched', rule_id='r1')
         self.assertTrue(blocker['blocking'])
         muted = self.alerts.annotate([blocker], {'alerts': {'muted': ['unmatched']}}, {})
-        self.assertEqual(muted, [], 'muted is hidden, and still blocks elsewhere')
+        self.assertEqual(muted, [], 'a muted kind is not shown at all')
         off = self.alerts.annotate([blocker], {'rules': [{'id': 'r1', 'enabled': False}]}, {})
-        self.assertEqual(off, [])
+        self.assertEqual(len(off), 1, 'still there to be looked at')
+        self.assertTrue(off[0]['unmanaged'])
+        self.assertEqual(self.alerts.summarise(off)['blocking'], 0, 'and blocking nothing')
 
     def test_the_header_counts_what_it_was_told_to(self):
         found = [self.alerts.make('unmatched', rule_id='r1'),
