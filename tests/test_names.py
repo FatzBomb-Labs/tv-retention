@@ -246,7 +246,9 @@ class Acknowledgement(unittest.TestCase):
         counts = {}
         for wanted in ('errors', 'warnings', 'all'):
             counts[wanted] = len(self.alerts.header_worthy(found, {'alerts': {'header': wanted}}))
-        self.assertEqual(counts, {'errors': 1, 'warnings': 2, 'all': 3})
+        # ended-expired is a warning now: a rule with nothing left in its window will never
+        # do anything again, which is the one asking to be acted on.
+        self.assertEqual(counts, {'errors': 1, 'warnings': 3, 'all': 3})
 
     def test_an_acknowledged_alert_is_never_counted(self):
         found = self.alerts.annotate([self.alerts.make('no-recycle-bin', instance_id='i1')],

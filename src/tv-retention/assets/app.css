@@ -193,7 +193,8 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-rule.alert-warning { border-color: var(--tvr-warn); }
 .tvr-rule.alert-error { border-color: var(--tvr-bad); }
 /* Thicker, and the one colour nothing else uses. */
-#tv-retention .tvr-rule.selected { border-color: var(--tvr-fg); border-width: 3px; }
+#tv-retention .tvr-rule.selected { border-color: var(--tvr-fg);
+  box-shadow: inset 0 0 0 2px var(--tvr-fg); }
 
 /* Switched off keeps whatever its border was saying and stops asserting it: the colour is
    still the truth about the series, the dashes are the truth about the rule. */
@@ -813,6 +814,10 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-series-shell.open .tvr-details { position: static; height: 100%; max-height: none;
   display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
 .tvr-details-top { padding: 7px 10px 0; display: grid; gap: 5px; }
+/* The pane with nothing in it. Present rather than absent, so choosing a series never
+   changes the width of the list it was chosen from. */
+.tvr-details-idle { display: grid; place-items: center; padding: 24px 16px; text-align: center;
+  font-size: 12px; opacity: .5; }
 .tvr-series-shell.open .tvr-details-body { overflow-y: auto; overscroll-behavior: contain;
   min-height: 0; }
 @media (max-width: 1250px) {

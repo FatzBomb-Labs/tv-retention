@@ -799,8 +799,13 @@ class Interface(unittest.TestCase):
                             ('alert-notice', '--tvr-notice'), ('alert-warning', '--tvr-warn'),
                             ('alert-error', '--tvr-bad')):
             self.assertRegex(self.css, rf'\.tvr-rule\.{tone} \{{ border-color: var\({token}\)')
-        # Selected is thicker and the one colour nothing else uses.
-        self.assertRegex(self.css, r'\.tvr-rule\.selected \{ border-color: var\(--tvr-fg\); border-width: 3px')
+        # Selected is heavier and the one colour nothing else uses — drawn inward, because
+        # a thicker border changed the card's size, nudged every card after it, and slid
+        # the one just clicked out from under the pointer.
+        selected = self.css.split('.tvr-rule.selected {')[1].split('}')[0]
+        self.assertIn('border-color: var(--tvr-fg)', selected)
+        self.assertIn('box-shadow: inset', selected)
+        self.assertNotIn('border-width', selected)
         # And the ranking lives in one place rather than in the cascade.
         block = self.js.split('function cardTone(row)')[1].split('\n  }')[0]
         self.assertLess(block.index('isOpen'), block.index('worstSeverity'))
@@ -1143,9 +1148,8 @@ class Interface(unittest.TestCase):
         panel come straight from Sonarr, and a series being added is the one most likely
         to have moved since the catalogue was read.
         """
-        # In the pane's own bar, beside the other thing the pane can be told to do.
-        head = self.js.split("el('h3', { textContent: 'Series details' })")[0]
-        self.assertIn("title: 'Re-read this series from Sonarr'", head)
+        # In the pane's own bar, and left of the close, which is what the order says.
+        self.assertIn("title: 'Re-read this series from Sonarr'", self.js)
         self.assertIn("el('span', { className: 'tvr-spacer' }), refresh, close);", self.js)
         self.assertIn('refresh.addEventListener(\'click\', () => context.reread(refresh));', self.js)
         self.assertIn('`Last refreshed: ${stamp ? ago(stamp) : \'never\'}`', self.js)
@@ -1277,3 +1281,70 @@ class Theme(unittest.TestCase):
         self.assertIn('--tvr-on-fill', self.css)
         for assumed in ('color: #1a1a1a', 'background: var(--tvr-info); color: #fff'):
             self.assertNotIn(assumed, self.css)
+
+
+class Bands(unittest.TestCase):
+    """The three sections, and what each one lets you put away."""
+
+    @classmethod
+    def setUpClass(cls):
+        source = ROOT / 'src' / 'tv-retention'
+        cls.js = (source / 'assets' / 'app.js').read_text()
+        cls.css = (source / 'assets' / 'app.css').read_text()
+        cls.html = (source / 'include' / 'interface.html').read_text()
+
+    def test_hiding_a_severity_does_not_stop_it_counting(self):
+        """The toggles are about what you want in front of you, not about what is true.
+
+        The header total and the card badges answer a different question, and a control
+        that quietly changed both would be an acknowledgement wearing a filter's clothes.
+        """
+        block = self.js.split('const bandShows = (key)')[1].split('\n\n')[0]
+        self.assertIn("remembered(`show.${key}`", block)
+        # Nothing in the filter path touches the counts.
+        applied = self.js.split('function applyBandFilters')[1].split('\n  }')[0]
+        self.assertNotIn('seriesAlertList', applied)
+        self.assertNotIn('setBadge', applied)
+
+    def test_an_error_can_never_be_put_away(self):
+        # One stops a series from running, and hiding it would not stop that being true —
+        # the same reason an error can never be acknowledged.
+        block = self.js.split('const ATTENTION_FILTERS = [')[1].split('];')[0]
+        self.assertIn("'warning'", block)
+        self.assertIn("'notice'", block)
+        self.assertNotIn("'error'", block)
+
+    def test_a_row_carrying_no_named_kind_is_never_filtered_out(self):
+        """An error in the attention band carries neither warning nor notice.
+
+        Filtering on "carries none of the switched-on kinds" would have hidden exactly the
+        rows that matter most.
+        """
+        applied = self.js.split('function applyBandFilters')[1].split('\n  }')[0]
+        self.assertIn('return !carried.length || carried.some(', applied)
+
+    def test_the_scheduled_band_offers_every_kind_of_work_it_holds(self):
+        block = self.js.split('const SCHEDULED_FILTERS = [')[1].split('];')[0]
+        for label in ('Series removals', 'Episode deletions', 'Monitoring changes'):
+            self.assertIn(label, block)
+
+    def test_a_toggle_appears_only_for_a_kind_that_is_present(self):
+        # Offering to hide nothing is a control that can only disappoint.
+        block = self.js.split('function bandFilterSwitches')[1].split('\n  }')[0]
+        self.assertIn('if (!count) return;', block)
+        self.assertIn('`${label} (${count})`', block)
+
+    def test_grey_posters_are_for_triage_rather_than_for_browsing(self):
+        # Three thousand grey posters is a different page. In the whole library, ended is
+        # one more fact about a series; in the two sections above it, it is the point.
+        self.assertIn("if (series.ended && row.section !== 'all') marks.push('ended');", self.js)
+        self.assertIn("cardsInto(band.box, shown, 'attention')", self.js)
+        self.assertIn("cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT), 'all')", self.js)
+
+    def test_the_details_pane_is_always_there(self):
+        """Selecting a series used to open it, which narrowed the list and reflowed the
+        grid — moving the card that had just been clicked out from under the pointer."""
+        self.assertIn('<aside id="tvr-details" class="tvr-details"></aside>', self.html)
+        self.assertIn("shell.classList.add('open');", self.js)
+        self.assertIn('Select a series to view or modify its details.', self.js)
+        self.assertIn('.tvr-details-idle', self.css)

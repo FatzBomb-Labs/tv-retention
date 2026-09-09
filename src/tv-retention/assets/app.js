@@ -1073,7 +1073,8 @@
     container.style.setProperty('--card-font', String(FONT_SCALE[scale - 1]));
   }
 
-  const cardsInto = (box, rows) => rows.forEach((row) => box.append(libraryCard(row)));
+  const cardsInto = (box, rows, section) => rows.forEach(
+    (row) => box.append(libraryCard(Object.assign({ section }, row))));
 
   // A band and the list under it. Collapsing is remembered per section, because which of
   // the three you are working in is a habit rather than a decision — and Scheduled actions
@@ -1081,6 +1082,48 @@
   // answered every time you open the page.
   const BAND_OPEN = { attention: true, scheduled: false, all: true };
   const bandOpen = (name) => (remembered(`band.${name}`, '') || (BAND_OPEN[name] ? 'open' : 'shut')) === 'open';
+
+  // What a band is currently showing of what it holds. Off hides the rows; it never makes
+  // the alert stop counting — the header total and the card badges are about what is true,
+  // and this is about what you want in front of you while you work through it.
+  const bandShows = (key) => remembered(`show.${key}`, 'yes') === 'yes';
+  const setBandShows = (key, on) => { remember(`show.${key}`, on ? 'yes' : 'no'); renderLibrary(); };
+
+  // Severity for the attention band, kind of work for the scheduled one. Errors are absent
+  // on purpose: one stops a series from running, and hiding that would not stop it being
+  // true — the same reason an error can never be acknowledged.
+  const ATTENTION_FILTERS = [
+    ['warning', 'Warnings', (row) => worstSeverity(row.alerts) === 'warning'],
+    ['notice', 'Notices', (row) => worstSeverity(row.alerts) === 'notice'],
+  ];
+  const SCHEDULED_FILTERS = [
+    ['removals', 'Series removals', (row) => !!queuedRemoval(row.rule)],
+    ['deletions', 'Episode deletions', (row) => !!((monitoring[row.rule.id] || {}).plan || {}).delete],
+    ['monitoring', 'Monitoring changes', (row) => {
+      const plan = (monitoring[row.rule.id] || {}).plan || {};
+      return !!(plan.monitor || plan.unmonitor);
+    }],
+  ];
+
+  // A row survives if any kind it carries is switched on. A row carrying only kinds that
+  // are switched off is what the toggles are for; one carrying none of them — an error in
+  // the attention band — is never filtered out by them.
+  function applyBandFilters(rows, filters) {
+    return rows.filter((row) => {
+      const carried = filters.filter(([, , holds]) => holds(row));
+      return !carried.length || carried.some(([key]) => bandShows(key));
+    });
+  }
+
+  function bandFilterSwitches(band, rows, filters) {
+    filters.forEach(([key, label, holds]) => {
+      const count = rows.filter(holds).length;
+      if (!count) return;          // nothing of this kind: nothing to offer hiding
+      const control = toggle(`${label} (${count})`, bandShows(key),
+                             (on) => setBandShows(key, on), { className: 'tvr-band-switch' });
+      band.head.append(control.node);
+    });
+  }
 
   function sectionBand(name, label, shown, total) {
     const open = bandOpen(name);
@@ -1129,8 +1172,9 @@
     $('tvr-rules-empty').hidden = rows.length > 0 || alerting.length > 0 || scheduled.length > 0;
 
     if (attention.length || sleeping.length) {
-      const band = sectionBand('attention', 'Needs attention',
-                               attention.length + (showSleeping ? sleeping.length : 0),
+      const held = attention.concat(showSleeping ? sleeping : []);
+      const shown = applyBandFilters(held, ATTENTION_FILTERS);
+      const band = sectionBand('attention', 'Needs attention', shown.length,
                                visibleLibrary('alerts', false).length);
       if (sleeping.length) {
         const show = toggle(`Show ${plural(sleeping.length, 'disabled series')}`, showSleeping,
@@ -1138,16 +1182,19 @@
                             { className: 'tvr-band-switch' });
         band.head.append(show.node);
       }
-      cardsInto(band.box, attention.concat(showSleeping ? sleeping : []));
+      bandFilterSwitches(band, held, ATTENTION_FILTERS);
+      cardsInto(band.box, shown, 'attention');
       container.append(band.head, band.box);
     }
 
     // Every series the next run will touch, whatever the filters say. The header already
     // counts the changes; this says which shows they land on.
     if (scheduled.length) {
-      const band = sectionBand('scheduled', 'Scheduled actions', scheduled.length,
+      const shown = applyBandFilters(scheduled, SCHEDULED_FILTERS);
+      const band = sectionBand('scheduled', 'Scheduled actions', shown.length,
                                visibleLibrary('scheduled', false).length);
-      cardsInto(band.box, scheduled);
+      bandFilterSwitches(band, scheduled, SCHEDULED_FILTERS);
+      cardsInto(band.box, shown, 'scheduled');
       container.append(band.head, band.box);
     }
 
@@ -1157,7 +1204,7 @@
     const band = sectionBand('all', 'All', rows.length, library.length);
     // Three thousand cards is not a list anyone reads, and it is not a page any browser
     // enjoys laying out. Search and the filters are how you get to the rest.
-    cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT));
+    cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT), 'all');
     container.append(band.head, band.box);
     if (rows.length > LIBRARY_LIMIT) {
       container.append(el('p', { className: 'tvr-empty',
@@ -1192,7 +1239,7 @@
     const marks = ['tvr-rule', cardTone(row)];
     if (rule && !rule.enabled) marks.push('disabled');
     if (rule && queuedRemoval(rule)) marks.push('queued');
-    if (series.ended) marks.push('ended');
+    if (series.ended && row.section !== 'all') marks.push('ended');
     const card = el('div', { className: marks.join(' ') });
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
@@ -2308,10 +2355,18 @@
   function renderDetails() {
     const pane = $('tvr-details');
     const shell = $('tvr-series-shell');
-    shell.classList.toggle('open', !!editing);
-    pane.hidden = !editing;
-    if (!editing) return;
+    // Always open. It used to appear on selection, which narrowed the list beside it and
+    // reflowed the grid — sliding the card you had just clicked out from under the
+    // pointer. An empty pane costs a column and removes that entirely.
+    shell.classList.add('open');
     pane.replaceChildren();
+    if (!editing) {
+      pane.append(el('div', { className: 'tvr-details-head' },
+                     [el('h3', { textContent: 'Series details' })]));
+      pane.append(el('div', { className: 'tvr-details-idle' },
+                     [el('p', { textContent: "Select a series to view or modify its details." })]));
+      return;
+    }
 
     const head = el('div', { className: 'tvr-details-head' });
     const close = el('button', { type: 'button', className: 'tvr-icon-button', title: 'Close' },

@@ -48,7 +48,7 @@ KINDS = {
         'action': '', 'notify': False,
     },
     'ended-expired': {
-        'severity': NOTICE, 'blocking': False, 'scope': 'series',
+        'severity': WARNING, 'blocking': False, 'scope': 'series',
         'title': 'Ended, and nothing is left inside the keep window',
         'help': 'This rule has nothing further to do. You can remove it, or remove the show.',
         # The series ending is worth telling someone about, and it already is, once, when
