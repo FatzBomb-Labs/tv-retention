@@ -192,6 +192,35 @@ class Interface(unittest.TestCase):
         for tone in ('.tvr-run.live', '.tvr-run.test', '.tvr-run.blocked'):
             self.assertIn(tone, self.css)
 
+    def test_the_run_button_follows_both_things_that_change_it(self):
+        """Test Mode and the alerts move independently, and it missed both.
+
+        `snapshot.test_mode` is refreshed only by a full snapshot call, so turning Test
+        Mode off and saving left the button describing the mode the page had loaded with —
+        at exactly the moment somebody is reading it to see whether it will delete
+        something. And alerts arrive on their own schedule, never passing through
+        renderTopBar, so a Sonarr coming back up left the button red.
+        """
+        state = self.js.split('const testMode = ()')[1].split('};')[0]
+        self.assertIn('(settings || {}).schedule', state)
+        # Nowhere else reads it. The helper's own fallback, for the moment before the first
+        # settings arrive, is the only legitimate use — and a comment explaining why is not
+        # a use at all.
+        code = [line for line in self.js.splitlines()
+                if 'snapshot.test_mode' in line and not line.strip().startswith('//')]
+        self.assertEqual(code, [],
+                         'read anywhere but the helper, it is stale the moment settings are saved')
+        self.assertIn('!!(snapshot || {}).test_mode', state, 'the helper still needs a fallback')
+        # It works out its own "nothing to do", so anything can call it.
+        self.assertIn('function renderRunButton() {', self.js)
+        applied = self.js.split('function applyAlerts')[1].split('\n  }')[0]
+        self.assertIn('renderRunButton()', applied)
+
+    def test_the_run_is_blue_rather_than_green(self):
+        # Green already means "monitored" in this interface, and the run is the primary
+        # action rather than a state that is going well.
+        self.assertIn('button.tvr-run.live { background: var(--tvr-action); }', self.css)
+
     def test_the_top_bar_has_three_zones(self):
         # The middle is centred on the window, which a flex spacer cannot do: it would
         # centre on whatever is left after the other two.

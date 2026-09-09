@@ -470,7 +470,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   gap: 12px; padding: 4px 10px; border-bottom: 1px solid var(--tvr-line);
   background: var(--tvr-panel); flex: none; }
 .tvr-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tvr-brand-icon { display: block; border-radius: 4px; flex: none; }
+.tvr-brand-icon { display: block; border-radius: 5px; flex: none; }
 .tvr-brand-name { font-size: 15px; font-weight: 600; white-space: nowrap; }
 .tvr-topbar-middle { display: flex; align-items: center; gap: 8px; justify-self: center; }
 .tvr-topbar-actions { display: flex; align-items: center; gap: 8px; justify-self: end; }
@@ -484,10 +484,13 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 /* The colour is the sentence, so it is a filled button rather than an icon: green changes
    things, orange reports and changes nothing, red is stopping every run and opens the
    reason. */
-#tv-retention button.tvr-run { display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 12px; font-weight: 600; border: 1px solid transparent; color: var(--tvr-on-fill); }
-#tv-retention button.tvr-run .fa { font-size: 11px; }
-#tv-retention button.tvr-run.live { background: var(--tvr-good); }
+#tv-retention button.tvr-run { display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 14px; font-weight: 600; font-size: 13px; border: 1px solid transparent;
+  color: var(--tvr-on-fill); }
+#tv-retention button.tvr-run .fa { font-size: 15px; }
+/* Blue rather than green: green already means "monitored" in this interface, and the run
+   is the primary action rather than a state that is going well. */
+#tv-retention button.tvr-run.live { background: var(--tvr-action); }
 #tv-retention button.tvr-run.test { background: var(--tvr-accent); }
 #tv-retention button.tvr-run.blocked { background: var(--tvr-bad); }
 #tv-retention button.tvr-run:hover:not([disabled]) { filter: brightness(1.1); }

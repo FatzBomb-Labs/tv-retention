@@ -208,9 +208,21 @@
       (alertsByRule[alert.rule_id] = alertsByRule[alert.rule_id] || []).push(alert);
     });
     if (snapshot) snapshot.alerts = list || [];
+    // A system alert appearing or clearing changes whether a run can happen at all, and
+    // alerts arrive on their own schedule without ever passing through renderTopBar.
+    if (snapshot) renderRunButton();
   }
 
   const seriesAlerts = (ruleId) => alertsByRule[ruleId] || [];
+
+  // From the settings rather than the snapshot. `snapshot.test_mode` is only refreshed by a
+  // full snapshot call, so turning Test Mode off and saving left the top bar and the Run
+  // button describing the mode the page had loaded with — which is exactly the moment
+  // somebody is reading that button to see whether it will delete something.
+  const testMode = () => {
+    const schedule = (settings || {}).schedule;
+    return schedule ? !!schedule.test_mode : !!(snapshot || {}).test_mode;
+  };
   const seriesAlertList = () => Object.values(alertsByRule).reduce((all, list) => all.concat(list), []);
   const isBlocked = (ruleId) => seriesAlerts(ruleId).some((alert) => alert.blocking);
   const worstSeverity = (list) => (list.some((a) => a.severity === 'error') ? 'error'
@@ -357,8 +369,8 @@
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
     $('tvr-about-version').textContent = snapshot.version || '';
     const banner = ((settings || {}).alerts || {}).test_banner || 'full';
-    $('tvr-test-banner').hidden = !snapshot.test_mode || banner === 'chip';
-    $('tvr-test-chip').hidden = !snapshot.test_mode || banner !== 'chip';
+    $('tvr-test-banner').hidden = !testMode() || banner === 'chip';
+    $('tvr-test-chip').hidden = !testMode() || banner !== 'chip';
     renderCounts();
     renderTopBar();
     renderRules();
@@ -531,7 +543,7 @@
   function runState() {
     if (!(settings.instances || []).length) return 'blocked';
     if (systemAlerts.some((alert) => alert.blocking)) return 'blocked';
-    return snapshot.test_mode ? 'test' : 'live';
+    return testMode() ? 'test' : 'live';
   }
 
   const RUN_STATES = {
@@ -540,7 +552,11 @@
     blocked: ['Disabled', 'Something is stopping every run. Click to see what.'],
   };
 
-  function renderRunButton(nothing) {
+  function renderRunButton() {
+    // It works out its own "nothing to do", so anything that changes what the button
+    // should say can simply call it.
+    const plan = snapshot.plan || { actionable: 0, trustworthy: false };
+    const nothing = plan.trustworthy && !plan.actionable;
     const state = runState();
     const [text, why] = RUN_STATES[state];
     const button = $('tvr-run');
@@ -568,7 +584,7 @@
     $('tvr-changes-caret').hidden = nothing;
     button.disabled = nothing;
     $('tvr-synced').textContent = syncedAgo();
-    renderRunButton(nothing);
+    renderRunButton();
 
     menu.hidden = true;
     menu.replaceChildren();
@@ -767,7 +783,7 @@
     // The confirmation states the actual plan rather than describing runs in general.
     let warning = `Run ${plural(runnable.length, 'series')} now?\n\n`;
     warning += plan.actionable ? `This will ${planText(plan)}.\n\n` : 'No changes are currently expected.\n\n';
-    if (snapshot.test_mode) {
+    if (testMode()) {
       warning += 'Test mode is on, so this changes nothing: it reports exactly what it would '
         + 'have done and writes neither to your files nor to Sonarr.';
     } else {
@@ -2724,7 +2740,7 @@
       ['Series with a rule', plural((settings.rules || []).length, 'series')],
       ['Sonarr last read', sync.synced_at ? ago(sync.synced_at) : 'not yet'],
       ['Schedule', (settings.schedule || {}).enabled ? (snapshot.schedule_text || 'on') : 'off'],
-      ['Test Mode', snapshot.test_mode ? 'on — a scheduled run changes nothing' : 'off'],
+      ['Test Mode', testMode() ? 'on — nothing writes, scheduled or manual' : 'off'],
       ['Storage', settings.state_dir || ''],
     ];
     box.replaceChildren(...rows.map(([name, value]) => el('div', { className: 'tvr-inline-row' }, [
