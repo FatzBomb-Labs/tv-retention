@@ -842,7 +842,6 @@
   }));
 
   // -- series ------------------------------------------------------------
-  const ATTENTION_RANK = { error: 0, warning: 1, notice: 2, '': 3 };
 
   function presetFor(rule) {
     return (settings.profiles || []).find((preset) => preset.id === rule.profile_id) || null;
@@ -993,18 +992,20 @@
       if (term && !(`${series.title} ${series.path || ''}`.toLowerCase().includes(term))) return;
       rows.push({ series, rule, alerts: alertsHere });
     });
+    // One order, applied to both lists. Sorting problems to the top of the main list was
+    // how you found them before there was a section for them; doing both puts the same
+    // series in two places for the same reason, and makes the list underneath jump about
+    // as alerts come and go.
     const order = $('tvr-sort').value;
-    const rank = (row) => (row.rule && isBlocked(row.rule.id) ? -1
-      : (ATTENTION_RANK[worstSeverity(row.alerts)] ?? (row.rule ? 3 : 4)));
+    const byTitle = (a, b) => String(a.series.sort_title || a.series.title)
+      .localeCompare(String(b.series.sort_title || b.series.title));
     rows.sort((a, b) => (
-      order === 'title-desc' ? String(b.series.sort_title || b.series.title).localeCompare(String(a.series.sort_title || a.series.title))
+      order === 'title-desc' ? -byTitle(a, b)
       : order === 'added' ? String(b.series.added || '').localeCompare(String(a.series.added || ''))
       : order === 'size' ? (b.series.size_on_disk || 0) - (a.series.size_on_disk || 0)
       : order === 'episodes' ? (b.series.total_episode_count || 0) - (a.series.total_episode_count || 0)
       : order === 'keep' ? keepRank(a.rule) - keepRank(b.rule)
-      : order === 'attention' ? (rank(a) - rank(b)
-          || String(a.series.sort_title || a.series.title).localeCompare(String(b.series.sort_title || b.series.title)))
-      : String(a.series.sort_title || a.series.title).localeCompare(String(b.series.sort_title || b.series.title))));
+      : byTitle(a, b)));
     return rows;
   }
 
@@ -1225,6 +1226,9 @@
       if (plan && (plan.delete || plan.monitor || plan.unmonitor)) art.append(changeMarks(rule, plan));
       art.append(alertMarks(rule));
     }
+    // Always there, unlike the retention pill below it: grayscale says something is
+    // different about this poster, and this says what.
+    if (series.ended) art.append(el('span', { className: 'tvr-card-ended', textContent: 'Ended' }));
     art.append(retentionPill(rule));
     card.append(art);
     card.append(el('div', { className: 'tvr-rule-main' }, [
@@ -1310,6 +1314,7 @@
     'unmatched': 'No Sonarr match',
     'folder-missing': 'Folder missing',
     'unknown-files': 'Unknown files',
+    'ended': 'Series ended',
     'ended-expired': 'Series ended',
     'sonarr-unreachable': 'Sonarr unreachable',
   };
@@ -2675,6 +2680,7 @@
   // on purpose: hiding "this series will not run" does not stop it being true.
   const MUTABLE_KINDS = [
     ['no-recycle-bin', 'Sonarr has no recycle bin'],
+    ['ended', 'A series has ended and still has episodes'],
     ['ended-expired', 'A series has ended with nothing left in its window'],
   ];
   const mutedInputs = {};

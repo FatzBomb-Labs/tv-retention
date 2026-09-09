@@ -822,6 +822,30 @@ class Interface(unittest.TestCase):
         self.assertIn('border-style: dashed', disabled)
         self.assertNotIn('border-color', disabled)
 
+    def test_the_main_list_stops_ranking_what_the_section_above_it_ranks(self):
+        """Sorting problems to the top was how you found them before there was a section.
+
+        Doing both puts the same series in two places for the same reason, and makes the
+        list underneath jump about as alerts come and go.
+        """
+        self.assertNotIn('value="attention"', self.html)
+        self.assertNotIn('ATTENTION_RANK', self.js)
+        block = self.js.split("const order = $('tvr-sort').value;")[1].split('return rows;')[0]
+        self.assertNotIn('isBlocked', block)
+        self.assertNotIn('alerts', block)
+
+    def test_an_ended_series_says_so_on_its_poster(self):
+        # Grayscale says something is different about this poster; the pill says what. It
+        # is there whether or not anyone is pointing at the card, unlike the retention
+        # below it, because it is a fact about the series rather than a detail you ask for.
+        self.assertIn("className: 'tvr-card-ended', textContent: 'Ended'", self.js)
+        block = self.css.split('.tvr-card-ended {')[1].split('}')[0]
+        self.assertIn('left: 50%', block)
+        self.assertIn('transform: translateX(-50%)', block)
+        pill = self.css.split('.tvr-card-pill {')[1].split('}')[0]
+        self.assertIn('bottom: 0', pill)
+        self.assertRegex(block, r'bottom: \d+px', 'it sits above the retention, not on it')
+
     def test_a_switched_off_series_is_offered_rather_than_listed(self):
         """It raises nothing, so it is not in the section about things to do.
 

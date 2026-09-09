@@ -886,6 +886,12 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   padding: 3px 6px; font-size: 10.5px; font-weight: 600; text-align: center;
   background: rgba(0,0,0,.72); color: #fff; opacity: 0; transition: opacity .12s;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Directly above the retention, centred, and there whether or not anyone is pointing at
+   the card — it is a fact about the series rather than a detail you ask for. */
+.tvr-card-ended { position: absolute; left: 50%; transform: translateX(-50%); bottom: 22px;
+  z-index: 2; padding: 1px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+  background: rgba(0,0,0,.72); color: #e8e8e8; }
 .tvr-card-pill.preset { color: #9ec9ef; }
 .tvr-card-pill.loose { color: #cfcfcf; font-weight: normal; }
 .tvr-rules-grid .tvr-rule:hover .tvr-card-pill { opacity: 1; }

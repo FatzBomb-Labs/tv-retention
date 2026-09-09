@@ -260,7 +260,7 @@ LOG_LEVELS = ['minimal', 'error', 'warning', 'info', 'verbose']
 # Kept here rather than imported from alerts, which imports nothing and is imported by
 # everything. The blocking ones cannot be muted: hiding "this series will not run" does
 # not stop it being true, it only stops you finding out why.
-ALERT_KINDS = ['unmatched', 'ended-expired', 'sonarr-unreachable', 'no-recycle-bin']
+ALERT_KINDS = ['unmatched', 'ended', 'ended-expired', 'sonarr-unreachable', 'no-recycle-bin']
 BLOCKING_KINDS = ['unmatched', 'sonarr-unreachable']
 
 

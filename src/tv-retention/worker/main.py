@@ -1070,6 +1070,12 @@ def alerts_for_rule(settings: dict, rule: dict, state: dict) -> list:
         return [alerts.make('ended-expired', rule_id=rule['id'],
                             detail='Sonarr reports this series as ended and nothing remains '
                                    'inside the keep window')]
+    if state.get('lifecycle') == 'ended':
+        return [alerts.make('ended', rule_id=rule['id'],
+                            detail=f'Sonarr reports this series as ended. '
+                                   f'{state.get("files_in_frame", 0)} of '
+                                   f'{state.get("files_total", 0)} episodes are still inside '
+                                   f'the keep window')]
     return []
 
 

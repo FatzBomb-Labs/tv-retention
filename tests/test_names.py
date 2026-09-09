@@ -315,3 +315,44 @@ class Unused(unittest.TestCase):
     def test_the_scan_would_notice_something_left_behind(self):
         # Proof it is looking: a name this suite mentions nowhere else.
         self.assertEqual(self.mentions('a_name_nothing_in_this_project_uses'), 1)
+
+
+class EndedAlerts(unittest.TestCase):
+    """A series that has finished, told apart from one that has finished and emptied."""
+
+    @classmethod
+    def setUpClass(cls):
+        import main
+        cls.main = main
+
+    def rule(self):
+        return {'id': 'r1', 'match_status': 'matched', 'enabled': True}
+
+    def kinds(self, lifecycle, **state):
+        found = self.main.alerts_for_rule({}, self.rule(),
+                                          dict({'ok': True, 'lifecycle': lifecycle}, **state))
+        return [alert['kind'] for alert in found]
+
+    def test_ended_with_episodes_left_is_a_notice_of_its_own(self):
+        """No further episodes are coming, so what is kept can only shrink.
+
+        Worth saying while there is still something to decide about — which is exactly the
+        case the old alert did not cover, because it only fired once the window was empty.
+        """
+        self.assertEqual(self.kinds('ended', files_in_frame=12, files_total=60), ['ended'])
+
+    def test_ended_and_empty_is_still_the_other_one(self):
+        self.assertEqual(self.kinds('ended_expired'), ['ended-expired'])
+        self.assertEqual(self.kinds('ended_empty'), ['ended-expired'])
+
+    def test_a_running_series_says_nothing(self):
+        self.assertEqual(self.kinds(''), [])
+
+    def test_it_is_a_notice_and_does_not_notify_twice(self):
+        # Sonarr's own "this series ended" notification already goes out once, the first
+        # time it says so. This is the standing fact rather than the news of it.
+        import alerts
+        made = alerts.make('ended', rule_id='r1', detail='x')
+        self.assertEqual(made['severity'], alerts.NOTICE)
+        self.assertFalse(made['blocking'])
+        self.assertFalse(alerts.notifies(made))

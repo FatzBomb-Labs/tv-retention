@@ -37,6 +37,16 @@ KINDS = {
                 'run until it does.',
         'action': 'rematch', 'notify': True,
     },
+    'ended': {
+        'severity': NOTICE, 'blocking': False, 'scope': 'series',
+        'title': 'Series has ended',
+        'help': 'No further episodes are coming, so what is kept here will only shrink. '
+                'Worth deciding what you want to keep of it while there is still something '
+                'to decide about.',
+        # Sonarr's own "this series ended" notification already goes out once, the first
+        # time it says so. This is the standing fact rather than the news of it.
+        'action': '', 'notify': False,
+    },
     'ended-expired': {
         'severity': NOTICE, 'blocking': False, 'scope': 'series',
         'title': 'Ended, and nothing is left inside the keep window',
