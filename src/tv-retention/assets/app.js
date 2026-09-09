@@ -436,7 +436,14 @@
       const section = head.dataset.sectionHead;
       // Clicking the section you are already in collapses nothing: there would be no open
       // section and no view to show. It just returns you to where you were.
-      showView(remembered(`last.${section}`, '') || sectionDefault(section));
+      //
+      // Where you were is in the browser, and it outlives the view it names. Renaming
+      // `media-rules` to `media-automation` left every existing browser remembering a view
+      // that no longer exists: `showView` fell back to `series-all`, which is in another
+      // section, so clicking Media management appeared to do nothing at all. A remembered
+      // name is only worth having if it still names something.
+      const last = remembered(`last.${section}`, '');
+      showView(VIEWS.includes(last) ? last : sectionDefault(section));
     });
   });
 

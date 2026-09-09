@@ -400,7 +400,8 @@ class Interface(unittest.TestCase):
         And Series is the exception worth encoding: with nothing connected yet, All is the
         only one of the three lists with anything in it.
         """
-        self.assertIn("remembered(`last.${section}`, '') || sectionDefault(section)", self.js)
+        self.assertIn("remembered(`last.${section}`, '')", self.js)
+        self.assertIn('sectionDefault(section)', self.js)
         self.assertIn('remember(`last.${section}`, name)', self.js)
         block = self.js.split('function sectionDefault(section)')[1].split('\n  }')[0]
         self.assertIn("(settings.rules || []).length ? 'series-connected' : 'series-all'", block)
@@ -610,6 +611,22 @@ class Interface(unittest.TestCase):
                 continue
             self.assertIn(identifier, collect, f'{identifier} is on Automation but never saved')
             self.assertIn(identifier, render, f'{identifier} is on Automation but never filled in')
+
+    def test_a_remembered_view_is_checked_before_it_is_used(self):
+        """localStorage outlives the view it names, and a rename is not a migration.
+
+        `media-rules` became `media-automation`, and every browser that had ever opened
+        Media management went on remembering the old name. `showView` does not know which
+        section was asked for, so its fallback sent you to `series-all` — in a different
+        section — and clicking Media management looked like a dead button.
+
+        Every other remembered value is a preference that degrades harmlessly. This one is
+        a name, and a name has to still name something.
+        """
+        handler = self.js.split('[data-section-head]').pop().split('function showView')[0]
+        self.assertIn('VIEWS.includes(last)', handler)
+        # The shape of the bug: the remembered name going straight into showView.
+        self.assertNotIn("showView(remembered(`last.${section}`", self.js)
 
     def test_the_picker_names_every_reason_an_episode_can_be_excluded(self):
         """A fourth reason added to core would be shown as a pattern that has no text.
