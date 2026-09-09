@@ -972,16 +972,34 @@
   //
   // Search still applies to both. It is a question rather than a filter: typing a title
   // and being shown thirty unrelated series with alerts would not be help.
-  function visibleLibrary(everythingWithAlerts) {
+  // Whether the next run will do anything at all to this series. A queued removal counts
+  // even on a switched-off rule: removals are the one thing that ignores the enabled flag,
+  // and hiding the only destructive thing still going to happen would be the wrong way
+  // round. A blocked series never counts, because no run will reach it.
+  function scheduledFor(rule) {
+    if (!rule) return false;
+    if (queuedRemoval(rule)) return true;
+    if (!rule.enabled || isBlocked(rule.id)) return false;
+    const plan = (monitoring[rule.id] || {}).plan;
+    return !!(plan && (plan.delete || plan.monitor || plan.unmonitor));
+  }
+
+  // Three questions about the same library, so three passes over it rather than three
+  // lists kept in step. `alerts` and `scheduled` ignore the filters on purpose: a problem
+  // is not less true for being on another tab. Search still narrows every one of them,
+  // because search is a question rather than a filter.
+  function visibleLibrary(mode, useSearch = true) {
     if (library === null) return [];
-    const term = ($('tvr-search').value || '').trim().toLowerCase();
+    const term = useSearch ? ($('tvr-search').value || '').trim().toLowerCase() : '';
     const hideEnded = $('tvr-hide-ended').checked;
     const rows = [];
     library.forEach((series) => {
       const rule = ruleFor(series);
       const alertsHere = rule ? seriesAlerts(rule.id) : [];
-      if (everythingWithAlerts) {
+      if (mode === 'alerts') {
         if (!alertsHere.length) return;
+      } else if (mode === 'scheduled') {
+        if (!scheduledFor(rule)) return;
       } else {
         if (libraryFilter === 'connected' && !rule) return;
         if (libraryFilter === 'unconnected' && rule) return;
@@ -1057,6 +1075,32 @@
 
   const cardsInto = (box, rows) => rows.forEach((row) => box.append(libraryCard(row)));
 
+  // A band and the list under it. Collapsing is remembered per section, because which of
+  // the three you are working in is a habit rather than a decision — and Scheduled actions
+  // starts closed, since it answers a question you go and ask rather than one you want
+  // answered every time you open the page.
+  const BAND_OPEN = { attention: true, scheduled: false, all: true };
+  const bandOpen = (name) => (remembered(`band.${name}`, '') || (BAND_OPEN[name] ? 'open' : 'shut')) === 'open';
+
+  function sectionBand(name, label, shown, total) {
+    const open = bandOpen(name);
+    const box = el('div', { className: layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules',
+                            hidden: !open });
+    const toggleButton = el('button', { type: 'button', className: 'tvr-band-toggle',
+                                        'aria-expanded': String(open) }, [
+      el('i', { className: `fa fa-caret-${open ? 'down' : 'right'}` }),
+      el('span', { textContent: label }),
+      // Both numbers, because the pair is the information: the first alone cannot say
+      // whether the filters are hiding anything.
+      el('span', { className: 'tvr-band-count', textContent: `${shown}/${total}` }),
+    ]);
+    toggleButton.addEventListener('click', () => {
+      remember(`band.${name}`, open ? 'shut' : 'open');
+      renderLibrary();
+    });
+    return { head: el('div', { className: 'tvr-band' }, [toggleButton]), box };
+  }
+
   function renderLibrary() {
     const container = $('tvr-rules');
     container.className = 'tvr-library';
@@ -1074,41 +1118,47 @@
                           [el('span', { className: 'tvr-spinner' }), text(' Reading from Sonarr…')]));
       return;
     }
-    const rows = visibleLibrary(false);
-    const alerting = visibleLibrary(true);
+    const rows = visibleLibrary('filtered');
+    const alerting = visibleLibrary('alerts');
+    const scheduled = visibleLibrary('scheduled');
     // A switched-off series raises nothing, so it is not in the section about things that
     // need doing — but it is still counted, and offered, because "I turned that off and
     // forgot" is a real way to lose track of a problem.
     const attention = alerting.filter((row) => row.rule && row.rule.enabled);
     const sleeping = alerting.filter((row) => row.rule && !row.rule.enabled);
-    $('tvr-rules-empty').hidden = rows.length > 0 || alerting.length > 0;
-    const cardBox = () => el('div', { className: layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules' });
+    $('tvr-rules-empty').hidden = rows.length > 0 || alerting.length > 0 || scheduled.length > 0;
 
-    // Only when there is something to say. A heading reading "All" over the only list
-    // there is would be a label for a distinction that is not being drawn — and the one
-    // exception is a band with nothing under it, when everything that needs attention is
-    // switched off and the only thing to offer is the way to see it.
     if (attention.length || sleeping.length) {
-      const band = el('h3', { className: 'tvr-h3 tvr-band' },
-                      [el('span', { textContent: 'Needs attention' })]);
+      const band = sectionBand('attention', 'Needs attention',
+                               attention.length + (showSleeping ? sleeping.length : 0),
+                               visibleLibrary('alerts', false).length);
       if (sleeping.length) {
         const show = toggle(`Show ${plural(sleeping.length, 'disabled series')}`, showSleeping,
                             (on) => { showSleeping = on; remember('sleeping', on ? '1' : ''); renderLibrary(); },
                             { className: 'tvr-band-switch' });
-        band.append(show.node);
+        band.head.append(show.node);
       }
-      container.append(band);
-      const box = cardBox();
-      cardsInto(box, attention.concat(showSleeping ? sleeping : []));
-      container.append(box);
-      container.append(el('h3', { className: 'tvr-h3 tvr-band' },
-                          [el('span', { textContent: 'All' })]));
+      cardsInto(band.box, attention.concat(showSleeping ? sleeping : []));
+      container.append(band.head, band.box);
     }
-    const box = cardBox();
+
+    // Every series the next run will touch, whatever the filters say. The header already
+    // counts the changes; this says which shows they land on.
+    if (scheduled.length) {
+      const band = sectionBand('scheduled', 'Scheduled actions', scheduled.length,
+                               visibleLibrary('scheduled', false).length);
+      cardsInto(band.box, scheduled);
+      container.append(band.head, band.box);
+    }
+
+    // Always, unlike the two above it. The count is the reason: "573 of 3022" is the
+    // answer to why a show you expected is not on screen, and that question is asked far
+    // more often than it is worth saving a line to avoid.
+    const band = sectionBand('all', 'All', rows.length, library.length);
     // Three thousand cards is not a list anyone reads, and it is not a page any browser
     // enjoys laying out. Search and the filters are how you get to the rest.
-    cardsInto(box, rows.slice(0, LIBRARY_LIMIT));
-    container.append(box);
+    cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT));
+    container.append(band.head, band.box);
     if (rows.length > LIBRARY_LIMIT) {
       container.append(el('p', { className: 'tvr-empty',
                                  textContent: `${rows.length - LIBRARY_LIMIT} more — search, or narrow the filters.` }));

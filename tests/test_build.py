@@ -822,6 +822,40 @@ class Interface(unittest.TestCase):
         self.assertIn('border-style: dashed', disabled)
         self.assertNotIn('border-color', disabled)
 
+    def test_three_sections_answer_three_questions(self):
+        """What needs doing, what will be done, and everything.
+
+        The first two ignore the filters, because neither question is less true for being
+        asked on another tab. All is always there because its count answers the question
+        people actually ask — why is a show I expected not on screen.
+        """
+        for name, label in (('attention', 'Needs attention'), ('scheduled', 'Scheduled actions'),
+                            ('all', 'All')):
+            self.assertIn(f"'{name}', '{label}'", self.js)
+        # The two upper bands appear only when they hold something; All always does.
+        self.assertIn('if (scheduled.length) {', self.js)
+        self.assertIn('if (attention.length || sleeping.length) {', self.js)
+        self.assertIn("const band = sectionBand('all', 'All', rows.length, library.length);", self.js)
+        self.assertIn("BAND_OPEN = { attention: true, scheduled: false, all: true }", self.js)
+
+    def test_a_band_says_how_much_the_filters_are_hiding(self):
+        # The first number alone cannot: "573" does not say whether anything is missing.
+        self.assertIn("textContent: `${shown}/${total}`", self.js)
+        # Totals ignore the search that narrows the list beneath them.
+        self.assertIn("visibleLibrary('alerts', false).length", self.js)
+        self.assertIn("visibleLibrary('scheduled', false).length", self.js)
+
+    def test_a_queued_removal_is_scheduled_even_with_the_rule_switched_off(self):
+        """Removals are the one thing that ignores the enabled flag.
+
+        Hiding the only destructive thing still going to happen, because the rule that no
+        longer runs is switched off, would be exactly the wrong way round. A blocked series
+        never counts either way, because no run will reach it.
+        """
+        block = self.js.split('function scheduledFor(rule)')[1].split('\n  }')[0]
+        self.assertLess(block.index('queuedRemoval(rule)'), block.index('rule.enabled'))
+        self.assertIn('if (!rule.enabled || isBlocked(rule.id)) return false;', block)
+
     def test_the_main_list_stops_ranking_what_the_section_above_it_ranks(self):
         """Sorting problems to the top was how you found them before there was a section.
 
@@ -853,7 +887,7 @@ class Interface(unittest.TestCase):
         is counted and offered — and that is the one case where the band appears with
         nothing under it, because the offer is the only thing there is to show.
         """
-        block = self.js.split('const alerting = visibleLibrary(true);')[1].split('const cardBox')[0]
+        block = self.js.split("const alerting = visibleLibrary('alerts');")[1].split('if (attention.length')[0]
         self.assertIn('row.rule && row.rule.enabled', block)
         self.assertIn('row.rule && !row.rule.enabled', block)
         self.assertIn('if (attention.length || sleeping.length) {', self.js)
@@ -953,10 +987,10 @@ class Interface(unittest.TestCase):
         self.assertNotIn('tvr-only-alerts', self.html)
         self.assertNotIn('tvr-only-alerts', self.js)
         self.assertNotIn('tvr-series-rollup', self.html)
-        self.assertIn("textContent: 'Needs attention'", self.js)
-        block = self.js.split('function visibleLibrary(everythingWithAlerts)')[1].split('\n  }')[0]
-        self.assertIn('if (everythingWithAlerts) {', block)
-        # Search still narrows both: it is a question rather than a filter.
+        self.assertIn("'attention', 'Needs attention'", self.js)
+        block = self.js.split('function visibleLibrary(mode, useSearch = true)')[1].split('\n  }')[0]
+        self.assertIn("if (mode === 'alerts') {", block)
+        # Search still narrows every section: it is a question rather than a filter.
         self.assertIn("if (term && !(`${series.title}", block)
 
     def test_the_panel_heading_is_opaque(self):

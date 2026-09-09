@@ -573,10 +573,21 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-side-count { font-size: 11.5px; }
 /* Two lists, one page. The band names what the group below it is, and is only there when
    there are two groups to tell apart. */
-#tv-retention .tvr-band { display: flex; align-items: center; gap: 10px; margin: 2px 0 0;
+/* Three bands, and each one opens and closes. Which section you work in is a habit rather
+   than a decision, so it is remembered. */
+#tv-retention .tvr-band { display: flex; align-items: center; gap: 10px; margin: 4px 0 0;
   padding-bottom: 3px; border-bottom: 1px solid var(--tvr-line); }
+#tv-retention button.tvr-band-toggle { display: flex; align-items: center; gap: 7px;
+  flex: 1; min-width: 0; padding: 2px 0; border: none; background: none; border-radius: 0;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700;
+  opacity: .72; text-align: left; }
+#tv-retention button.tvr-band-toggle:hover { opacity: 1; background: none; }
+.tvr-band-toggle .fa { font-size: 9px; opacity: .7; flex: none; }
+/* Both numbers, because the pair is the information: the first alone cannot say whether
+   the filters are hiding anything. */
+.tvr-band-count { letter-spacing: normal; opacity: .55; font-weight: 600; }
 /* The one control that lives on a band: what it offers is about the band it sits on. */
-.tvr-band-switch { margin-left: auto; text-transform: none; letter-spacing: normal;
+.tvr-band-switch { flex: none; text-transform: none; letter-spacing: normal;
   font-weight: normal; opacity: .8; }
 .tvr-band-switch:hover { opacity: 1; }
 /* A sub-heading inside a page that now holds two things at once. */
