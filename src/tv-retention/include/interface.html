@@ -130,14 +130,14 @@
         <option value="keep">Keep window, shortest first</option>
       </select>
       <label class="tvr-switch" title="Hide series that have ended and have no retention rule. One that has a rule stays, and one with an alert always stays."><input type="checkbox" id="tvr-hide-ended" checked><span class="tvr-slider"></span><span class="tvr-switch-text">Hide ended</span></label>
-      <label class="tvr-switch" id="tvr-only-alerts-wrap" hidden title="Show only series with something that needs addressing"><input type="checkbox" id="tvr-only-alerts"><span class="tvr-slider"></span><span class="tvr-switch-text">Alerts only</span></label>
       <span class="tvr-spacer"></span>
       <div class="tvr-seg" role="group" aria-label="Layout">
         <button type="button" id="tvr-layout-list" class="active" title="List"><i class="fa fa-bars"></i></button>
         <button type="button" id="tvr-layout-grid" title="Posters"><i class="fa fa-th"></i></button>
       </div>
+      <input type="range" id="tvr-scale" class="tvr-scale" min="1" max="5" step="1" value="3"
+             aria-label="Card size" title="Card size">
     </div>
-    <button type="button" id="tvr-series-rollup" class="tvr-rollup" hidden></button>
     <div id="tvr-series-shell" class="tvr-series-shell">
       <div class="tvr-series-list">
         <div id="tvr-rules" class="tvr-rules"></div>

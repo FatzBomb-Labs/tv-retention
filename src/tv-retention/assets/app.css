@@ -163,6 +163,8 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
 .tvr-dirty { font-size: 12px; color: var(--tvr-warn); }
 .tvr-seg { display: inline-flex; gap: 2px; }
+.tvr-scale { width: 92px; flex: none; accent-color: var(--tvr-action); cursor: pointer;
+  padding: 0; border: none; background: none; }
 #tv-retention .tvr-seg button { border: none; border-radius: 4px; padding: 0; font-size: 12px;
   width: 24px; height: 24px; display: grid; place-items: center; opacity: .5; }
 #tv-retention .tvr-seg button:hover { opacity: .8; }
@@ -547,6 +549,10 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention .tvr-side-item .tvr-tab-badge { height: 15px; min-width: 15px; font-size: 9px;
   margin-left: 4px; }
 .tvr-side-count { font-size: 11.5px; }
+/* Two lists, one page. The band names what the group below it is, and is only there when
+   there are two groups to tell apart. */
+#tv-retention .tvr-band { margin: 2px 0 0; padding-bottom: 3px;
+  border-bottom: 1px solid var(--tvr-line); }
 /* A sub-heading inside a page that now holds two things at once. */
 .tvr-sub-head { margin-top: 4px; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
@@ -581,7 +587,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
    there is no alignment step to depend on and no percentage to fail to resolve. Only then
    does object-fit decide the shape, and it decides it everywhere. */
 .tvr-poster img { position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: contain; display: block; }
+  object-fit: cover; display: block; }
 .tvr-card-series-facts { font-size: 11px; opacity: .75; }
 .tvr-card-series .tvr-chip { justify-self: start; margin-top: 2px; }
 .tvr-card-series button { justify-self: start; margin-top: 4px; }
@@ -638,29 +644,27 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   .tvr-details { position: static; max-height: none; }
 }
 
-/* A library row: artwork first, at one width for every card so the titles line up whatever
-   shape the poster is. Fitted to the row rather than cropped, because a squashed poster is
-   worse than a letterboxed one. */
-.tvr-rule { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: start; }
+/* Hard sizes, set on the container by the slider and read by everything under it.
+   Fitting a poster to whatever box the layout produced is what made this hard three times
+   over — a box that derived its height had nothing definite for the image to resolve
+   against. A stated width and height, and an image told to fill it, cannot do that. */
+.tvr-library { --poster-w: 50px; --poster-h: 72px; --card-font: 1; display: grid; gap: 8px; }
+.tvr-rule { display: grid; grid-template-columns: var(--poster-w) minmax(0, 1fr); gap: 10px;
+  align-items: start; }
 .tvr-rule-main { min-width: 0; display: grid; gap: 2px; }
-.tvr-poster-row { width: 46px; height: 68px; }
-.tvr-poster-row img { background: var(--tvr-soft); }
+.tvr-poster-row { width: var(--poster-w); height: var(--poster-h); }
+.tvr-poster-row img { background: var(--tvr-soft); object-fit: cover; }
 #tv-retention .tvr-rule.loose { border-left-color: var(--tvr-line); opacity: .92; }
 .tvr-connected { display: inline-grid; place-items: center; font-size: 12px; }
 .tvr-connected.yes { color: var(--tvr-good); }
 .tvr-connected.no { opacity: .35; }
 
-/* Poster layout: the artwork leads and the facts sit under it. */
-.tvr-rules-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
-.tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; }
-/* Declared, not derived. Every other poster box states its height outright — 68px in the
-   list, 138px in the panel — and that is why they were the two that always looked right:
-   a percentage height inside them has something definite to resolve against. This one
-   derived its height from its width through aspect-ratio, which is not definite for that
-   purpose, so the image fell back to its own size and the box clipped the bottom off it.
-   240px tall is 160px wide at 2:3, which is what the column is, so almost nothing is left
-   over to letterbox. */
-.tvr-rules-grid .tvr-poster-row { width: 100%; height: 240px; }
+/* Poster layout: the artwork leads and the facts sit under it. Columns are exactly a card
+   wide rather than stretched to fill the row — the sizes are chosen, so honouring them
+   matters more than a flush right edge. */
+.tvr-rules-grid { grid-template-columns: repeat(auto-fill, var(--poster-w)); justify-content: start; }
+.tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; width: var(--poster-w); }
+.tvr-rules-grid .tvr-poster-row { width: var(--poster-w); height: var(--poster-h); }
 .tvr-rules-grid .tvr-rule-title { white-space: normal; }
 
 /* One number for "is anything wrong", next to the one for "is anything scheduled". */
@@ -826,9 +830,18 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-rules-grid .tvr-rule { grid-template-columns: 1fr; gap: 0; padding: 0; overflow: hidden; }
 .tvr-rules-grid .tvr-poster-row { border-radius: 5px 5px 0 0; }
 .tvr-rules-grid .tvr-rule-main { padding: 5px 7px 6px; gap: 1px; }
-.tvr-grid-title { font-size: 12px; font-weight: 600; line-height: 1.25;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tvr-grid-sub { font-size: 10.5px; opacity: .55; }
+/* One type scale for both layouts, stepped by the slider. The grid's sizes were drawn for
+   the middle step, so that is 1 and the rest move around it — and the list uses the same
+   ones, because the same fact should not be a different size for being on a different row.
+   `em` rather than `px` so the multiplier reaches everything under the card at once. */
+.tvr-library .tvr-rule { font-size: calc(13px * var(--card-font)); }
+.tvr-grid-title, .tvr-rules .tvr-rule-title { font-size: 0.92em; font-weight: 600;
+  line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.tvr-grid-sub, .tvr-rules .tvr-card-series-facts { font-size: 0.81em; opacity: .55; }
+.tvr-rules .tvr-plan, .tvr-rules .tvr-plan-quiet,
+#tv-retention .tvr-rules button.tvr-plan { font-size: 0.85em; }
+.tvr-rules .tvr-chip { font-size: 0.81em; }
 
 .tvr-card-alerts { position: absolute; top: 4px; right: 4px; display: grid; gap: 3px; z-index: 2; }
 #tv-retention button.tvr-card-alert { display: grid; place-items: center; width: 19px; height: 19px;

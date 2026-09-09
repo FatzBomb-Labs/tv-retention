@@ -305,16 +305,16 @@ class Interface(unittest.TestCase):
         page whose subject is a list. The captions went with them: a search box says what
         it is by being one, and every sort option names an order.
         """
-        head = self.html.split('<div class="tvr-view-head tvr-series-head">')[1].split('</div>\n')[0]
+        head = (self.html.split('<div class="tvr-view-head tvr-series-head">')[1]
+                .split('<div id="tvr-series-shell"')[0])
         for inside in ('tvr-library-title', 'tvr-search', 'tvr-sort', 'tvr-hide-ended',
-                       'tvr-only-alerts', 'tvr-layout-list'):
+                       'tvr-layout-list', 'tvr-scale'):
             self.assertIn(inside, head)
         self.assertNotIn('tvr-series-toolbar', self.html)
         self.assertNotIn('tvr-series-toolbar', self.css)
         # Short on the switch, and the whole rule in the tooltip: "Hide ended without a
         # rule" explained on the control what the control could explain on hover.
         self.assertIn('>Hide ended</span>', self.html)
-        self.assertIn('>Alerts only</span>', self.html)
         self.assertIn('One that has a rule stays, and one with an alert always stays.', self.html)
         # It wraps rather than squeezing: two rows on a narrow window is the honest
         # answer, not a search box six characters wide.
@@ -828,34 +828,67 @@ class Interface(unittest.TestCase):
         topbar = self.css.split('.tvr-topbar { display: grid;')[1].split('}')[0]
         self.assertNotIn('border-radius', topbar)
 
-    def test_a_poster_is_bounded_rather_than_sized(self):
-        """A poster must not be able to exceed its box, whatever its shape.
+    def test_a_poster_fills_a_box_that_states_its_own_size(self):
+        """It fills now, where it used to fit — and that is safe because the box is chosen.
 
-        Sizing it to the box and relying on object-fit only looked right: in a centred
-        box the percentage height has nothing definite to resolve against, so the image
-        kept its own height and the box clipped it. Bounds cannot do that.
+        Fitting was the right answer while the box came from the layout: a poster squashed
+        into a shape nobody picked is worse than one letterboxed in it. The sizes are hard
+        values now, every one of them within a few percent of 2:3, so cropping takes a
+        sliver off a poster instead of leaving a margin around every card.
+
+        What has not changed is why the box must state its height. A height derived from
+        width — through aspect-ratio, or from the grid column — is not definite for
+        percentage resolution, so the image fell back to its own size and the box clipped
+        the bottom off it. That cost three wrong fixes.
         """
-        import re
         rule = self.css.split('.tvr-poster img {')[1].split('}')[0]
         # Positioned against the box's edges: its size is the box's size by construction,
         # with no alignment step to depend on and no percentage that can fail to resolve.
         self.assertIn('position: absolute', rule)
         self.assertIn('inset: 0', rule)
-        self.assertIn('object-fit: contain', rule)
+        self.assertIn('object-fit: cover', rule)
         self.assertIn('position: relative', self.css.split('.tvr-poster {')[1].split('}')[0])
-        # Every poster box states its height. A height derived from width through
-        # aspect-ratio is not definite for percentage resolution, so the image inside it
-        # fell back to its own size and the box clipped it.
         for box in ('.tvr-poster {', '.tvr-poster-row {', '.tvr-poster-panel {',
                     '.tvr-rules-grid .tvr-poster-row {'):
             declared = self.css.split(box)[1].split('}')[0]
-            self.assertRegex(declared, r'height:\s*\d+px',
+            self.assertRegex(declared, r'height:\s*(\d+px|var\(--poster-h\))',
                              f'{box.strip()} does not declare a height')
         import re as regex
         declarations = regex.sub(r'/\*.*?\*/', '', self.css, flags=regex.S)
         self.assertNotIn('aspect-ratio', declarations, 'a derived height is not definite')
-        self.assertEqual(re.findall(r'object-fit:\s*cover', self.css), [],
-                         'a poster is cropped somewhere')
+
+    def test_the_slider_sets_hard_sizes_rather_than_fitting_to_the_layout(self):
+        """Five steps, two layouts, ten stated sizes.
+
+        And the type steps with them: the grid's sizes were drawn for the middle step, so
+        that is 1 and the rest move around it. The list uses the same scale, because the
+        same fact should not be a different size for being on a different row.
+        """
+        block = self.js.split('const SCALES = {')[1].split('};')[0]
+        self.assertIn('grid: [[100, 143], [125, 179], [150, 215], [175, 250], [200, 286]]', block)
+        self.assertIn('list: [[25, 36], [38, 54], [50, 72], [75, 107], [100, 143]]', block)
+        self.assertIn('const FONT_SCALE = [0.8, 0.9, 1, 1.1, 1.2];', self.js)
+        # Numbers on the container, so moving the slider resizes what is on screen rather
+        # than rebuilding it.
+        self.assertIn("container.style.setProperty('--poster-w'", self.js)
+        self.assertIn("applyScale($('tvr-rules'))", self.js)
+        self.assertIn('id="tvr-scale"', self.html)
+
+    def test_what_needs_attention_is_a_section_rather_than_a_filter(self):
+        """A series with a problem is not hidden by being on the wrong tab.
+
+        Which is what "alerts only" was for, and why it could sit switched off with the
+        problem still there. The section shows every alerting series whatever the filters
+        say — the same series appears again below, because it is still in the library.
+        """
+        self.assertNotIn('tvr-only-alerts', self.html)
+        self.assertNotIn('tvr-only-alerts', self.js)
+        self.assertNotIn('tvr-series-rollup', self.html)
+        self.assertIn("textContent: 'Needs attention'", self.js)
+        block = self.js.split('function visibleLibrary(everythingWithAlerts)')[1].split('\n  }')[0]
+        self.assertIn('if (everythingWithAlerts) {', block)
+        # Search still narrows both: it is a question rather than a filter.
+        self.assertIn("if (term && !(`${series.title}", block)
 
     def test_the_panel_heading_is_opaque(self):
         # A translucent sticky heading lets its own contents scroll through it.

@@ -894,22 +894,6 @@
     return link;
   }
 
-  // Series problems are acted on from the series card, so their roll-up belongs on this
-  // tab — and for the same reason the Alerts tab never counts them.
-  function renderSeriesRollup() {
-    const rollup = $('tvr-series-rollup');
-    const list = seriesAlertList();
-    rollup.hidden = bulkChecking || list.length === 0;
-    if (rollup.hidden) return;
-    const affected = new Set(list.map((alert) => alert.rule_id)).size;
-    const bySeverity = { error: 0, warning: 0, notice: 0 };
-    list.forEach((alert) => { bySeverity[alert.severity] += 1; });
-    rollup.replaceChildren(
-      el('strong', { textContent: `${plural(list.length, 'alert')} need to be addressed` }),
-      el('span', { textContent: ` across ${plural(affected, 'series')} — ${bySeverity.error} critical, `
-        + `${bySeverity.warning} warning, ${bySeverity.notice} notice. Open this to show only those series.` }));
-  }
-
   // Remembered per browser, because it is a preference about looking rather than a
   // setting about behaviour — it belongs to the person at the screen, not to the plugin.
   const remember = (name, value) => { try { localStorage.setItem(`tvr.${name}`, value); } catch (error) { /* private window */ } };
@@ -977,21 +961,30 @@
     (rule) => rule.series_id === series.series_id && rule.instance_id === series.instance_id) || null;
 
   // What the three sidebar items and the two toggles come to, together.
-  function visibleLibrary() {
+  // Two lists out of one library: everything the filters allow, and — separately —
+  // everything with an alert, whatever the filters say. A series with a problem is not
+  // hidden by being on the wrong tab, which is what an "alerts only" toggle was for and
+  // why it could be left switched off with the problem still there.
+  //
+  // Search still applies to both. It is a question rather than a filter: typing a title
+  // and being shown thirty unrelated series with alerts would not be help.
+  function visibleLibrary(everythingWithAlerts) {
     if (library === null) return [];
     const term = ($('tvr-search').value || '').trim().toLowerCase();
     const hideEnded = $('tvr-hide-ended').checked;
-    const onlyAlerts = $('tvr-only-alerts').checked;
     const rows = [];
     library.forEach((series) => {
       const rule = ruleFor(series);
-      if (libraryFilter === 'connected' && !rule) return;
-      if (libraryFilter === 'unconnected' && rule) return;
-      // The toggle hides what is ended *and* unmanaged. A connected series is never
-      // hidden: it is your own rule, and an ended one is where retention matters most.
-      if (hideEnded && series.ended && !rule) return;
       const alertsHere = rule ? seriesAlerts(rule.id) : [];
-      if (onlyAlerts && !alertsHere.length) return;
+      if (everythingWithAlerts) {
+        if (!alertsHere.length) return;
+      } else {
+        if (libraryFilter === 'connected' && !rule) return;
+        if (libraryFilter === 'unconnected' && rule) return;
+        // The toggle hides what is ended *and* unmanaged. A connected series is never
+        // hidden: it is your own rule, and an ended one is where retention matters most.
+        if (hideEnded && series.ended && !rule) return;
+      }
       if (term && !(`${series.title} ${series.path || ''}`.toLowerCase().includes(term))) return;
       rows.push({ series, rule, alerts: alertsHere });
     });
@@ -1034,13 +1027,33 @@
     return art;
   }
 
+  // Hard sizes rather than a poster fitted to whatever box the layout produced. The two
+  // columns are the two layouts; the row is the step on the slider.
+  const SCALES = {
+    grid: [[100, 143], [125, 179], [150, 215], [175, 250], [200, 286]],
+    list: [[25, 36], [38, 54], [50, 72], [75, 107], [100, 143]],
+  };
+  // Three is the size the type was drawn for, so it is 100% and the rest step around it.
+  const FONT_SCALE = [0.8, 0.9, 1, 1.1, 1.2];
+  let scale = Math.min(5, Math.max(1, Number(remembered('scale', '3')) || 3));
+
+  function applyScale(container) {
+    const [width, height] = SCALES[layout === 'grid' ? 'grid' : 'list'][scale - 1];
+    container.style.setProperty('--poster-w', `${width}px`);
+    container.style.setProperty('--poster-h', `${height}px`);
+    container.style.setProperty('--card-font', String(FONT_SCALE[scale - 1]));
+  }
+
+  function cardsInto(box, rows) {
+    rows.forEach((row) => box.append(
+      row.rule && queuedRemoval(row.rule) ? queuedCard(row.rule) : libraryCard(row)));
+  }
+
   function renderLibrary() {
-    renderSeriesRollup();
     const container = $('tvr-rules');
-    const rows = visibleLibrary();
-    container.className = layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules';
+    container.className = 'tvr-library';
     container.replaceChildren();
-    $('tvr-only-alerts-wrap').hidden = seriesAlertList().length === 0;
+    applyScale(container);
     if (library === null) {
       $('tvr-rules-empty').hidden = true;
       container.append(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
@@ -1053,11 +1066,25 @@
                           [el('span', { className: 'tvr-spinner' }), text(' Reading from Sonarr…')]));
       return;
     }
-    $('tvr-rules-empty').hidden = rows.length > 0;
+    const rows = visibleLibrary(false);
+    const attention = visibleLibrary(true);
+    $('tvr-rules-empty').hidden = rows.length > 0 || attention.length > 0;
+    const cardBox = () => el('div', { className: layout === 'grid' ? 'tvr-rules tvr-rules-grid' : 'tvr-rules' });
+
+    // Only when there is something to say. A heading reading "All" over the only list
+    // there is would be a label for a distinction that is not being drawn.
+    if (attention.length) {
+      container.append(el('h3', { className: 'tvr-h3 tvr-band', textContent: 'Needs attention' }));
+      const box = cardBox();
+      cardsInto(box, attention);
+      container.append(box);
+      container.append(el('h3', { className: 'tvr-h3 tvr-band', textContent: 'All' }));
+    }
+    const box = cardBox();
     // Three thousand cards is not a list anyone reads, and it is not a page any browser
     // enjoys laying out. Search and the filters are how you get to the rest.
-    rows.slice(0, LIBRARY_LIMIT).forEach((row) => container.append(
-      row.rule && queuedRemoval(row.rule) ? queuedCard(row.rule) : libraryCard(row)));
+    cardsInto(box, rows.slice(0, LIBRARY_LIMIT));
+    container.append(box);
     if (rows.length > LIBRARY_LIMIT) {
       container.append(el('p', { className: 'tvr-empty',
                                  textContent: `${rows.length - LIBRARY_LIMIT} more — search, or narrow the filters.` }));
@@ -1224,8 +1251,16 @@
       renderLibrary();
     });
   });
+  // The slider only ever changes numbers on the container, so it redraws nothing: the
+  // cards already on screen resize under it as it moves.
+  $('tvr-scale').value = String(scale);
+  $('tvr-scale').addEventListener('input', () => {
+    scale = Number($('tvr-scale').value) || 3;
+    remember('scale', scale);
+    applyScale($('tvr-rules'));
+  });
   applyLayout();
-  ['tvr-hide-ended', 'tvr-only-alerts', 'tvr-search', 'tvr-sort'].forEach((id) => {
+  ['tvr-hide-ended', 'tvr-search', 'tvr-sort'].forEach((id) => {
     $(id).addEventListener('input', renderLibrary);
     $(id).addEventListener('change', renderLibrary);
   });
@@ -1431,12 +1466,6 @@
     });
     byInstance.forEach((list, name) => systemBox.append(systemAlertCard(name, list)));
   }
-
-  $('tvr-series-rollup').addEventListener('click', () => {
-    $('tvr-only-alerts').checked = true;
-    $('tvr-search').value = '';
-    renderLibrary();
-  });
 
   $('tvr-recheck-all').addEventListener('click', () => guarded('', async () => {
     const ids = (settings.rules || []).filter((rule) => rule.enabled).map((rule) => rule.id);
