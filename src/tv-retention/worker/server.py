@@ -415,7 +415,12 @@ def take_the_volume() -> None:
     """
     if os.geteuid() != 0:
         return
+    # 1000:1000 is the general default. Unraid's is 99:100 — `nobody:users`, which owns
+    # everything under /mnt/user — and its template sets that. It matters less here than
+    # for its neighbours: this owns one config directory and never touches a library, so
+    # there is no shared media ownership to get wrong.
     uid, gid = int(env('PUID', '1000')), int(env('PGID', '1000'))
+    os.umask(int(env('UMASK', '022'), 8))
     root = Path(env('TVR_CONFIG_DIR', '/config'))
     root.mkdir(parents=True, exist_ok=True)
     # Only what is not already right: a poster cache of three thousand files does not need

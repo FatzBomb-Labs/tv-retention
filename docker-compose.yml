@@ -16,3 +16,8 @@ services:
       # would rather have no login at all:
       # - TVR_AUTH=none
       - TZ=Etc/UTC
+      # Who owns /config. The container takes it on start, so no chown is asked of you.
+      # 1000:1000 by default; on Unraid use 99:100.
+      # - PUID=1000
+      # - PGID=1000
+      # - UMASK=022

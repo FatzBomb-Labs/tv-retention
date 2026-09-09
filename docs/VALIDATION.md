@@ -10,18 +10,17 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 388 tests, all pass |
-| `python3 tools/build.py` | package and manifest built, rebuild is byte-identical |
-| `php -l src/tv-retention/include/api.php` | no syntax errors |
-| `php -l` on the PHP section of `TVRetention.page` | no syntax errors |
+| `python3 -m unittest discover -s tests` | 386 tests, all pass |
+| Worker imports | every module loads, server.py included |
 | `node --check src/tv-retention/assets/app.js` | no syntax errors |
-| Icon check | `fa-television` resolves to a real glyph |
+| `docker build` | 122 MB image |
+| Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; `snapshot` answers with settings migrated v7 to v8; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
 ### Coverage by area
 
 | File | Tests | What it holds |
 |---|---|---|
-| `test_build.py` | 120 | The package, and the interface as a build artefact |
+| `test_build.py` | 104 | The interface, checked statically |
 | `test_monitoring.py` | 33 | The two modes, the keep frame, and what each one asks Sonarr to do |
 | `test_freshness.py` | 31 | Reading ages, staleness, what may be shown as current |
 | `test_migration.py` | 30 | Settings v1 → v7, each step and the whole chain |
@@ -36,11 +35,18 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 | `test_progress.py` | 12 | The progress marker, the banner over it, and what the header totals |
 | `test_sonarr.py` | 9 | Rule-to-series matching, and ambiguity refused rather than guessed |
 | `test_unaired.py` | 9 | Unaired seasons, and the next episode due |
+| `test_server.py` | 14 | What the front door refuses, guards and lets through |
 
 `test_build.py` is the largest because the interface is checked statically: it is the file
 with no runtime under test, so the guards that would otherwise be a browser sit here.
 Among them — every element the script hides exists in the markup, every id is unique,
-braces and parentheses balance, and every WebGUI default this page has to undo is undone.
+braces and parentheses balance, and every icon the interface names is one we ship.
+
+`test_server.py` covers what used to be somebody else's problem. The plugin was handed
+authentication and a CSRF token by emhttp and never had to be right about either. One of
+its tests found that `TVR_PORT=` — set but empty, a realistic way to write a compose file —
+would have taken the container down at startup, because `os.environ.get`'s default applies
+to a variable that is absent rather than one set to nothing.
 
 ## Live, read-only, against 3022 series and 36 rules
 
@@ -76,10 +82,9 @@ Against the running `Sonarr-Series` container, from a `/tmp` staging directory w
 
 ## Not yet exercised
 
-- **A live deletion.** Test Mode has never been turned off on this server. See
+- **A live deletion.** Test Mode has never been turned off on this server, and no version of this — plugin or container — has ever removed a file. See
   [ACCEPTANCE.md](ACCEPTANCE.md).
 - **A live monitoring write.** The selection has been exercised; Sonarr's `PUT` has not.
-- **The plugin installed through the WebGUI**, and the generated cron entry firing.
 - **TMDB air-date filling** — no API key configured.
 - **Unraid notifications** — no notification has been observed arriving. `announce_alerts`
   is now wired into the sweep, so the first appearance of a problem is what sends one; that

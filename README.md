@@ -1,13 +1,46 @@
 # TV Retention
 
-An Unraid plugin that keeps TV libraries at a chosen size. For each show you set how much
-to keep — a number of **days**, **episodes**, **seasons**, or any combination — and the
-plugin removes the rest **through Sonarr**, so Sonarr's database stays correct and the
-removed episodes are unmonitored instead of being re-downloaded.
+**Per-series retention for a TV library, driven by Sonarr alone.**
 
-It replaces the hand-maintained shell script this project grew out of: the show list, the
-retention periods, and the schedule all live in the WebGUI, and every deletion is justified
-by real episode metadata rather than a file timestamp.
+Set how much of each show to keep — a number of **days**, **episodes**, **seasons**, or any
+combination — and the rest is removed **through Sonarr**, so its database stays correct and
+what goes is unmonitored rather than downloaded again tonight.
+
+For the shows that never end. A daily talk show accumulates for ever, and nobody wants the
+2019 episodes; you want the last thirty, permanently. That is a standing policy rather than
+a cleanup, which is why this is not driven by watch state and does not need a media server.
+
+```yaml
+services:
+  tv-retention:
+    image: ghcr.io/fatzserver/tv-retention:latest
+    ports: ["8787:8787"]
+    volumes: ["./config:/config"]
+    environment:
+      - TVR_USERNAME=admin
+      - TVR_PASSWORD=something-long
+```
+
+One volume. **No media mount**, no path mapping, no `PUID` juggling over a library: this
+never opens a library file. Sonarr owns the filesystem and deletion is an API call, so a
+whole class of mistake cannot happen here.
+
+### How it differs from the neighbours
+
+Most tools in this space delete what **nobody watched** — Maintainerr, Janitorr, purgeomatic
+and the rest — and most need Plex, Jellyfin, Emby or Tautulli to answer that question.
+Watch state is the wrong signal for a daily show: nobody watches the archive.
+
+Maintainerr in particular builds a Plex collection and acts on what falls into it. This
+sets a retention policy on a series. Both are good; they are answering different questions.
+If what you want is *"keep the newest two seasons of everything tagged Reality"*, and you
+would rather not stand up a media server to say so, this is the one shaped for that.
+
+### Status
+
+Working and in use, but **young**: it has not yet been run in anger against a large library
+by anyone but its author. Test Mode is on by default and a scheduled run reports exactly
+what it would do while changing nothing. Read [Safety](#safety) before you turn it off.
 
 ---
 
@@ -45,24 +78,36 @@ by real episode metadata rather than a file timestamp.
 4. Selected files are deleted through Sonarr's API, and the episodes are unmonitored.
 5. The plan and the outcome are written to a run journal and shown in the UI.
 
-**The plugin touches no filesystem at all.** Sonarr owns it: sizes, air dates, import dates
-and monitoring arrive with the episodes, and deletion is a Sonarr call. There is no path
-mapping to configure and no setting that duplicates something Sonarr already does — its
-recycle bin, its extra-file handling and its empty-folder cleanup all apply as they are.
+**It touches no filesystem at all.** Sonarr owns it: sizes, air dates, import dates and
+monitoring arrive with the episodes, and deletion is a Sonarr call. There is no path mapping
+to configure and no setting that duplicates something Sonarr already does — its recycle bin,
+its extra-file handling and its empty-folder cleanup all apply as they are.
 
 ## Installing
 
-Unraid → **Plugins** → **Install Plugin**, and give it the path to
-[`install/tv-retention.plg`](install/tv-retention.plg). The manifest carries the package inside
-it, so that one file is the whole installer — no repository or internet access is needed.
+`docker compose up -d`, with the file above, then open `http://<host>:8787`.
 
-To install from a local copy, put the `.plg` somewhere on the server (for example
-`/boot/config/plugins/`) and pass that path instead.
+Requirements: Docker, and at least one reachable Sonarr v3 or v4 instance. Nothing else —
+no media server, no Tautulli, no library mount.
 
-The plugin appears at **Tools → TV Retention**. Removing it leaves your settings, run journals
-and history in place, so reinstalling picks up where you left off.
+### Settings
 
-Requirements: Unraid 7.0 or newer, and at least one reachable Sonarr v3/v4 instance.
+| Variable | Default | |
+|---|---|---|
+| `TVR_USERNAME`, `TVR_PASSWORD` | — | Required. The password must be at least 8 characters. |
+| `TVR_AUTH` | — | Set to `none` to run with no login at all. Only sane when nothing untrusted can reach the port — behind a VPN or Tailscale. |
+| `TVR_PORT` | `8787` | |
+| `PUID`, `PGID` | `1000` | Who owns `/config`. On Unraid use `99` and `100`. The container takes ownership on start, so no `chown` is asked of you. |
+| `UMASK` | `022` | |
+| `TZ` | `Etc/UTC` | Decides when "daily at 4am" is. |
+
+**It will not start without a login.** Set the two variables, or set `TVR_AUTH=none` on
+purpose. The alternative — running with the interface locked away — would leave the half
+that deletes running unsupervised while the half that would notice is unreachable, and the
+realistic way to arrive there is a typo in a compose file six months from now.
+
+Authentication guards the interface, never the work. The schedule runs whether or not
+anybody is logged in, the same way Sonarr downloads with nobody watching.
 
 ## Getting around
 
@@ -244,7 +289,7 @@ apply.
 
 ## Finished shows
 
-When Sonarr reports a series as ended, the card says so, once, and an Unraid notification is
+When Sonarr reports a series as ended, the card says so, once, and a notification is
 sent the first time. If nothing remains inside its keep window the rule has nothing further
 to do, and its card offers to remove it.
 
@@ -256,7 +301,7 @@ is what changed. Everything else is arithmetic over episodes it already holds.
 | When | What it costs |
 |---|---|
 | A rule edited, a preset raised, a day passing | **nothing** — the plan is re-decided from the stored episodes |
-| Every minute (the cron tick) | two small queries asking Sonarr what changed; only the series it names are re-read |
+| Every 30 s (the worker loop) | two small queries asking Sonarr what changed; only the series it names are re-read |
 | Every 15 s while the page is open | the same question, plus every plan re-decided locally |
 | Every six hours | Sonarr's series list, to notice series added |
 | Daily | a full read of every series, as the backstop |
@@ -291,7 +336,8 @@ switch it back on and every alert it had returns. That is not the same as muting
 a decision about a *kind* of alert across every series and leaves a blocking alert
 blocking.
 
-Unraid notifications are for something structurally wrong: a series that cannot be found, a
+Notifications are a JSON POST to a webhook you configure, and they fire for something
+structurally wrong: a series that cannot be found, a
 Sonarr that will not answer, deletions with no recycle bin to catch them, a series Sonarr
 has newly taken on, a series that has ended. **Never the retention itself.** Episodes being
 scheduled for deletion and monitoring being brought into line are the job, not the news —
@@ -357,22 +403,34 @@ as soon as it answers, and exactly one is ever queued.
 
 ## Where things are stored
 
+Everything is under `/config`, so a backup is a directory and a move is a copy.
+
+### Coming from the Unraid plugin
+
+This was an Unraid plugin until version 2026.09.09. Settings carry over exactly, API keys
+included — copy the file in and the container upgrades it on first read:
+
+```bash
+mkdir -p ./config
+cp /boot/config/plugins/tv-retention/settings.json ./config/settings.json
+```
+
+Then remove the plugin. The caches are rebuilt on the first sync and are not worth moving.
+
 | Path | Contents |
 |---|---|
-| `/boot/config/plugins/tv-retention/settings.json` | All settings, including API keys. Survives reboots and reinstalls. |
-| `/boot/config/plugins/tv-retention/schedule.cron` | The generated cron entry. |
-| `<state folder>/state.json` | Run history and the last run report. |
-| `<state folder>/journal.jsonl` | Append-only audit trail. |
-| `<state folder>/health.json` | Cached per-series results, alerts, and the change-feed cursor. |
-| `<state folder>/catalogue.json` | Sonarr's series list. |
-| `<state folder>/episodes/<rule>.json` | One rule's episodes, as last read. |
-| `<state folder>/jobs.json` | When each scheduled job last ran. |
-| `<state folder>/tmdb-cache.json` | Cached TMDB air dates. |
+| `/config/settings.json` | All settings, including API keys. |
+| `/config/state/state.json` | Run history and the last run report. |
+| `/config/state/journal.jsonl` | Append-only audit trail. |
+| `/config/state/health.json` | Cached per-series results, alerts, and the change-feed cursor. |
+| `/config/state/catalogue.json` | Sonarr's series list. |
+| `/config/state/episodes/<rule>.json` | One rule's episodes, as last read. |
+| `/config/state/jobs.json` | When each scheduled job last ran. |
+| `/config/state/posters/` | Artwork borrowed from Sonarr, keyed so a changed poster is a new file. |
+| `/config/state/tmdb-cache.json` | Cached TMDB air dates. |
 
-The **app storage folder** is set under **System → Storage**. On a fresh install it defaults to a
-`tv-retention` folder inside the appdata share this server has configured for Docker
-(`DOCKER_APP_CONFIG_PATH` in `docker.cfg`, `/mnt/user/appdata` here), deliberately off the
-flash device. If the array is down it falls back to the flash config folder.
+The state folder can be moved under **System → Storage** if you would rather it sat
+elsewhere; there is rarely a reason.
 
 API keys are stored in `settings.json` and are never sent to the browser; the UI shows a
 mask, and echoing the mask back means "keep the stored key".
@@ -381,28 +439,33 @@ mask, and echoing the mask back means "keep the stored key".
 
 ```
 src/tv-retention/
-  TVRetention.page          Unraid Tools page; loads the interface and the assets
-  include/api.php        Authenticated bridge: CSRF check, then one JSON call to the worker
   include/interface.html Markup for the sidebar shell and its thirteen views
   assets/app.js          UI logic; holds no authority, re-validates nothing itself
-  assets/app.css         Styling, scoped to #tv-retention
+  assets/app.css         Styling
+  assets/icons.css       Ten icons, drawn here rather than borrowed
+  worker/server.py       The page, its assets, the JSON API, the poster proxy, the login
   worker/core.py         Settings validation and the retention decision. Pure.
   worker/store.py        The filesystem: settings, caches, the log, the progress marker
   worker/sonarr.py       Sonarr v3 client and the rule/series matcher
   worker/tmdb.py         Optional air-date lookup with an on-disk cache
   worker/alerts.py       What needs attention, and whether it blocks or notifies
-  worker/schedules.py    When a job is due, including what cron cannot express
-  worker/migrate.py      Settings upgrades, v1 through v7
-  worker/main.py         Sonarr orchestration, the run executor, the tick, the CLI
+  worker/schedules.py    When a job is due
+  worker/migrate.py      Settings upgrades, v1 through v8
+  worker/main.py         Sonarr orchestration, the run executor, the loop, the CLI
   worker/actions.py      The RPC surface, one function per thing the interface can ask for
-  event/*                Array start/stop hooks
 ```
 
-The browser never talks to Sonarr and never sees an API key. `api.php` accepts a POST with a
-valid Unraid CSRF token, passes the JSON payload to `worker/main.py rpc` in a fixed
-environment, and returns the reply. The worker re-validates every field regardless of what
-the page sent, on load as well as on save — a rule written before a field existed must still
-arrive with it.
+**Standard library only.** No framework, no dependencies, nothing to audit beyond the
+interpreter — which is also why the image is small and why `core.py` can be tested against
+fixtures without any of the rest.
+
+One process: the worker loop runs in a thread behind the HTTP server, so the schedule keeps
+its own time whether or not the page is ever opened.
+
+The browser never talks to Sonarr and never sees an API key. `server.py` checks the session
+cookie and a per-session CSRF token, then hands the JSON payload to `actions.dispatch`. The
+worker re-validates every field regardless of what the page sent, on load as well as on
+save — a rule written before a field existed must still arrive with it.
 
 `core.py` performs no network access and writes nothing, which is why re-deciding what a
 rule would do costs nothing at all. `actions.py` imports `main`, never the other way round.
@@ -411,24 +474,24 @@ Both object caches are keyed by the *shape* of what Sonarr's mapping produces, n
 schema number: listing a field in `SERIES_FIELDS` or `EPISODE_FIELDS` is the cache bump, and
 a test fails if the mapping produces a key the list does not name.
 
-`app.css` is scoped to `#tv-retention`, but scoping is not isolation. Unraid's own
-stylesheet reaches every `button`, `select` and `input` on the page through
-`:where(:not(.unapi *))` selectors, which contribute **no specificity** — so any property
-this plugin does not name simply applies. Margins, minimum widths and `width: 100%` on
-selects all arrived that way and are reset explicitly, with tests to keep them reset,
-because losing one produces no error.
+`app.css` carries explicit resets on `button`, `select` and `input` that look redundant now
+and are kept deliberately. They exist because the interface used to be embedded in Unraid's
+WebGUI, whose stylesheet reached every control through `:where()` selectors that contribute
+**no specificity** — so any property this file did not name simply applied, silently. Four
+rounds of spacing work went into finding that. The page is its own now, but a reset that
+states what it wants is worth more than one that inherits and hopes.
 
 ## Development
 
 ```bash
 python3 -m unittest discover -s tests -v   # 388 tests
-python3 tools/build.py                     # writes dist/ and install/tv-retention.plg
+docker build -t tv-retention .             # the image
 ./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
 ```
 
-`tools/check-on-host.sh` stages the source under `/tmp` on the Unraid host and runs the
-suite there. It does not install the plugin, touch `/boot`, read the media library, or
-contact Sonarr.
+`tools/check-on-host.sh` stages the source under `/tmp` on a host with Python and runs the
+suite there — a convenience for developing inside a container that has none. It builds no
+image, reads no media, and contacts no Sonarr.
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) for what has been verified, and
 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) for the checks to run on the target system before

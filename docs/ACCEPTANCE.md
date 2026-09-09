@@ -1,31 +1,38 @@
 # Acceptance checks on the target system
 
-Work through these on FatzServer before turning **Test Mode** off. Each step is either
-read-only or reversible.
+Work through these before turning **Test Mode** off. Each step is either read-only or
+reversible.
 
 Test Mode governs the **scheduler** only: a scheduled run does everything except write. A
 manual run is always live, so section 6 is the first thing here that can delete anything.
 
-## 1. Install
+## 1. Start it
 
-- [ ] Plugins → Install Plugin → path to `install/tv-retention.plg`. Installation reports
-      the SHA256 check passing.
-- [ ] **Tools → TV Retention** loads, shows the version, and shows the **TEST MODE** chip.
+- [ ] `docker compose up -d` with no `TVR_USERNAME`/`TVR_PASSWORD` and no `TVR_AUTH`.
+      Confirm it **exits**, and that the message names both ways forward.
+- [ ] Add the two variables and start again. `http://<host>:8787` shows a login.
+- [ ] A wrong password is refused; the right one lands on the page with the **TEST MODE**
+      chip showing.
+- [ ] `docker logs` carries no traceback and no permission error. Confirm `/config` was
+      taken over without anyone being asked to `chown` anything, and that `PUID=99
+      PGID=100` is honoured if you set it.
+- [ ] Every icon is **visible**, not merely present — the bars/grid toggle, refresh, close,
+      the caret in the scheduled-changes menu. An icon with no glyph behind it renders as
+      an empty, zero-sized element, so the button is there and there is nothing to click.
+- [ ] Stop the container and start it again. Confirm you are logged out (sessions are in
+      memory, deliberately) and that nothing else was lost.
 - [ ] After an upgrade, the page loads the new script *and the new stylesheet* without a
-      manual cache clear. The asset URL carries a hash of both files together — hashing
+      manual cache clear. The asset URL carries a hash of every asset together — hashing
       them separately and truncating took every character from the first, so CSS-only
       releases shipped under the key the browser already held.
-- [ ] The Plugins page row shows the **TV Retention** description and a television icon
-      that opens the page when clicked. Verify the icon is actually **visible**, not merely
-      present: an icon name with no glyph behind it renders as an empty, zero-sized
-      element, so the link is there but there is nothing to click.
-- [ ] The Tools tile shows the same icon. Both come from the same name.
-- [ ] The Name column reads `tv-retention`, which is Unraid's plugin directory identifier,
-      not a label.
-- [ ] `ls /boot/config/plugins/tv-retention/` shows the package; there is no
-      `schedule.cron` yet.
-- [ ] `ls /var/log/plugins/tv-retention.plg` exists. `update_cron` will not honour the
-      plugin's cron file without that marker.
+- [ ] With `TVR_AUTH=none`, confirm it starts, serves without a login, and says so in the
+      log. Then put the password back.
+
+## 1a. Bringing settings over from the plugin
+
+- [ ] `cp /boot/config/plugins/tv-retention/settings.json ./config/settings.json`, start,
+      and confirm every rule, preset and instance is present with its API key intact.
+- [ ] Confirm the settings file on disk now reads `"settings_version": 8`.
 
 ## 2. Sonarr instances
 
@@ -34,7 +41,7 @@ manual run is always live, so section 6 is the first thing here that can delete 
 - [ ] Add `Sonarr-Anime` (port 8990) and test it.
 - [ ] Note whether either Sonarr has a recycle bin configured — the test reports it. If
       not, everything Sonarr deletes is permanent, which is why the alert offers a
-      one-click fix rather than a setting of the plugin's own.
+      one-click fix rather than a setting of its own.
 - [ ] Reload the page: the API keys show as masked, and saving again keeps them working.
 - [ ] Disable an instance and confirm its rules stay in place and stop being processed.
 
@@ -110,8 +117,10 @@ manual run is always live, so section 6 is the first thing here that can delete 
       beside it updates that age, the counts and the plan.
 - [ ] On a series with **no rule**, press refresh and confirm the facts actually change —
       it re-reads the catalogue entry, since there is no rule to check.
-- [ ] Stop Sonarr briefly and run `main.py check`. Confirm one summary notification, the
-      banner at the top of the page, and the affected shows flagged individually.
+- [ ] Stop Sonarr briefly and run
+      `docker exec tv-retention python3 /app/worker/main.py check`. Confirm one
+      notification, the banner at the top of the page, and the affected shows flagged
+      individually.
 - [ ] Switch off a series that has an alert. Confirm its badge, its line in the roll-up and
       its notifications all stop — and that switching it back on brings them back.
 - [ ] Acknowledge a warning and confirm it hides; change what it says and confirm it
@@ -119,18 +128,20 @@ manual run is always live, so section 6 is the first thing here that can delete 
 
 ## 9. Schedule
 
-- [ ] Enable a daily schedule. Confirm `/boot/config/plugins/tv-retention/schedule.cron`
-      exists and `crontab -l` contains the entry.
-- [ ] Wait for one scheduled run (or temporarily set it a few minutes ahead). Confirm it
-      appears in history marked *schedule*, that it reports what it would have done, and
-      that it changed nothing while Test Mode is on.
+- [ ] Enable a daily schedule a few minutes ahead. Confirm the run happens without anyone
+      being logged in — close the browser and check the history afterwards. The worker is
+      the point; authentication guards the interface, never the work.
+- [ ] Confirm it appears in history marked *schedule*, reports what it would have done, and
+      changed nothing while Test Mode is on.
 - [ ] Turn Test Mode off and watch one scheduled run go through for real.
-- [ ] Disable the schedule and confirm the cron file is removed.
+- [ ] Stop the container across a scheduled time, then start it again. Confirm the missed
+      run is caught up rather than skipped.
+- [ ] Set `TZ` and confirm "daily at 4am" means 4am where you are.
 
 ## 10. Restart
 
-- [ ] Reboot, or stop and start the array. Confirm settings and rules survive, and that
-      the cron entry is republished.
+- [ ] `docker compose restart`, and reboot the host. Confirm settings, rules, history and
+      the journal all survive, and that the schedule resumes on its own.
 
 ## 11. Removing a series
 
@@ -139,11 +150,19 @@ manual run is always live, so section 6 is the first thing here that can delete 
 - [ ] Confirm the removal action offered — leave it alone, monitor, unmonitor, or ask
       Sonarr to delete it — is what actually happens.
 - [ ] Confirm a wrong title typed into the confirmation is refused.
-- [ ] Confirm the plugin asks *Sonarr* to delete the series rather than deleting anything
-      itself, so Sonarr's recycle bin and bookkeeping apply.
+- [ ] Confirm it asks *Sonarr* to delete the series rather than deleting anything itself,
+      so Sonarr's recycle bin and bookkeeping apply.
 
-## 12. Uninstall
+## 12. Notifications
 
-- [ ] Remove the plugin. Confirm the cron entry is gone, and that `settings.json` and the
-      journal remain.
-- [ ] Reinstall and confirm the rules come back exactly as they were.
+- [ ] Set `notifications.webhook_url` to something that will show you the body, and cause a
+      problem — stop a Sonarr instance. Confirm one JSON POST arrives.
+- [ ] Leave it broken and let another sweep run. Confirm **no second notification**: a
+      problem is announced once, when it appears, and again only if what it says changes.
+- [ ] Switch off a series that has an alert. Confirm it stops notifying entirely.
+- [ ] Confirm an unreachable webhook is logged and does not stop the run.
+
+## 13. Remove it
+
+- [ ] `docker compose down`. Confirm `./config` still holds the settings and the journal.
+- [ ] Bring it back up and confirm everything is where it was.

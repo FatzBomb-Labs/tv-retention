@@ -5,10 +5,14 @@ through Sonarr. See [README.md](README.md) for architecture and usage.
 
 ## Validation
 
-There is no Python or PHP in the Webtop development container. Run
-`./tools/check-on-host.sh`, which stages the source under `/tmp` on FatzServer and runs
-`python3 -m unittest discover -s tests`, `python3 tools/build.py`, and the PHP/JS lints
-there. The suite is 388 tests with no expected failures.
+There is no Python in the Webtop development container. Run `./tools/check-on-host.sh`,
+which stages the source under `/tmp` on FatzServer, runs `python3 -m unittest discover -s
+tests`, imports every worker module, and syntax-checks `app.js`. The suite is 386 tests
+with no expected failures.
+
+To see it actually running, build the image on the host and point it at a *copy* of the
+settings with the schedule forced off. Never the original, and never a container that could
+act: the read-only discipline for live checks applies to the container too.
 
 ## Layout
 
@@ -16,7 +20,12 @@ there. The suite is 388 tests with no expected failures.
 why re-deciding a rule costs nothing. `worker/store.py` is the filesystem and nothing else.
 `worker/actions.py` is the RPC surface, one function per thing the interface can ask for,
 and it imports `main` rather than the other way round. `worker/main.py` is what talks to
-Sonarr and decides things, plus the tick and the CLI.
+Sonarr and decides things, plus the loop and the CLI. `worker/server.py` is the front door
+— the page, its assets, the JSON API, the poster proxy and the login — and it is the only
+module that knows HTTP exists.
+
+Standard library only, everywhere. A dependency would have to earn its place against the
+fact that there is currently nothing to audit but the interpreter.
 [docs/VALIDATION.md](docs/VALIDATION.md) records the last validation.
 
 ## Project constraints
@@ -114,18 +123,16 @@ had replaced.
 behind the decisions that shaped it. Delete from it as things land, so it always describes
 what is left.
 
-**It is becoming a container, and the plugin is being retired.** Decided: this is an
-application rather than an OS or GUI extension, it is meant to be useful to people who are
-not on Unraid, and the plugin borrows PHP and Python from a host that can change either
-without warning. [docs/CONTAINER.md](docs/CONTAINER.md) holds the design and the order of
-work; [docs/PLAN.md](docs/PLAN.md) holds why, including what the survey of the neighbouring
-tools actually found.
+**It is a container.** The plugin is gone: no `.plg`, no `.page`, no PHP, no cron entry, no
+Unraid paths. [docs/CONTAINER.md](docs/CONTAINER.md) records what the port was and
+[docs/PLAN.md](docs/PLAN.md) records why, including what the survey of the neighbouring
+tools found.
 
 Licensed **GPL-3.0**, matching Sonarr.
 
-Until the port lands, do not add anything Unraid-specific. What is there is five constants
-in `store.py` and four functions in `main.py`, and the port is tractable precisely because
-that list is short.
+Nothing host-specific goes back in. The one concession is `PUID`/`PGID`/`UMASK`, which are
+container conventions rather than Unraid ones, and the container applies them to its own
+volume rather than asking anybody to run `chown`.
 
 ## Deployment
 

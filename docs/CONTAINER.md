@@ -1,7 +1,17 @@
 # The container port
 
-The decision is recorded in [PLAN.md](PLAN.md). This is what it takes, what carries over
-untouched, and what genuinely has to be built.
+**Done.** Landed over commits `15dfca1` (cut Unraid out) and `fbadb3b` (serve it). Kept as
+the record of what the port was and why each piece went where it did — the decision behind
+it is in [PLAN.md](PLAN.md).
+
+What it cost, against the estimate below: the Unraid surface was exactly as small as it
+looked, `core.py` never moved, and the suite went 388 → 372 → 386 as package tests were
+replaced by server tests. Two things were not in the plan. Ten icons had to be drawn,
+because the interface borrowed the WebGUI's Font Awesome and that is neither ours to ship
+nor present anywhere else. And the container had to take ownership of its own volume: a
+bind mount arrives owned by root, and telling people to `chown` a directory before the
+thing will start is the exact friction that sent this project looking at its neighbours in
+the first place.
 
 **The plugin is not kept alongside.** It borrows PHP and Python from the host, so an Unraid
 release can break it at any time, and polishing something with that dependency on the way to
