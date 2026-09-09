@@ -1,13 +1,17 @@
 # TV Retention
 
-An Unraid Tools plugin that applies per-show retention to a TV library and deletes
-through Sonarr. See [README.md](README.md) for architecture and usage.
+A container that applies per-show retention to a TV library and deletes through Sonarr.
+See [README.md](README.md) for architecture and usage.
+
+Much of the prose below still says "the plugin". It means the application: every
+constraint held before the container port and holds after it, and rewriting the word
+throughout would churn the file that records why they exist.
 
 ## Validation
 
 There is no Python in the Webtop development container. Run `./tools/check-on-host.sh`,
 which stages the source under `/tmp` on FatzServer, runs `python3 -m unittest discover -s
-tests`, imports every worker module, and syntax-checks `app.js`. The suite is 386 tests
+tests`, imports every worker module, and syntax-checks `app.js`. The suite is 441 tests
 with no expected failures.
 
 To see it actually running, build the image on the host and point it at a *copy* of the
@@ -139,14 +143,12 @@ volume rather than asking anybody to run `chown`.
 
 ## Deployment
 
-`install/tv-retention.plg` is the self-contained installer. Work through
+`docker compose up -d --build`, one `/config` volume, no media mounts. Work through
 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) on the target system before turning Test Mode off.
 
-It is installed on FatzServer, so a rename is not free: the slug appears in
-`/boot/config/plugins/<slug>/`, the state folder, `/usr/local/emhttp/plugins/<slug>/`, the
-package name, and the marker in `/var/log/plugins/` that `update_cron` requires before it
-will honour a plugin's cron file at all.
+`install/` and its `.plg` are gone. This section described them until after they were
+deleted, three paragraphs below the note saying the plugin was scrapped — which is the
+argument for deleting from a document rather than appending to it.
 
-Development changes are deployed by copying `src/tv-retention/` over
-`/usr/local/emhttp/plugins/tv-retention/`. That is enough to test, but only reinstalling
-the `.plg` makes it survive — the package is what an Unraid upgrade restores from.
+To watch it run, build the image on the host and point it at a **copy** of the settings
+with the schedule forced off. Never the original, and never a container that could act.

@@ -117,6 +117,17 @@ What is left:
    refuse `keep_days` on it, checked when the editor opens and again on save, and say so
    rather than silently processing nothing. Then TVMaze and AniList as providers behind
    Sonarr and TMDB, each switchable.
+
+   **Build it synchronously.** Sonarr fills `airDateUtc` from TVDB for anything with a
+   broadcast slot, so on nearly every series the check is a scan over episodes already in
+   the cache: no network, no wait, and nothing on screen. That removes the reason for a
+   background reconcile queue, a progress state, or any asynchronous shape at all. Only a
+   series with an actual gap reaches a provider, and only then does anyone see anything.
+
+   The one population that genuinely lacks dates is **season 0** — specials are often
+   undated in TVDB — and specials are excluded by default. So the realistic trigger is
+   somebody who has deliberately switched them on, which is a good place for the invariant
+   to speak up rather than a nuisance.
 5. **Persistence, with an intent ledger** — what was decided, what was written, and what
    is still owed, so a run interrupted mid-write can be finished rather than repeated.
 
