@@ -114,6 +114,13 @@ had replaced.
 behind the decisions that shaped it. Delete from it as things land, so it always describes
 what is left.
 
+**It is becoming a container.** Decided, not yet built: this is an application rather than
+an OS or GUI extension, it is meant to be useful to people who are not on Unraid, and it
+runs as root with authority to delete media. [docs/CONTAINER.md](docs/CONTAINER.md) holds
+the design. Until then the plugin is the product and stays working — but keep the Unraid
+surface where it is, concentrated in five constants in `store.py` and four functions in
+`main.py`, and do not spread it.
+
 ## Deployment
 
 `install/tv-retention.plg` is the self-contained installer. Work through

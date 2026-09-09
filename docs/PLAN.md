@@ -10,6 +10,42 @@ follows is what remains.
 
 ---
 
+## Decided: it becomes a container
+
+**Superseding "it stays a plugin".** That decision was argued on memory, the Unraid
+notification path and the WebGUI's authentication, and it was correct for a tool used by
+one person on one server. Two things changed it.
+
+**It is an application, not an OS or GUI extension.** Unraid's guidance draws that line by
+what a thing *extends*, not by whether it has a web page. This one extends nothing: no
+driver, no array behaviour, no system config, no WebGUI internals. Its subject is a media
+library and another container's HTTP API. Strip the page away and what is left is a
+scheduled job that talks to Sonarr over the network. It also runs as root, unsandboxed,
+with authority to delete media — which is precisely the case the guidance protects against
+once other people are running it.
+
+**Both advantages only exist on Unraid.** If the audience is "people who run Sonarr", most
+of them are not on Unraid, and native notifications reach none of them. A generic outbound
+notification reaches everyone, Unraid users included. What read as a cost is a reason to
+go.
+
+**The live connection is the bonus, not the reason** — and it is available more cheaply
+than it looks. What the interface lacks is not SignalR, it is a process that stays
+alive: a resident loop polling the change feed every ten seconds is already
+transformative next to a daily sync and a refresh button, and costs nothing new. SignalR
+is an optimisation on top, and would be this project's first dependency outside the
+standard library. Do not reach for it in v1.
+
+**What the port is not.** Not a rewrite, and not a conversion. The boundary is already in
+the right place — of 8,594 lines, the Unraid-specific surface is `api.php`, the `.page`,
+two event scripts, five constants in `store.py`, and four functions in `main.py`. Build the
+container alongside the working plugin; retire the plugin once the container is proven.
+There are 3,022 series and real deletions pending on something that works, and that is not
+a thing to hold hostage to a migration.
+
+[CONTAINER.md](CONTAINER.md) holds the design, what genuinely has to be built, and the one
+question — authentication — that is still open.
+
 ## Still to build
 
 **A smaller schedule.** Shows air at most once a day, and the interface offers hourly,
@@ -58,21 +94,11 @@ written down here.
 
 ## Decisions worth keeping
 
-**It stays a plugin.** Docker buys one thing the plugin cannot have: a process that stays
-alive, and so a live socket to Sonarr. It does **not** remove scheduling — a container
-still decides "run once a day", as a sleep loop rather than a cron line — and it costs the
-Unraid notification path, the WebGUI's authentication, and about 35 MiB held permanently
-against the plugin's zero at rest. Measured here: peak 33.7 MiB for a tenth of a second,
-55 ms per request, ~3 minutes of one core per day; the lightest container on the same box
-idles at 17.7 MiB.
-
-The port would be small if that ever changes: `core.py` is pure, `store.py` is the only
-filesystem coupling, and the Unraid-specific surface is three things — the notify script,
-cron, and the `.page`.
-
-**No live connection.** No SignalR, no held sockets, no daemon. Sonarr is read once a day,
-on demand from the button, and immediately before a run. Everything the interface shows is
-answered from that reading, and its age is stated rather than hidden.
+**No live connection — while it is a plugin.** No SignalR, no held sockets, no daemon.
+Sonarr is read once a day, on demand from the button, and immediately before a run.
+Everything the interface shows is answered from that reading, and its age is stated rather
+than hidden. This was never a preference: a plugin has no process that stays alive, and
+every mechanism above exists to work around that. See the decision below.
 
 **A series that is switched off raises nothing.** Not a display filter — one filter,
 `alerts.managed_only`, applied both where the interface reads alerts and where the health

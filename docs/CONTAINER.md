@@ -1,0 +1,174 @@
+# The container port
+
+The decision is recorded in [PLAN.md](PLAN.md). This is what it would actually take, what
+carries over untouched, and what genuinely has to be built.
+
+Nothing here is built yet. The plugin keeps working until the container is proven.
+
+---
+
+## What carries over
+
+Of 8,594 lines, most of the plugin is not Unraid-specific and does not move.
+
+| File | Lines | Change |
+|---|---|---|
+| `core.py` | 945 | **none** — pure, and the part that decides deletions |
+| `sonarr.py` | 306 | none |
+| `migrate.py` | 238 | none |
+| `schedules.py` | 209 | none, though most of it stops being reachable (see below) |
+| `alerts.py` | 200 | none |
+| `tmdb.py` | 112 | none |
+| `actions.py` | 727 | `dispatch(request)` stays; it stops arriving over stdin |
+| `store.py` | 380 | paths only — five constants and the appdata lookup |
+| `main.py` | 1,388 | four functions go, one loop arrives |
+| `app.js` / `app.css` / `interface.html` | 3,965 | served as static files |
+| `api.php` | 124 | **deleted** |
+| `TVRetention.page`, `event/*` | ~30 | **deleted** |
+
+`core.py` not moving is the point. The retention decision is the dangerous part, it is
+already pure, and it must not travel in the same change as everything else.
+
+### The Unraid surface, in full
+
+Everything that knows it is on Unraid:
+
+```
+store.py    CONFIG  CRON  RUNTIME  UPDATE_CRON  NOTIFY   + state_dir from docker.cfg
+main.py     array_ready()  require_ready()  notify()  write_cron()
+include/    api.php, TVRetention.page
+event/      disks_mounted, stopping_svcs
+```
+
+Five constants, four functions, four files. `array_ready` and `require_ready` disappear
+outright — a container has no array to wait for, and no `/mnt/user` to check, because it
+mounts no media at all.
+
+---
+
+## Shape
+
+One process, one image, no media mounts.
+
+```
+tv-retention
+  /config          the only volume: settings.json, caches, journal, posters
+  :8787            the interface and its API
+  SONARR_URL etc.  optional; the interface configures instances as it does now
+```
+
+**No media mounts is the standout property.** The plugin touches no filesystem, so the
+container needs no library access, no path mapping, no `PUID`/`PGID` juggling over media,
+and cannot damage a library even if it is wrong. Very few tools in this space can say that.
+It should be the first line of the README.
+
+The HTTP server is standard library — `ThreadingHTTPServer` over `actions.dispatch`, which
+already takes a decoded request and returns a plain dict. That is roughly eighty lines,
+replacing 124 lines of PHP that exist only to bridge into emhttp.
+
+### One thing gets easier
+
+Every `:where()` reset in `app.css` — the margins, the minimum widths, `width: 100%` on
+selects — exists because the page is embedded in Unraid's stylesheet. So does the
+`#tv-retention` scoping, and the test guarding all of it. In a container the page is ours
+and that entire hazard class disappears.
+
+---
+
+## What has to be built
+
+Three things. Everything else is moving code that already works.
+
+### 1. Authentication — the open question
+
+This is the design work, and it is not optional. This software exists to delete media, and
+most containers in this space ship with no authentication at all because they assume a
+trusted LAN. That assumption is doing more work than it should for a tool with delete
+authority. Today the WebGUI supplies both authentication and a CSRF token for free; both
+have to be replaced.
+
+| Option | For | Against |
+|---|---|---|
+| **None, bind to LAN** | what the neighbours do | a tool that deletes media should not be the one that trusts the network |
+| **Password + session cookie** | stdlib (`hashlib.scrypt`), no dependency, forced on first run | a password to store and reset; needs CSRF handling of its own |
+| **Trust a proxy header** | free SSO for anyone already running Authelia or authentik | catastrophic if the container is reachable without the proxy |
+| **API key only** | trivial | no session, so the key ends up in a bookmark |
+
+**Recommendation:** a password with a session cookie as the floor, set on first run and not
+disableable, plus proxy-header trust as an explicit opt-in for people who already have SSO
+and know what they are turning on. `SameSite=Strict` plus a per-session token for CSRF.
+
+**This is the decision to make before anything is written**, because it shapes the request
+path every action goes through.
+
+### 2. Notifications
+
+The primitive becomes an outbound webhook: a JSON POST on the events the plugin already
+names, with the same "once per problem, keyed" rule `announce_alerts` enforces now. That
+reaches every user rather than only Unraid's.
+
+Unraid users keep what they have through an optional command target, invoking a
+bind-mounted `notify`. Documented as host coupling, opt-in, and never the default —
+the point of the move is not to reintroduce it as a requirement.
+
+### 3. Resident loop, and later a live connection
+
+`schedules.py` stays but most of it stops being reachable. A container decides "run once a
+day" with a sleep loop, and the two things that justified the tick — catching up a run
+missed while the server was off, and holding one until Sonarr answers — are now trivially
+true rather than carefully arranged. The cron file, `update_cron`, and the `/var/log/plugins`
+marker all go.
+
+**v1: poll the change feed every ten seconds.** The mechanism already exists — it is what
+the minute tick calls — and running it from a resident process is the whole of what
+"live" means to anyone using this. Two small queries, no dependency, no new failure mode.
+
+**v2, only if v1 proves insufficient:** Sonarr's SignalR endpoint. It needs a websocket
+client, which would be this project's first dependency outside the standard library. In a
+container that is acceptable — the image is ours — but it should be a deliberate second
+step with evidence behind it, not part of the port.
+
+---
+
+## Migration
+
+Settings are already at v7 with a migration chain behind them, and the container reads the
+same document: point it at the plugin's `settings.json` once, let `migrate` run, and write
+the result into `/config`. The state folder is already on appdata. Nothing needs
+re-entering, including API keys.
+
+The one thing that does not carry: **Test Mode governs the scheduler**, and the scheduler
+is changing shape. The invariant survives — a scheduled run does everything except write —
+but the wording in AGENTS.md refers to a cron-driven design and needs revisiting when the
+loop replaces it.
+
+---
+
+## What is lost
+
+Said plainly, so it is not discovered later:
+
+- **The WebGUI's authentication**, replaced by something we now own and must get right.
+- **Native Unraid notifications** as the default path.
+- **Zero memory at rest.** Measured: about 35 MiB held permanently against the plugin's
+  nothing. The lightest container on this server idles at 17.7 MiB.
+- **The Tools menu entry**, and with it the fact that it is already in front of you.
+
+None of these outweigh running as root on other people's servers with authority to delete
+their media. All of them are worth stating before the work starts.
+
+---
+
+## Sequencing
+
+1. **Decide authentication.** Nothing else can be written around an undecided request path.
+2. **Extract the Unraid surface behind an interface** — notify, schedule, ready-check — in
+   the plugin, with the plugin still working. Nothing else changes and the tests still pass.
+3. **Build the HTTP server and the image** against that interface. Two front ends, one
+   worker, both live.
+4. **Prove it** on a copy of the real settings, read-only, against the real Sonarr — the
+   same discipline `docs/VALIDATION.md` already records.
+5. **Retire the plugin** once a container has taken a live deletion here.
+
+Step 2 is the one that makes the rest safe: it is a refactor with full test coverage on
+both sides, not a port. Everything after it is additive.
