@@ -611,6 +611,28 @@ class Interface(unittest.TestCase):
             self.assertIn(identifier, collect, f'{identifier} is on Automation but never saved')
             self.assertIn(identifier, render, f'{identifier} is on Automation but never filled in')
 
+    def test_the_picker_names_every_reason_an_episode_can_be_excluded(self):
+        """A fourth reason added to core would be shown as a pattern that has no text.
+
+        The picker splits on manual versus not, then on season versus pattern, and the
+        second split has no default. Adding a reason server-side and forgetting the
+        interface is silent: the episode is greyed out, and the line saying why is blank.
+        """
+        import core
+        self.assertEqual(sorted(core.EXCLUSION_REASONS), ['manual', 'pattern', 'season'])
+        picker = self.js.split('function exclusionTree(')[1].split('\n  function ')[0]
+        for reason in core.EXCLUSION_REASONS:
+            self.assertIn(f"'{reason}'", picker, f'the picker never mentions {reason}')
+
+    def test_excluding_and_monitoring_do_not_share_a_tree(self):
+        """A tick means "never touch this" in one and "Sonarr should have this" in the
+        other. The day they share a code path, one of them is wrong."""
+        self.assertIn('function exclusionTree(', self.js)
+        self.assertIn('function monitorTree(', self.js)
+        picker = self.js.split('function exclusionTree(')[1].split('\n  function ')[0]
+        self.assertNotIn('monitorTree(', picker)
+        self.assertNotIn('monitored', picker.split('picked:')[1])
+
     def test_the_unsaved_mark_reaches_every_view_that_can_save(self):
         """It was bound to views whose id began "tvr-view-settings".
 

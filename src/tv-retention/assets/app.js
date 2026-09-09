@@ -1720,6 +1720,107 @@
   // Seasons and episodes with a checkbox each, checked where Sonarr monitors them now.
   // The series and season boxes are three-state, because "some of this" is a real answer
   // and a box that can only say yes or no would have to lie about it.
+  // Excluding is not monitoring, so this is its own tree rather than a mode of the other
+  // one. A tick here means "never touch this", a tick there means "Sonarr should have
+  // this", and the day those two share a code path is the day one of them is wrong.
+  //
+  // A season's own box means the whole season, including episodes that do not exist yet —
+  // which is the only thing ticking every episode individually cannot say, and the reason
+  // the stored list has an entry shaped that way.
+  function exclusionTree(seasons, current) {
+    const node = el('div', { className: 'tvr-tree' });
+    const wholeSeasons = new Set((current || [])
+      .filter((entry) => entry.episode === null || entry.episode === undefined)
+      .map((entry) => entry.season));
+    const picked = new Set((current || [])
+      .filter((entry) => entry.episode !== null && entry.episode !== undefined)
+      .map((entry) => `${entry.season}:${entry.episode}`));
+    const seasonRows = [];
+
+    (seasons || []).forEach((season) => {
+      const rows = season.episodes || [];
+      if (!rows.length) return;
+      // An episode excluded by Automation is shown and not offered. The rule that put it
+      // there is global, so unticking it here would be an override with nowhere to live —
+      // and saying that out loud is more use than a box that springs back.
+      const auto = rows.filter((episode) => episode.excluded && episode.excluded !== 'manual');
+      const locked = auto.length === rows.length;
+      const box = el('input', { type: 'checkbox', className: 'tvr-pick',
+                                checked: wholeSeasons.has(season.season), disabled: locked });
+      const count = el('span', { className: 'tvr-tree-count' });
+      const caret = el('button', { type: 'button', className: 'tvr-tree-caret' },
+                       [el('i', { className: 'fa fa-caret-right' })]);
+      const list = el('div', { className: 'tvr-tree-episodes', hidden: true });
+      caret.addEventListener('click', (event) => {
+        event.preventDefault();
+        list.hidden = !list.hidden;
+        caret.firstChild.className = `fa fa-caret-${list.hidden ? 'right' : 'down'}`;
+      });
+      const header = el('label', { className: 'tvr-tree-row tvr-tree-season',
+                                   title: locked ? 'Every episode of this season is excluded by Automation'
+                                                 : 'Exclude the whole season, including episodes not yet aired' }, [
+        box, el('span', { textContent: season.season === 0 ? 'Specials' : `Season ${season.season}` }), count,
+      ]);
+      const ticks = [];
+      rows.forEach((episode) => {
+        const isAuto = episode.excluded && episode.excluded !== 'manual';
+        const tick = el('input', { type: 'checkbox', className: 'tvr-pick',
+                                   checked: isAuto || picked.has(`${episode.season}:${episode.episode}`),
+                                   disabled: isAuto });
+        // Named, not inferred. "Anything that is not a season is a pattern" renders a
+        // reason nobody taught this about as `matches “undefined”`, which is worse than
+        // saying less.
+        const why = !isAuto ? ''
+          : (episode.excluded === 'season' ? 'excluded season'
+             : (episode.excluded === 'pattern' ? `matches “${episode.excluded_by}”`
+                : 'excluded by Automation'));
+        list.append(el('label', { className: `tvr-tree-row tvr-tree-episode${isAuto ? ' tvr-tree-auto' : ''}` }, [
+          tick,
+          el('span', { textContent: `E${String(episode.episode).padStart(2, '0')} · ${episode.title || ''}` }),
+          el('span', { className: 'tvr-tree-note tvr-tree-why', textContent: why }),
+        ]));
+        if (!isAuto) ticks.push({ tick, episode });
+        tick.addEventListener('change', refresh);
+      });
+      box.addEventListener('change', () => {
+        ticks.forEach((entry) => { entry.tick.disabled = box.checked;
+                                   if (box.checked) entry.tick.checked = true; });
+        refresh();
+      });
+      ticks.forEach((entry) => { entry.tick.disabled = box.checked; });
+      seasonRows.push({ season: season.season, box, ticks, count, total: rows.length, auto: auto.length });
+      node.append(el('div', { className: 'tvr-tree-season-wrap' },
+                     [el('div', { className: 'tvr-tree-head' }, [caret, header]), list]));
+    });
+
+    function refresh() {
+      seasonRows.forEach((row) => {
+        const on = row.box.checked ? row.total
+          : row.auto + row.ticks.filter((entry) => entry.tick.checked).length;
+        row.count.textContent = `${on}/${row.total} excluded`;
+      });
+    }
+    refresh();
+
+    return {
+      node,
+      empty: !seasonRows.length,
+      // Only the hand-picked half. What Automation excludes is not stored per series, so
+      // reading the ticked boxes back wholesale would bake a global rule into this one
+      // series and leave it there after the rule changed.
+      picked: () => {
+        const found = [];
+        seasonRows.forEach((row) => {
+          if (row.box.checked) { found.push({ season: row.season, episode: null }); return; }
+          row.ticks.forEach((entry) => {
+            if (entry.tick.checked) found.push({ season: row.season, episode: entry.episode.episode });
+          });
+        });
+        return found;
+      },
+    };
+  }
+
   function monitorTree(seasons, options) {
     const only = (options || {}).only;                // a filter over which episodes show
     const state = new Map();                          // episode id -> wanted, as displayed
@@ -2104,8 +2205,7 @@
       // Inheriting says what it will inherit. "Use the global setting" made you go and
       // look; naming the value means the row already answers the question.
       const globalSpecials = (settings.retention || {}).include_specials ? 'Include specials' : 'Exclude specials';
-      const globalMonitoring = ((settings.retention || {}).monitoring || 'unmonitor-only') === 'full-sync'
-        ? 'Full sync' : 'Unmonitor only';
+      const globalMonitoring = MONITOR_NAMES[(settings.retention || {}).monitoring || 'unmonitor-only'];
       const specials = options(el('select'), [['', `[Default] ${globalSpecials}`], ['no', 'Exclude specials'],
                                               ['yes', 'Include specials']],
         rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : ''));
@@ -2158,6 +2258,80 @@
         el('div', { className: 'tvr-once-title', textContent: 'On save' }),
         unmonitorCount,
       ]);
+
+      // Everything being done to this series that nobody asked for on this screen. The
+      // monitoring mode and the specials setting have controls below, and the exclusions
+      // come from Automation and from this series' own list — which is exactly why they
+      // are worth stating together. "Why is this episode never deleted" should be
+      // answerable here rather than by opening another page and matching in your head.
+      const autoLines = el('div', { className: 'tvr-auto-lines' });
+      const autoEdit = el('button', { type: 'button', className: 'tvr-action tvr-small',
+                                      textContent: 'Edit…' });
+      const autoRow = el('div', { className: 'tvr-once', hidden: true }, [
+        el('div', { className: 'tvr-once-title' },
+           [text('Automation'), el('span', { className: 'tvr-spacer' }), autoEdit]),
+        autoLines,
+      ]);
+      // Kept here rather than read back off `rule` each time, so the pane shows what was
+      // just saved without waiting for the settings to come round again.
+      let manualExclusions = (rule.exclusions || []).slice();
+      const sayAutomation = (data) => {
+        if (!existing) return;
+        autoRow.hidden = false;
+        const found = (data && data.exclusions) || { seasons: [], patterns: [], manual: 0, total: 0 };
+        const line = (className, label) => el('div', { className: `tvr-auto-line ${className}`,
+                                                       textContent: label });
+        const lines = [
+          line('tvr-auto-plain', `Monitoring: ${MONITOR_NAMES[data.monitoring] || data.monitoring}`
+            + (data.monitoring_default ? ' — from Automation' : ' — set on this series')),
+          line('tvr-auto-plain', `Specials: ${data.specials ? 'included' : 'excluded'}`
+            + (data.specials_default ? ' — from Automation' : ' — set on this series')),
+        ];
+        found.seasons.forEach((entry) => lines.push(line('tvr-auto-rule',
+          `${entry.season === 0 ? 'Specials' : `Season ${entry.season}`} excluded — `
+          + `${plural(entry.episodes, 'episode')}, from Automation`)));
+        found.patterns.forEach((entry) => lines.push(line('tvr-auto-rule',
+          `Matches “${entry.pattern}” — ${plural(entry.episodes, 'episode')}, from Automation`)));
+        if (found.manual) lines.push(line('tvr-auto-manual',
+          `${plural(found.manual, 'episode')} excluded on this series`));
+        if (!found.total) lines.push(line('tvr-auto-plain', 'Nothing is excluded from this series'));
+        autoLines.replaceChildren(...lines);
+      };
+      const loadAutomation = () => {
+        if (!existing) return;
+        guarded('', async () => sayAutomation(await api('exclusions', { rule_id: rule.id }, '', true)));
+      };
+      // The same episode list the monitoring tree reads, so the picker and the pane agree
+      // about which episodes exist and which are already spoken for.
+      autoEdit.addEventListener('click', () => guarded('', async () => {
+        const data = await api('episodes', {
+          rule_id: rule.id, instance_id: series.instance_id, series_id: series.series_id,
+          draft: Object.assign({}, draftScope(), { include_specials: specials.value }),
+        }, 'Reading episodes…', true);
+        const tree = exclusionTree(data.seasons, manualExclusions);
+        dialog(`Exclusions — ${title}`, (box) => {
+          box.append(el('p', { textContent:
+            'An excluded episode is never deleted and never unmonitored, whatever this '
+            + 'series’ rule says. Nothing is restored or removed by saving: an exclusion '
+            + 'decides what a run may touch, and a run is still the only thing that acts.' }));
+          box.append(el('p', { className: 'tvr-lede', textContent:
+            'Greyed episodes are excluded by Automation, which applies to every series and '
+            + 'changes there. A season’s own box excludes the whole season, including '
+            + 'episodes that have not aired yet.' }));
+          box.append(tree.empty
+            ? el('p', { className: 'tvr-empty', textContent: 'Sonarr has no episodes for this series.' })
+            : el('div', { className: 'tvr-tree-box' }, [tree.node]));
+          return tree;
+        }, async (picked) => {
+          const target = (settings.rules || []).find((other) => other.id === rule.id);
+          if (!target) return;
+          manualExclusions = picked.picked();
+          target.exclusions = rule.exclusions = manualExclusions;
+          await saveSettings('Exclusions saved.');
+          loadAutomation();
+          refreshCounts();
+        });
+      }));
 
       // Counted by the worker from the episodes it already holds, and re-counted when the
       // window moves. Debounced because typing a keep value changes it on every keystroke.
@@ -2213,7 +2387,7 @@
         input.addEventListener('change', () => { updateScopeRow(); refreshCounts(); });
         input.addEventListener('input', refreshCounts);
       });
-      setTimeout(() => { updateScopeRow(); refreshCounts(); }, 0);
+      setTimeout(() => { updateScopeRow(); refreshCounts(); loadAutomation(); }, 0);
 
       top.append(identity);
       // The banner names what this form does, under the series it does it to. Enabling a
@@ -2232,7 +2406,7 @@
         conditions.node,
         field('Season 0 / specials', specials),
         field('Monitoring', monitorMode, 'Unmonitor only never asks Sonarr to fetch anything.'),
-        scopeRow, unmonitorNote);
+        autoRow, scopeRow, unmonitorNote);
       const formState = () => JSON.stringify({ profile_id: presetSelect.value,
                                         keep_days: conditions.days.value,
                                         keep_episodes: conditions.episodes.value,
@@ -2447,6 +2621,10 @@
       check();
     }
   }
+
+  // Said in three places, and it read as two different settings the first time they
+  // disagreed about capitalisation.
+  const MONITOR_NAMES = { 'unmonitor-only': 'Unmonitor only', 'full-sync': 'Full sync' };
 
   // A rule's keep window, as the one-time pass needs to remember it.
   function scopeOf(rule) {

@@ -11,7 +11,7 @@ throughout would churn the file that records why they exist.
 
 There is no Python in the Webtop development container. Run `./tools/check-on-host.sh`,
 which stages the source under `/tmp` on FatzServer, runs `python3 -m unittest discover -s
-tests`, imports every worker module, and syntax-checks `app.js`. The suite is 441 tests
+tests`, imports every worker module, and syntax-checks `app.js`. The suite is 450 tests
 with no expected failures.
 
 To see it actually running, build the image on the host and point it at a *copy* of the
@@ -66,9 +66,30 @@ fact that there is currently nothing to audit but the interpreter.
 - The Run button may only be hidden on a complete, current plan. A stale or partial
   reading must never be presented as "nothing to do".
 - Media files Sonarr does not know about are reported, never deleted.
+- An exclusion outranks every rule, including the series' own. It is decided before
+  anything else and it is the one answer never weighed against another, which is what
+  makes it worth having: a keep window is a policy, and an exclusion is an exception to
+  every policy at once.
+- One pass decides exclusions, and both readings come out of it. `excluded_causes` says
+  *what* excluded each episode, `excluded_episodes` is that with the detail dropped, and
+  `exclusion_summary` is that counted. Answering "is this excluded" and "what excluded it"
+  in two places is how a pane names a pattern that caught nothing, or misses one that did.
+- A series' exclusion list is stored by season and episode *number*, never by Sonarr's
+  episode id: ids do not survive a series being removed and added back, and outliving
+  ordinary events is the whole point of the list. An entry with no episode number is the
+  whole season, including episodes that have not aired — which is the only thing ticking
+  every episode individually cannot say.
+- The per-series picker offers the hand-picked half and no more. What Automation excludes
+  is global and is not stored per series, so a box that let one series untick a global rule
+  would be an override with nowhere to live. Automatic exclusions are shown, explained,
+  and disabled.
 - `worker/core.py` stays free of network access and deletions so the retention logic can
   be tested against fixtures.
 - Test Mode defaults to on, and every new install starts with no retention schedule.
+- Specials are decided by `retention.include_specials` and its per-series override, and by
+  nothing else. There is deliberately no automatic exclusion for season 0: it would be the
+  same question asked worse, and two settings for one decision is how a rule ends up
+  meaning different things depending on which page you last visited.
 - A cached reading is always shown with its age; nothing cached may be presented as live.
 - Settings are validated on load, not only on save: a rule written before a field existed
   must still arrive with it, or the interface has nowhere to put the value.

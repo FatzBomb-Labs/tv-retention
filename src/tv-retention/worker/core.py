@@ -453,9 +453,22 @@ def excluded_episodes(episodes, rule, settings) -> dict:
     with the answer so the interface can say which is which — red for a rule that put it
     there, orange for a person — and so the journal can say why something was skipped.
     """
+    return {key: reason for key, (reason, _) in excluded_causes(episodes, rule, settings).items()}
+
+
+def excluded_causes(episodes, rule, settings) -> dict:
+    """The same answer, carrying *which* season or *which* phrase did it.
+
+    One pass decides both, so the list the series pane shows and the list a run acts on
+    cannot disagree: `excluded_episodes` is this with the detail dropped, and
+    `exclusion_summary` is this counted. Answering the two questions separately is how a
+    pane ends up naming a pattern that excluded nothing.
+    """
     automation = settings.get('automation') or DEFAULTS['automation']
     seasons = set(automation.get('exclude_seasons') or [])
-    patterns = [text.lower() for text in automation.get('exclude_matching') or []]
+    # Kept beside the text as typed, because the summary names it back to the person who
+    # wrote it and lower-casing their phrase in the interface would be a small lie.
+    patterns = [(text, text.lower()) for text in automation.get('exclude_matching') or []]
     manual = {(entry['season'], entry['episode']) for entry in rule.get('exclusions') or []}
     whole_seasons = {season for season, episode in manual if episode is None}
 
@@ -467,14 +480,46 @@ def excluded_episodes(episodes, rule, settings) -> dict:
         if key is None:
             continue
         if (season, number) in manual or season in whole_seasons:
-            found[key] = 'manual'
+            found[key] = ('manual', None)
         elif season in seasons:
-            found[key] = 'season'
+            found[key] = ('season', season)
         elif patterns:
             haystack = f'{episode.get("title") or ""}\n{episode.get("path") or ""}'.lower()
-            if any(text in haystack for text in patterns):
-                found[key] = 'pattern'
+            for shown, needle in patterns:
+                if needle in haystack:
+                    found[key] = ('pattern', shown)
+                    break
     return found
+
+
+def exclusion_summary(episodes, rule, settings) -> dict:
+    """What this series' exclusion list is made of, for the series pane to read out.
+
+    Only causes that actually caught something appear. A season excluded globally that
+    this series does not have, or a phrase nothing matches, is true of the settings rather
+    than of this series, and listing it here would answer a question nobody asked.
+    """
+    causes = excluded_causes(episodes, rule, settings)
+    seasons, patterns, manual = {}, {}, 0
+    for reason, detail in causes.values():
+        if reason == 'manual':
+            manual += 1
+        elif reason == 'season':
+            seasons[detail] = seasons.get(detail, 0) + 1
+        else:
+            patterns[detail] = patterns.get(detail, 0) + 1
+    typed = (settings.get('automation') or {}).get('exclude_matching') or []
+    return {
+        'total': len(causes),
+        'episodes': len(episodes),
+        'manual': manual,
+        'seasons': [{'season': season, 'episodes': count}
+                    for season, count in sorted(seasons.items())],
+        # In the order they were typed, which is the order the box they came from shows
+        # them in. Sorted by count, the pane and the setting would disagree on sight.
+        'patterns': [{'pattern': text, 'episodes': patterns[text]}
+                     for text in typed if text in patterns],
+    }
 
 
 def validate_exclusions(raw, field='Exclusions') -> list:

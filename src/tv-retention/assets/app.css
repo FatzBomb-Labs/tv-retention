@@ -482,6 +482,18 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   border-radius: 6px; padding: 8px 10px; display: grid; gap: 2px; }
 .tvr-once-title { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; opacity: .6; }
 .tvr-once small { opacity: .65; margin: 0 0 4px 42px; }
+/* The title row carries a button now, so it has to be a row. */
+.tvr-once-title { display: flex; align-items: center; gap: 6px; }
+#tv-retention .tvr-once-title button { margin: 0; min-width: 0; }
+
+/* What is being done to this series, one cause per line. Two colours and no more: a rule
+   put it there, or a person did. Anything else on the line is the count, which is the
+   part that answers "is this actually catching anything". */
+.tvr-auto-lines { display: grid; gap: 1px; margin-top: 2px; }
+.tvr-auto-line { font-size: 11.5px; }
+.tvr-auto-plain { opacity: .7; }
+.tvr-auto-rule { color: var(--tvr-bad); }
+.tvr-auto-manual { color: var(--tvr-warn); }
 
 /* ---------------------------------------------------------------------------
    The shell: one line of chrome, a sidebar of sections, one view at a time.
@@ -853,6 +865,10 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-tree-episode { padding-left: 34px; font-weight: normal; }
 .tvr-tree-count { margin-left: auto; font-size: 11px; opacity: .55; font-weight: normal; }
 .tvr-tree-note { font-size: 10px; opacity: .5; }
+/* Excluded by Automation: shown, explained, and not offered. Dimming it without saying
+   why is how a disabled checkbox becomes a bug report. */
+.tvr-tree-auto { opacity: .55; }
+.tvr-tree-why { opacity: 1; color: var(--tvr-bad); }
 .tvr-tree-season-wrap { border-top: 1px solid var(--tvr-line); }
 .tvr-tree-season-wrap:first-of-type { border-top: none; }
 

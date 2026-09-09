@@ -19,8 +19,8 @@ import alerts
 import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
-                  describe_selectability, effective_rule, new_id, next_episode, normalise,
-                  redact, validate_settings)
+                  describe_selectability, effective_rule, exclusion_summary, excluded_causes,
+                  new_id, next_episode, normalise, redact, validate_settings)
 from sonarr import Sonarr, SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
@@ -253,10 +253,15 @@ def action_episodes(settings, request):
     Every episode is returned and each says whether it falls inside the keep window, so
     one call serves both the tree that offers the window and the one that offers the lot.
     """
-    _, episodes, frame = series_episodes(settings, request)
+    rule, episodes, frame = series_episodes(settings, request)
     inside = {episode.get('episode_id') for episode in frame['in_frame']}
+    # Why each excluded episode is excluded, so the picker can show an automatic exclusion
+    # as something to understand rather than something to untick. Only a manual one is a
+    # box anybody may move here; the rest come from Automation and change there.
+    causes = excluded_causes(episodes, rule, settings)
     seasons = {}
     for episode in sorted(episodes, key=lambda item: (item.get('season') or 0, item.get('episode') or 0)):
+        reason, detail = causes.get(episode.get('episode_id'), (None, None))
         seasons.setdefault(episode.get('season') or 0, []).append({
             'episode_id': episode.get('episode_id'),
             'season': episode.get('season'),
@@ -266,8 +271,33 @@ def action_episodes(settings, request):
             'has_file': bool(episode.get('has_file')),
             'monitored': bool(episode.get('monitored')),
             'in_scope': episode.get('episode_id') in inside,
+            'excluded': reason,
+            'excluded_by': detail,
         })
     return {'seasons': [{'season': number, 'episodes': rows} for number, rows in sorted(seasons.items())]}
+
+
+def action_exclusions(settings, request):
+    """What is being done to one series without anybody asking for it, per series.
+
+    Read from the stored reading, so opening the pane costs nothing and needs no network.
+    Everything here is derivable from the settings and the episodes already held; it is
+    gathered in one place because "why is this episode never deleted" should be answerable
+    where the series is, not by opening Automation and doing the matching in your head.
+    """
+    rule, episodes, _ = series_episodes(settings, request)
+    retention = settings.get('retention') or {}
+    active = effective_rule(rule, settings.get('profiles'))
+    specials = active.get('include_specials')
+    mode = rule.get('monitoring') or ''
+    return {
+        'monitoring': mode or retention.get('monitoring') or 'unmonitor-only',
+        'monitoring_default': not mode,
+        'specials': bool(retention.get('include_specials')) if specials is None else bool(specials),
+        'specials_default': specials is None,
+        'exclusions': exclusion_summary(episodes, rule, settings),
+    }
+
 
 
 def action_set_monitored(settings, request):
@@ -667,6 +697,7 @@ ACTIONS = {
     'scope-counts': action_scope_counts,
     'refresh-series': action_refresh_series,
     'episodes': action_episodes,
+    'exclusions': action_exclusions,
     'set-monitored': action_set_monitored,
     'settings': action_settings,
     'test-instance': action_test_instance,

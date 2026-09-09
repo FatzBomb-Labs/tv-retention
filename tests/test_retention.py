@@ -2,7 +2,8 @@ import datetime as dt
 import unittest
 
 import context  # noqa: F401
-from core import DEFAULTS, effective_date, evaluate
+from core import (DEFAULTS, effective_date, evaluate, excluded_causes, excluded_episodes,
+                  exclusion_summary)
 
 NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 
@@ -287,3 +288,76 @@ class Exclusions(unittest.TestCase):
         state = classify_monitoring(self.episodes(), rule, conf, now=NOW)
         touched = {row['episode_id'] for row in state['out_frame_monitored']}
         self.assertNotIn(1, touched, 'an excluded episode must never be unmonitored either')
+
+
+class ExclusionSummary(unittest.TestCase):
+    """What the series pane reads out, and the rule that it cannot disagree with a run.
+
+    Two functions answering "is this excluded" and "what excluded it" separately is how a
+    pane ends up naming a pattern that caught nothing, or missing one that did. They share
+    a pass, and these tests are what says so.
+    """
+
+    def episodes(self):
+        return [
+            {'episode_id': 1, 'season': 0, 'episode': 1, 'title': 'Christmas special',
+             'path': '/tv/Show/Specials/s00e01.mkv', 'has_file': True},
+            {'episode_id': 2, 'season': 1, 'episode': 1, 'title': 'Pilot',
+             'path': '/tv/Show/Season 01/s01e01.mkv', 'has_file': True},
+            {'episode_id': 3, 'season': 1, 'episode': 2, 'title': 'Behind the scenes',
+             'path': '/tv/Show/Season 01/s01e02.mkv', 'has_file': True},
+            {'episode_id': 4, 'season': 2, 'episode': 1, 'title': 'Ordinary',
+             'path': '/tv/Show/Season 02/s02e01.mkv', 'has_file': True},
+        ]
+
+    def summarise(self, rule=None, **automation):
+        conf = settings(automation=dict({'exclude_seasons': [], 'exclude_matching': []}, **automation))
+        return exclusion_summary(self.episodes(), rule or {}, conf)
+
+    def test_the_two_readings_name_the_same_episodes(self):
+        conf = settings(automation={'exclude_seasons': [0], 'exclude_matching': ['behind the scenes']})
+        rule = {'exclusions': [{'season': 2, 'episode': 1}]}
+        causes = excluded_causes(self.episodes(), rule, conf)
+        self.assertEqual(set(causes), set(excluded_episodes(self.episodes(), rule, conf)))
+        self.assertEqual({key: reason for key, (reason, _) in causes.items()},
+                         excluded_episodes(self.episodes(), rule, conf))
+
+    def test_each_cause_is_counted_against_the_thing_that_caused_it(self):
+        found = self.summarise(rule={'exclusions': [{'season': 2, 'episode': 1}]},
+                               exclude_seasons=[0], exclude_matching=['behind the scenes'])
+        self.assertEqual(found['seasons'], [{'season': 0, 'episodes': 1}])
+        self.assertEqual(found['patterns'], [{'pattern': 'behind the scenes', 'episodes': 1}])
+        self.assertEqual(found['manual'], 1)
+        self.assertEqual(found['total'], 3)
+
+    def test_a_pattern_that_catches_nothing_here_is_not_listed(self):
+        # True of the settings, not of this series. Listing it would answer a question
+        # nobody standing in front of this series asked.
+        found = self.summarise(exclude_matching=['behind the scenes', 'director commentary'])
+        self.assertEqual([entry['pattern'] for entry in found['patterns']], ['behind the scenes'])
+
+    def test_patterns_are_listed_in_the_order_they_were_typed(self):
+        # The box they came from shows them that way. Sorted by count, the pane and the
+        # setting disagree on sight.
+        found = self.summarise(exclude_matching=['behind the scenes', 'christmas'])
+        self.assertEqual([entry['pattern'] for entry in found['patterns']],
+                         ['behind the scenes', 'christmas'])
+
+    def test_the_phrase_is_named_back_as_it_was_typed(self):
+        # Matching is case-blind; reporting is not. Lower-casing somebody's phrase in the
+        # interface is a small lie about what they wrote.
+        found = self.summarise(exclude_matching=['Behind The Scenes'])
+        self.assertEqual(found['patterns'][0]['pattern'], 'Behind The Scenes')
+
+    def test_a_hand_picked_episode_outranks_a_pattern_that_also_caught_it(self):
+        # Manual wins in `excluded_causes`, so it must not be counted twice.
+        found = self.summarise(rule={'exclusions': [{'season': 1, 'episode': 2}]},
+                               exclude_matching=['behind the scenes'])
+        self.assertEqual(found['manual'], 1)
+        self.assertEqual(found['patterns'], [])
+        self.assertEqual(found['total'], 1)
+
+    def test_a_series_with_nothing_excluded_says_so_with_zeroes(self):
+        found = self.summarise()
+        self.assertEqual((found['total'], found['manual'], found['seasons'], found['patterns']),
+                         (0, 0, [], []))
