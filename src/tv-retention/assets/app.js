@@ -398,6 +398,43 @@
   const TITLES = { all: 'All series', connected: 'Connected series', unconnected: 'Not connected' };
   let libraryFilter = 'all';
 
+  // -- sections ----------------------------------------------------------
+  // One open at a time. Nineteen items in five groups is a wall; four collapsed headings
+  // and the group you are working in is a list.
+  const sectionOf = (view) => {
+    const button = document.querySelector(`.tvr-side [data-view="${view}"]`);
+    return button ? button.closest('[data-section]').dataset.section : null;
+  };
+
+  // Where a section opens when you have never been in it. Series is the exception: with
+  // nothing connected yet, "All" is the only list with anything in it.
+  function sectionDefault(section) {
+    if (section === 'series') {
+      return (settings.rules || []).length ? 'series-connected' : 'series-all';
+    }
+    const first = document.querySelector(`[data-section="${section}"] [data-view]`);
+    return first ? first.dataset.view : 'series-all';
+  }
+
+  function openSection(section) {
+    document.querySelectorAll('.tvr-side [data-section]').forEach((group) => {
+      const open = group.dataset.section === section;
+      group.classList.toggle('open', open);
+      const head = group.querySelector('[data-section-head]');
+      head.setAttribute('aria-expanded', String(open));
+      head.querySelector('.fa').className = `fa fa-caret-${open ? 'down' : 'right'}`;
+    });
+  }
+
+  document.querySelectorAll('.tvr-side [data-section-head]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const section = head.dataset.sectionHead;
+      // Clicking the section you are already in collapses nothing: there would be no open
+      // section and no view to show. It just returns you to where you were.
+      showView(remembered(`last.${section}`, '') || sectionDefault(section));
+    });
+  });
+
   function showView(name) {
     if (!VIEWS.includes(name)) name = 'series-all';
     // Unsaved edits belong to the library. Leaving it closes the pane, and a draft kept
@@ -413,12 +450,16 @@
     document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
       button.classList.toggle('active', button.dataset.view === name);
     });
+    // Where you were, per section, so a heading is a place you return to rather than a
+    // label that always drops you at the top.
+    const section = sectionOf(name);
+    if (section) { remember(`last.${section}`, name); openSection(section); }
     if (LIBRARY[name]) {
       libraryFilter = LIBRARY[name];
       $('tvr-library-title').textContent = TITLES[libraryFilter];
       renderLibrary();          // it fetches itself if what it needs is not in hand
     }
-    if (name === 'system-stats') guarded('', renderStatsView);
+    if (name === 'media-stats') guarded('', renderStatsView);
     if (name === 'system-logs') startLog(); else stopLog();
   }
 
@@ -643,7 +684,7 @@
     setBadge($('tvr-badge-series-all'), connectedAlerts);
     setBadge($('tvr-badge-series-connected'), connectedAlerts);
     setBadge($('tvr-badge-series-unconnected'), []);
-    setBadge($('tvr-badge-media-connections'), instances);
+    setBadge($('tvr-badge-media-connections'), instances);   // now under Settings
     setBadge($('tvr-badge-media-schedule'), []);
     setBadge($('tvr-badge-media-presets'), []);
     const failed = (snapshot.runs || []).slice(0, 1).filter((run) => (run.errors || []).length);
@@ -1341,7 +1382,7 @@
         return;
       }
       if (alert.action === 'open-instance' || alert.action === 'test-instance') {
-        showView('media-connections');
+        showView('settings-connections');
         const instance = (settings.instances || []).find((i) => i.id === alert.instance_id);
         if (instance) editInstance(instance);
         return;
@@ -2588,7 +2629,6 @@
     $('tvr-tmdb-key').value = (settings.tmdb || {}).api_key || '';
     $('tvr-history-size').value = settings.log_retention_runs;
     $('tvr-log-level').value = (settings.logging || {}).level || 'info';
-    $('tvr-ttl-hours').value = String((settings.health || {}).ttl_hours || 24);
 
     const box = $('tvr-notifications');
     box.replaceChildren();
@@ -2618,7 +2658,11 @@
         test_banner: $('tvr-test-banner-mode').value,
         muted: MUTABLE_KINDS.map(([kind]) => kind).filter((kind) => mutedInputs[kind] && mutedInputs[kind].checked),
       },
-      health: Object.assign({}, settings.health, { ttl_hours: $('tvr-ttl-hours').value }),
+      // No longer a control. It was one number doing two jobs — when the daily sweep is
+      // due, and when a reading counts as stale — and a resident loop watching the change
+      // feed every thirty seconds answers both without being asked. Kept in the settings
+      // so the value survives, and left where it is.
+      health: settings.health,
       notifications,
     });
   }

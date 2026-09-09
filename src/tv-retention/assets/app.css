@@ -522,7 +522,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention button.tvr-changes-row.monitor { color: var(--tvr-good); }
 .tvr-changes-foot { padding: 4px 8px; font-size: 11px; opacity: .55; }
 
-.tvr-shell { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 0;
+.tvr-shell { display: grid; grid-template-columns: 194px minmax(0, 1fr); gap: 0;
   align-items: stretch; flex: 1; min-height: 0; }
 /* Its own scrollbar: the sections stay reachable however long the view beside them runs,
    and a long series list no longer drags the navigation off the top of the screen. */
@@ -534,12 +534,21 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   border-right: 1px solid var(--tvr-line); }
 .tvr-side::-webkit-scrollbar { width: 6px; }
 .tvr-side::-webkit-scrollbar-thumb { background: var(--tvr-line); border-radius: 3px; }
-.tvr-side-group { display: grid; gap: 0; margin-bottom: 7px; }
+.tvr-side-group { display: grid; gap: 0; margin-bottom: 3px; }
+/* One section open at a time. Collapsed groups are two lines of chrome; the open one is
+   the list you are working in. */
+.tvr-side-items { display: none; padding: 3px 0 6px; }
+.tvr-side-group.open .tvr-side-items { display: grid; gap: 1px; }
 #tv-retention button.tvr-side-item { display: flex; align-items: center; gap: 8px; width: 100%;
-  text-align: left; border: none; background: none; border-radius: 3px; padding: 1px 8px;
-  font-size: 12px; line-height: 1.45; opacity: .8; border-left: 2px solid transparent; }
+/* Wider indent than the heading it sits under, so the hierarchy is visible without a rule
+   or a bullet: the heading owns the left edge and its items sit inside it. */
+  text-align: left; border: none; background: none; border-radius: 3px; padding: 3px 8px 3px 22px;
+  font-size: 13px; line-height: 1.5; opacity: .82; border-left: 2px solid transparent; }
 #tv-retention .tvr-side-item .tvr-tab-badge { height: 15px; min-width: 15px; font-size: 9px;
   margin-left: 4px; }
+.tvr-side-count { font-size: 11.5px; }
+/* A sub-heading inside a page that now holds two things at once. */
+.tvr-sub-head { margin-top: 4px; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
 #tv-retention button.tvr-side-item.active { background: var(--tvr-soft); opacity: 1;
   font-weight: 600; border-left-color: var(--tvr-accent); }
@@ -661,11 +670,23 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention button.tvr-alert-total.warning { color: var(--tvr-warn); }
 #tv-retention button.tvr-alert-total.notice { color: var(--tvr-notice); }
 
-.tvr-side-head { display: flex; align-items: center; gap: 6px; font-size: 9.5px;
-  letter-spacing: .1em; text-transform: uppercase; opacity: .6; font-weight: 700;
+/* A point larger than its items and set in caps: the difference has to read at a glance,
+   and weight alone was not doing it. */
+#tv-retention button.tvr-side-head,
+.tvr-side-head { display: flex; align-items: center; gap: 7px; width: 100%; font-size: 11px;
+  letter-spacing: .09em; text-transform: uppercase; opacity: .72; font-weight: 700;
+  text-align: left; border: none; border-radius: 0; cursor: pointer;
   /* Out past the panel's own padding: a heading that stops short of the edge is a label,
      and one that reaches it is a section. */
-  margin: 0 -4px 3px; padding: 3px 12px; background: var(--tvr-soft); }
+  margin: 0 -4px 2px; padding: 6px 12px; background: var(--tvr-soft); }
+#tv-retention button.tvr-side-head:hover { opacity: 1; background: var(--tvr-soft); }
+.tvr-side-head .fa { font-size: 9px; opacity: .7; flex: none; }
+.tvr-side-group.open > .tvr-side-head { opacity: 1; }
+/* Named rather than built: an item that does nothing yet says so instead of looking broken. */
+.tvr-side-soon { margin-left: auto; font-size: 9px; letter-spacing: .08em;
+  text-transform: uppercase; opacity: .45; }
+.tvr-side-item:has(.tvr-side-soon) { opacity: .5; }
+.tvr-soon { opacity: .7; font-style: italic; }
 
 /* Stats: a bar is easier to compare than four numbers in a column. */
 .tvr-bar-row { display: grid; grid-template-columns: 70px 1fr 90px; gap: 10px; align-items: center;

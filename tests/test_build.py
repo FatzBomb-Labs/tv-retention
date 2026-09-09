@@ -374,20 +374,42 @@ class Interface(unittest.TestCase):
         self.assertIn('.tvr-field > input, .tvr-field > select, .tvr-field > textarea '
                       '{ width: 100%; }', self.css)
 
-    def test_a_sidebar_group_is_a_band_not_a_label(self):
+    def test_a_sidebar_group_is_a_band_and_now_a_control(self):
         """Reaching the panel edge is what makes it a section rather than small type.
 
-        And it is a div: nothing collapses, so the rule styling it as a button had been
-        styling nothing at all.
+        It was a div when nothing collapsed. It opens its section now, so it is a button —
+        and one that says whether it is open, for anyone not looking at the caret.
         """
-        self.assertIn('<div class="tvr-side-head">', self.html)
-        self.assertNotIn('button.tvr-side-head', self.css)
+        self.assertIn('class="tvr-side-head" data-section-head=', self.html)
+        self.assertIn('aria-expanded=', self.html)
         block = self.css.split('.tvr-side-head {')[1].split('}')[0]
         self.assertIn('background: var(--tvr-soft)', block)
         # Out past the panel's own padding, which is what "full width" means here.
         panel = self.css.split('.tvr-side { display: block;')[1].split('}')[0]
-        self.assertIn('padding: 4px 4px 8px', panel)
         self.assertIn('margin: 0 -4px', block)
+
+    def test_one_section_is_open_at_a_time(self):
+        """Nineteen items in five groups is a wall; four headings and one group is a list."""
+        self.assertIn('function openSection(section)', self.js)
+        self.assertRegex(self.css, r'\.tvr-side-items \{[^}]*display: none')
+        self.assertRegex(self.css, r'\.tvr-side-group\.open \.tvr-side-items \{[^}]*display: (grid|block)')
+
+    def test_a_heading_returns_you_to_where_you_were(self):
+        """A section is a place, not a label.
+
+        And Series is the exception worth encoding: with nothing connected yet, All is the
+        only one of the three lists with anything in it.
+        """
+        self.assertIn("remembered(`last.${section}`, '') || sectionDefault(section)", self.js)
+        self.assertIn('remember(`last.${section}`, name)', self.js)
+        block = self.js.split('function sectionDefault(section)')[1].split('\n  }')[0]
+        self.assertIn("(settings.rules || []).length ? 'series-connected' : 'series-all'", block)
+
+    def test_the_sidebar_says_watching_rather_than_connected(self):
+        # "Connected" also describes Sonarr, TMDB and everything else under Connections.
+        self.assertIn('data-view="series-connected">Watching', self.html)
+        self.assertIn('data-view="series-unconnected">Not watching', self.html)
+        self.assertNotIn('>Connected\n', self.html)
 
     def test_the_layout_switch_is_two_square_icons(self):
         # A box around them made one control out of two buttons, and the padding inside it
