@@ -114,12 +114,18 @@ had replaced.
 behind the decisions that shaped it. Delete from it as things land, so it always describes
 what is left.
 
-**It is becoming a container.** Decided, not yet built: this is an application rather than
-an OS or GUI extension, it is meant to be useful to people who are not on Unraid, and it
-runs as root with authority to delete media. [docs/CONTAINER.md](docs/CONTAINER.md) holds
-the design. Until then the plugin is the product and stays working — but keep the Unraid
-surface where it is, concentrated in five constants in `store.py` and four functions in
-`main.py`, and do not spread it.
+**It is becoming a container, and the plugin is being retired.** Decided: this is an
+application rather than an OS or GUI extension, it is meant to be useful to people who are
+not on Unraid, and the plugin borrows PHP and Python from a host that can change either
+without warning. [docs/CONTAINER.md](docs/CONTAINER.md) holds the design and the order of
+work; [docs/PLAN.md](docs/PLAN.md) holds why, including what the survey of the neighbouring
+tools actually found.
+
+Licensed **GPL-3.0**, matching Sonarr.
+
+Until the port lands, do not add anything Unraid-specific. What is there is five constants
+in `store.py` and four functions in `main.py`, and the port is tractable precisely because
+that list is short.
 
 ## Deployment
 

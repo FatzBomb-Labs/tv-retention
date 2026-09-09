@@ -10,7 +10,55 @@ follows is what remains.
 
 ---
 
-## Decided: it becomes a container
+## Decided: it is published, as a container, and the plugin is retired
+
+**Published.** Not because the market research came back encouraging — it came back
+mixed — but because building for one server and retrofitting later is how projects get
+rewritten. If nobody takes it, nothing is lost that was not already spent. If somebody
+does, it was worth writing down.
+
+**The plugin is scrapped rather than shipped first.** It borrows PHP and Python from the
+host, so every Unraid release is a coin flip on a runtime this project does not control.
+Polishing something with that dependency, on the way to a container anyway, is work with a
+shelf life.
+
+**GPL-3.0**, matching Sonarr and the neighbourhood. Note the asymmetry before changing your
+mind: MIT to GPL is easy later, GPL to MIT needs every contributor's permission.
+
+### The position, in one sentence
+
+*Maintainerr builds Plex collections and acts on them. This sets a retention policy on a
+series.*
+
+That is the honest difference and it is fair to both tools. What the survey found:
+
+- **Thirteen years of unmet demand.** [Sonarr #314](https://github.com/Sonarr/Sonarr/issues/314)
+  has been open since August 2013 — 102 comments, ~30 distinct requesters, named use cases
+  of daily shows, news, sports and kids' TV. A maintainer said in 2014 that they wanted to
+  build it. They have not.
+- **The naive workaround breaks Sonarr.** The thread is full of `find -mtime +5 -delete`,
+  which deletes behind Sonarr's back and lets it re-download. That fetch-and-delete loop is
+  what the monitoring invariants here exist to prevent, and it is the reason this project
+  started.
+- **The category is aimed elsewhere.** Maintainerr, Janitorr, purgeomatic, Reclaimarr,
+  Deleterr, EmbyArrSync — almost all of them act on *watch state*, and most require a media
+  server or Tautulli. Watch state is the wrong signal for a daily show: nobody watches the
+  archive, you just want the last thirty, permanently.
+- **Maintainerr can be bent to it, and is not shaped for it.** `seasonFileRank` and
+  `episodeFileRank` arrived in v3.17.0 (2026-07-05), so the primitives exist. But a rule is
+  scoped to a *Plex library*, "take action after days" is mandatory, half the form is
+  collection presentation — Plex home, overlays, posters, sort titles — and at Media type
+  "Shows" the Sonarr actions are whole-show: delete the entire show, or unmonitor and delete
+  every episode. Preserving the newest two seasons means knowing to switch media type and
+  knowing a rank property exists.
+- **The gap is architectural, not marketing.** A marketing gap closes with a paragraph. A
+  gap between "a collection things fall into" and "a policy attached to a series" does not.
+
+**The risk, recorded honestly:** Maintainerr shipped fifteen releases in two months and is
+moving toward these primitives. This is a niche, not a market. Neither is a reason not to
+publish; both are reasons not to expect much.
+
+## The port
 
 **Superseding "it stays a plugin".** That decision was argued on memory, the Unraid
 notification path and the WebGUI's authentication, and it was correct for a tool used by

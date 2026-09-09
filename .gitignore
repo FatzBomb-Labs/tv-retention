@@ -4,3 +4,7 @@ __pycache__/
 dist/
 .dev/
 *.local.json
+
+# Reference screenshots and scratch material, not part of the project
+*.png
+!src/**/*.png

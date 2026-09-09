@@ -1,9 +1,13 @@
 # The container port
 
-The decision is recorded in [PLAN.md](PLAN.md). This is what it would actually take, what
-carries over untouched, and what genuinely has to be built.
+The decision is recorded in [PLAN.md](PLAN.md). This is what it takes, what carries over
+untouched, and what genuinely has to be built.
 
-Nothing here is built yet. The plugin keeps working until the container is proven.
+**The plugin is not kept alongside.** It borrows PHP and Python from the host, so an Unraid
+release can break it at any time, and polishing something with that dependency on the way to
+a container is work with a shelf life. `api.php`, `TVRetention.page` and `event/` are
+deleted rather than maintained. Nothing is lost operationally: the plugin has never taken a
+live deletion, so there is no running system to protect.
 
 ---
 
@@ -57,10 +61,10 @@ tv-retention
   SONARR_URL etc.  optional; the interface configures instances as it does now
 ```
 
-**No media mounts is the standout property.** The plugin touches no filesystem, so the
-container needs no library access, no path mapping, no `PUID`/`PGID` juggling over media,
-and cannot damage a library even if it is wrong. Very few tools in this space can say that.
-It should be the first line of the README.
+**No media mounts**, and no path mapping — the worker touches no filesystem, so it cannot
+damage a library even if it is wrong. This is not a differentiator on its own: an
+API-driven container normally has one config volume, and most of the neighbours do. It is
+worth stating in the README as a property, not as a headline.
 
 The HTTP server is standard library — `ThreadingHTTPServer` over `actions.dispatch`, which
 already takes a decoded request and returns a plain dict. That is roughly eighty lines,
@@ -162,13 +166,16 @@ their media. All of them are worth stating before the work starts.
 ## Sequencing
 
 1. **Decide authentication.** Nothing else can be written around an undecided request path.
-2. **Extract the Unraid surface behind an interface** — notify, schedule, ready-check — in
-   the plugin, with the plugin still working. Nothing else changes and the tests still pass.
-3. **Build the HTTP server and the image** against that interface. Two front ends, one
-   worker, both live.
+2. **Cut the Unraid surface out.** Delete `api.php`, the `.page` and `event/`; replace
+   `array_ready`/`require_ready` with nothing, `notify` with a webhook, `write_cron` with a
+   loop; repoint `store.py` at `/config`. The suite must still pass at the end of this, which
+   is what makes it safe — `core.py` is untouched throughout.
+3. **Build the HTTP server and the image.** `actions.dispatch` already takes a decoded
+   request and returns a dict, so this is a thin front end over what exists.
 4. **Prove it** on a copy of the real settings, read-only, against the real Sonarr — the
-   same discipline `docs/VALIDATION.md` already records.
-5. **Retire the plugin** once a container has taken a live deletion here.
+   same discipline `docs/VALIDATION.md` records. Then once, for real, on one series.
+5. **Publish.** GPL-3.0, GHCR image, a README written for a stranger rather than for its
+   author, and Test Mode on by default with the validation state stated plainly.
 
-Step 2 is the one that makes the rest safe: it is a refactor with full test coverage on
-both sides, not a port. Everything after it is additive.
+Step 2 is a deletion, not a rewrite, and that is the whole reason this is tractable: what is
+being removed is five constants, four functions and four files.
