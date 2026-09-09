@@ -548,8 +548,15 @@ class Interface(unittest.TestCase):
         self.assertNotRegex(self.js, r"dialog\((existing \? 'Edit series'|'Add series')")
 
     def test_the_sidebar_scrolls_on_its_own(self):
+        """It has its own scrollbar rather than dragging the page.
+
+        `position: sticky` went with the frame: sticking to the top of a scrolling page is
+        what you do when the page scrolls. The window does not scroll now — the shell is
+        the height of it, and the sidebar is the height of the shell.
+        """
         self.assertRegex(self.css, r'\.tvr-side \{[^}]*overflow-y: auto')
-        self.assertRegex(self.css, r'\.tvr-side \{[^}]*position: sticky')
+        self.assertRegex(self.css, r'\.tvr-side \{ height: 100%')
+        self.assertNotRegex(self.css, r'\.tvr-side \{[^}]*position: sticky')
 
     def test_one_library_serves_every_series_view(self):
         """A series Sonarr knows about belongs in one place whether it has a rule or not.
@@ -700,13 +707,32 @@ class Interface(unittest.TestCase):
         self.assertIn('if (isOpen(rule)) { editing = null;', self.js)
 
     def test_each_column_scrolls_within_something(self):
-        # overflow:auto with nothing to overflow moves the whole page instead, which is why
-        # the sidebar did not keep its own scrollbar.
-        self.assertRegex(self.css, r'\.tvr-shell \{ height: calc\(100vh')
+        """overflow:auto with nothing to overflow moves the whole page instead.
+
+        The height comes from the window now rather than from a guess about how much of it
+        the WebGUI had already used: body is the viewport, the app is a column inside it,
+        the banners take what they need and the shell takes the rest.
+        """
+        self.assertRegex(self.css, r'html, body \{ height: 100%')
+        self.assertRegex(self.css, r'#tv-retention \{ height: 100%')
+        # A flex child refuses to shrink below its contents without being told.
+        self.assertRegex(self.css, r'\.tvr-shell \{[^}]*flex: 1; min-height: 0')
         for selector in (r'\.tvr-side \{ height: 100%', r'\.tvr-main \{ height: 100%; overflow-y: auto',
                          r'\.tvr-details \{ position: sticky; top: 0; max-height: 100%; overflow-y: auto'):
             self.assertRegex(self.css, selector)
-        self.assertRegex(self.css, r'\.tvr-topbar \{ position: sticky; top: 0')
+
+    def test_the_window_is_the_application(self):
+        """No frame, and no headroom left for a page that is no longer above it.
+
+        The rounded border and the 186px subtracted from the viewport were both for living
+        inside the WebGUI as a card on somebody else's page.
+        """
+        self.assertNotIn('calc(100vh - 186px)', self.css)
+        shell = self.css.split('.tvr-shell { display: grid;')[1].split('}')[0]
+        self.assertNotIn('border:', shell)
+        self.assertNotIn('border-radius', shell)
+        topbar = self.css.split('.tvr-topbar { display: flex;')[1].split('}')[0]
+        self.assertNotIn('border-radius', topbar)
 
     def test_a_poster_is_bounded_rather_than_sized(self):
         """A poster must not be able to exceed its box, whatever its shape.

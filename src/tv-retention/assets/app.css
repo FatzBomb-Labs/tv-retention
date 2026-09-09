@@ -74,11 +74,16 @@ html { color-scheme: light; }
 html[data-theme="dark"] { color-scheme: dark; }
 @media (prefers-color-scheme: dark) { html:not([data-theme="light"]) { color-scheme: dark; } }
 
+html, body { height: 100%; }
 body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
-       font-family: var(--tvr-font); }
+       font-family: var(--tvr-font); overflow: hidden; }
 
-#tv-retention { width: 100%; font-size: 13px; line-height: 1.28;
-  font-family: var(--tvr-font); color: var(--tvr-fg); }
+/* A column the height of the window: banners take what they need, the shell takes the
+   rest. `min-height: 0` on the shell because a grid or flex child will otherwise refuse to
+   shrink below its contents, and the thing that scrolls is inside it. */
+#tv-retention { height: 100%; width: 100%; font-size: 13px; line-height: 1.28;
+  font-family: var(--tvr-font); color: var(--tvr-fg);
+  display: flex; flex-direction: column; }
 #tv-retention * { box-sizing: border-box; }
 /* An author display rule outranks the browser's [hidden] { display: none }, so any element
    this page hides in script needs the attribute to win explicitly. */
@@ -203,10 +208,10 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-result.ok { color: var(--tvr-good); }
 .tvr-result.bad { color: var(--tvr-bad); }
 
-.tvr-warning, .tvr-banner { border: 1px solid var(--tvr-warn); border-radius: 6px; padding: 10px 12px; margin: 10px 0;
-  background: rgba(217,130,43,.10); }
+.tvr-warning, .tvr-banner { border-bottom: 1px solid var(--tvr-warn); padding: 7px 12px; flex: none;
+  background: rgba(217,130,43,.12); }
 #tvr-checking { display: flex; align-items: center; gap: 8px; }
-#tvr-notice { border-radius: 6px; padding: 10px 12px; margin: 10px 0; border: 1px solid var(--tvr-line); }
+#tvr-notice { padding: 7px 12px; border-bottom: 1px solid var(--tvr-line); flex: none; }
 #tvr-notice.ok { border-color: var(--tvr-good); background: rgba(46,158,91,.10); }
 #tvr-notice.bad { border-color: var(--tvr-bad); background: rgba(192,57,43,.10); }
 .tvr-error { color: var(--tvr-bad); margin-top: 6px; }
@@ -460,8 +465,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
    colour, so it reads as one shade off the page under every Unraid theme — a fixed grey
    would be right on black and wrong on white. */
 .tvr-topbar { display: flex; align-items: center; gap: 12px; padding: 4px 10px;
-  border: 1px solid var(--tvr-line); border-radius: 6px 6px 0 0; border-bottom: none;
-  background: var(--tvr-panel); }
+  border-bottom: 1px solid var(--tvr-line); background: var(--tvr-panel); flex: none; }
 .tvr-brand { display: flex; align-items: baseline; gap: 8px; }
 .tvr-brand .fa { font-size: 15px; opacity: .75; align-self: center; }
 .tvr-brand-name { font-size: 15px; font-weight: 600; }
@@ -494,13 +498,15 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention button.tvr-run[disabled] { color: inherit; }
 
 .tvr-shell { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 0;
-  align-items: start; border: 1px solid var(--tvr-line); border-radius: 0 0 6px 6px; }
+  align-items: stretch; flex: 1; min-height: 0; }
 /* Its own scrollbar: the sections stay reachable however long the view beside them runs,
    and a long series list no longer drags the navigation off the top of the screen. */
-.tvr-side { display: block; position: sticky; top: 0; align-self: start;
-  max-height: calc(100vh - 60px); overflow-y: auto; overscroll-behavior: contain;
+/* Full height of the shell, and no corner: it reaches the bottom of the window now rather
+   than the bottom of a card. The later rule sets `height: 100%`; this one is what it
+   measures against. */
+.tvr-side { display: block; overflow-y: auto; overscroll-behavior: contain;
   padding: 4px 4px 8px; background: var(--tvr-panel);
-  border-right: 1px solid var(--tvr-line); border-radius: 0 0 0 6px; }
+  border-right: 1px solid var(--tvr-line); }
 .tvr-side::-webkit-scrollbar { width: 6px; }
 .tvr-side::-webkit-scrollbar-thumb { background: var(--tvr-line); border-radius: 3px; }
 .tvr-side-group { display: grid; gap: 0; margin-bottom: 7px; }
@@ -696,8 +702,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 /* Three columns that scroll independently, under a header that does not scroll at all.
    The height is fixed to the window so each pane has something to scroll *within*; without
    that, "overflow: auto" has nothing to overflow and the whole page moves instead. */
-.tvr-topbar { position: sticky; top: 0; z-index: 30; }
-.tvr-shell { height: calc(100vh - 186px); min-height: 460px; overflow: hidden; }
+.tvr-shell { overflow: hidden; }
 .tvr-side { height: 100%; max-height: none; position: static; }
 .tvr-main { height: 100%; overflow-y: auto; overscroll-behavior: contain; }
 .tvr-series-shell { align-items: start; }
@@ -706,6 +711,9 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-details { position: sticky; top: 0; max-height: 100%; overflow-y: auto;
   overscroll-behavior: contain; }
 @media (max-width: 1250px) {
+  /* Narrow: one column, and the window scrolls rather than the panes inside it. */
+  html, body { height: auto; overflow: visible; }
+  #tv-retention { height: auto; display: block; }
   .tvr-shell { height: auto; min-height: 0; overflow: visible; }
   .tvr-side, .tvr-main { height: auto; overflow: visible; }
   .tvr-details { position: static; max-height: none; }
