@@ -1239,7 +1239,12 @@
     const marks = ['tvr-rule', cardTone(row)];
     if (rule && !rule.enabled) marks.push('disabled');
     if (rule && queuedRemoval(rule)) marks.push('queued');
-    if (series.ended && row.section !== 'all') marks.push('ended');
+    // Grey means "finished, and it matters that it has". In the two bands above, that is
+    // the whole point. In the library it depends on whether the series is yours: one you
+    // watch has a retention decision behind it that will now only ever shrink, and one you
+    // do not is just something Sonarr happens to hold — greying three thousand of those
+    // would be a different page.
+    if (series.ended && (row.section !== 'all' || rule)) marks.push('ended');
     const card = el('div', { className: marks.join(' ') });
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;

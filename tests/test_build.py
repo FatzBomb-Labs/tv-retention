@@ -1334,10 +1334,15 @@ class Bands(unittest.TestCase):
         self.assertIn('if (!count) return;', block)
         self.assertIn('`${label} (${count})`', block)
 
-    def test_grey_posters_are_for_triage_rather_than_for_browsing(self):
-        # Three thousand grey posters is a different page. In the whole library, ended is
-        # one more fact about a series; in the two sections above it, it is the point.
-        self.assertIn("if (series.ended && row.section !== 'all') marks.push('ended');", self.js)
+    def test_grey_means_finished_and_that_it_matters(self):
+        """Always in the two bands above; in the library, only if the series is yours.
+
+        One you watch has a retention decision behind it that will now only ever shrink.
+        One you do not is something Sonarr happens to hold, and greying three thousand of
+        those would be a different page.
+        """
+        self.assertIn("if (series.ended && (row.section !== 'all' || rule)) marks.push('ended');",
+                      self.js)
         self.assertIn("cardsInto(band.box, shown, 'attention')", self.js)
         self.assertIn("cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT), 'all')", self.js)
 
