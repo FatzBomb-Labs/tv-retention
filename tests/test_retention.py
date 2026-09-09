@@ -212,3 +212,78 @@ class InterpolatedDates(unittest.TestCase):
         date, source = effective_date(episode, True)
         self.assertEqual(date, dt.date(2015, 1, 8))
         self.assertEqual(source, 'estimated')
+
+
+class Exclusions(unittest.TestCase):
+    """The one answer that is never weighed against anything else."""
+
+    def episodes(self):
+        return [
+            {'episode_id': 1, 'season': 1, 'episode': 1, 'title': 'Lost pilot',
+             'path': '/tv/Show/Season 01/s01e01.mkv', 'has_file': True, 'size': 10,
+             'air_date': '2010-01-01', 'air_source': 'sonarr', 'monitored': True},
+            {'episode_id': 2, 'season': 1, 'episode': 2, 'title': 'Ordinary',
+             'path': '/tv/Show/Season 01/s01e02.mkv', 'has_file': True, 'size': 10,
+             'air_date': '2010-01-08', 'air_source': 'sonarr', 'monitored': True},
+            {'episode_id': 3, 'season': 2, 'episode': 1, 'title': 'Anniversary show',
+             'path': '/tv/Show/Specials Extras/s02e01.mkv', 'has_file': True, 'size': 10,
+             'air_date': '2011-01-01', 'air_source': 'sonarr', 'monitored': True},
+        ]
+
+    def deleted(self, rule=None, automation=None):
+        conf = settings(automation=automation or {'exclude_seasons': [], 'exclude_matching': []})
+        rule = dict({'keep_episodes': 1, 'combine': 'earliest'}, **(rule or {}))
+        result = evaluate(self.episodes(), rule, conf, now=NOW)
+        return sorted(item['episode_id'] for item in result['delete'])
+
+    def test_without_exclusions_the_rule_decides(self):
+        self.assertEqual(self.deleted(), [1, 2])
+
+    def test_a_hand_picked_episode_is_never_deleted(self):
+        self.assertEqual(self.deleted(rule={'exclusions': [{'season': 1, 'episode': 1}]}), [2])
+
+    def test_an_entry_with_no_episode_number_excludes_the_season(self):
+        self.assertEqual(self.deleted(rule={'exclusions': [{'season': 1, 'episode': None}]}), [])
+
+    def test_a_whole_season_can_be_excluded_automatically(self):
+        self.assertEqual(self.deleted(automation={'exclude_seasons': [1], 'exclude_matching': []}), [])
+
+    def test_a_pattern_matches_the_title(self):
+        found = self.deleted(automation={'exclude_seasons': [], 'exclude_matching': ['lost pilot']})
+        self.assertEqual(found, [2])
+
+    def test_a_pattern_matches_the_path_so_it_catches_a_folder(self):
+        """Sonarr has no season names, so a folder is only reachable through the path.
+
+        Its season object carries a number, a monitored flag and statistics — nothing that
+        could be matched by name.
+        """
+        # And excluding one changes what the window holds: with S02E01 set aside, "keep 1"
+        # keeps the newest of what is left rather than the newest overall.
+        found = self.deleted(automation={'exclude_seasons': [], 'exclude_matching': ['Specials Extras']})
+        self.assertEqual(found, [1])
+
+    def test_the_reason_travels_with_the_answer(self):
+        # So the preview and the journal can say why something was skipped, without anyone
+        # going to read the settings to find out.
+        conf = settings(automation={'exclude_seasons': [2], 'exclude_matching': []})
+        rule = {'keep_episodes': 1, 'combine': 'earliest',
+                'exclusions': [{'season': 1, 'episode': 1}]}
+        result = evaluate(self.episodes(), rule, conf, now=NOW)
+        reasons = {item['episode_id']: item['reason'] for item in result['protected']}
+        self.assertIn('by hand', reasons[1])
+        self.assertIn('whole season', reasons[3])
+
+    def test_an_excluded_episode_is_neither_monitored_nor_unmonitored(self):
+        """Set aside where specials are, and for the same reason.
+
+        Outside the frame, and so outside everything that acts on the frame — the list
+        would be worth little if a run kept switching Sonarr's flags on the things on it.
+        """
+        from core import classify_monitoring
+        conf = settings(automation={'exclude_seasons': [], 'exclude_matching': []})
+        rule = {'keep_episodes': 1, 'combine': 'earliest',
+                'exclusions': [{'season': 1, 'episode': 1}]}
+        state = classify_monitoring(self.episodes(), rule, conf, now=NOW)
+        touched = {row['episode_id'] for row in state['out_frame_monitored']}
+        self.assertNotIn(1, touched, 'an excluded episode must never be unmonitored either')

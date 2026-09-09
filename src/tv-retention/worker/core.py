@@ -58,6 +58,23 @@ DEFAULTS = {
     'rules': [],
     # An API key is the switch: nobody enters one they do not want used.
     'tmdb': {'api_key': ''},
+    # Rules that put episodes on a series' exclusion list without anyone ticking them,
+    # evaluated every time rather than baked in: a list frozen at the moment a series was
+    # added would drift silently as the patterns changed.
+    #
+    # Specials are deliberately absent. Season 0 *is* specials in Sonarr, and
+    # `retention.include_specials` already decides them — globally, with a per-series
+    # override, which is strictly more than an automatic exclusion could offer. Two
+    # settings for one decision is how a rule ends up meaning different things depending
+    # on which page you last visited.
+    'automation': {
+        # Whole seasons, by number.
+        'exclude_seasons': [],
+        # Matched against the episode's title and its file path, so a folder name is caught
+        # by the same box that catches a title. Sonarr has no season names to match on —
+        # its season object carries a number, a monitored flag and statistics, nothing else.
+        'exclude_matching': [],
+    },
     'retention': {
         # One decision: specials are kept, and counted in monitoring, together or not at all.
         'include_specials': False,
@@ -403,6 +420,84 @@ def validate_queue(raw) -> dict:
     return queue
 
 
+def validate_automation(raw) -> dict:
+    """What goes on an exclusion list without anyone ticking it."""
+    raw = raw or {}
+    seasons = set()
+    for value in raw.get('exclude_seasons') or []:
+        seasons.add(_whole(value, 'Excluded season', 0, 999, allow_none=False))
+    patterns = []
+    for value in raw.get('exclude_matching') or []:
+        text = _text(value, 'Exclusion pattern', 200)
+        if text and text not in patterns:
+            patterns.append(text)
+    return {
+        'exclude_seasons': sorted(seasons),
+        'exclude_matching': patterns,
+    }
+
+
+# Said in the preview and in the journal, so "why was this skipped" never needs anyone to
+# go and read the settings to find out.
+EXCLUSION_REASONS = {
+    'manual': 'Excluded from this series by hand',
+    'season': 'This whole season is excluded automatically',
+    'pattern': 'Excluded automatically: it matches an exclusion pattern',
+}
+
+
+def excluded_episodes(episodes, rule, settings) -> dict:
+    """Every episode this series will never touch, and why it is on the list.
+
+    Manual first, because a person ticking a box outranks a pattern. The reason travels
+    with the answer so the interface can say which is which — red for a rule that put it
+    there, orange for a person — and so the journal can say why something was skipped.
+    """
+    automation = settings.get('automation') or DEFAULTS['automation']
+    seasons = set(automation.get('exclude_seasons') or [])
+    patterns = [text.lower() for text in automation.get('exclude_matching') or []]
+    manual = {(entry['season'], entry['episode']) for entry in rule.get('exclusions') or []}
+    whole_seasons = {season for season, episode in manual if episode is None}
+
+    found = {}
+    for episode in episodes:
+        season = episode.get('season')
+        number = episode.get('episode')
+        key = episode.get('episode_id')
+        if key is None:
+            continue
+        if (season, number) in manual or season in whole_seasons:
+            found[key] = 'manual'
+        elif season in seasons:
+            found[key] = 'season'
+        elif patterns:
+            haystack = f'{episode.get("title") or ""}\n{episode.get("path") or ""}'.lower()
+            if any(text in haystack for text in patterns):
+                found[key] = 'pattern'
+    return found
+
+
+def validate_exclusions(raw, field='Exclusions') -> list:
+    """Episodes this series never touches, by season and episode number.
+
+    Numbers rather than Sonarr's episode ids, because ids do not survive a series being
+    removed and added back and the whole point of this list is that it outlives ordinary
+    events. An entry with no episode number excludes the whole season.
+
+    Sorted and de-duplicated on the way in, so the stored document does not change shape
+    according to the order somebody happened to tick things.
+    """
+    found = set()
+    for entry in raw or []:
+        if not isinstance(entry, dict):
+            raise Rejected(f'{field} must be a list of season and episode numbers')
+        season = _whole(entry.get('season'), f'{field} season', 0, 999, allow_none=False)
+        episode = _whole(entry.get('episode'), f'{field} episode', 0, 9999)
+        found.add((season, episode))
+    return [{'season': season, 'episode': episode} for season, episode in sorted(
+        found, key=lambda pair: (pair[0], -1 if pair[1] is None else pair[1]))]
+
+
 def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
     if not isinstance(raw, dict):
         raise Rejected('Invalid rule')
@@ -436,6 +531,9 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         # one show can be worth keeping fully in step with Sonarr while the rest are not.
         monitoring=_choice(raw.get('monitoring'), MONITORING_MODES, 'Monitoring', allow_blank=True),
         queue=validate_queue(raw.get('queue')),
+        # Never monitored by us, never unmonitored by us, never deleted. The one list that
+        # outranks every rule, including this rule's own.
+        exclusions=validate_exclusions(raw.get('exclusions')),
         # Match state is owned by the backend; the UI cannot assert a rule is matched.
         match_status='matched' if series_id else 'unmatched',
         match_error=_text(raw.get('match_error'), 'Match error', 500),
@@ -539,6 +637,7 @@ def validate_settings(raw, previous=None) -> dict:
         'profiles': profiles,
         'rules': rules,
         'tmdb': {'api_key': tmdb_key},
+        'automation': validate_automation(raw.get('automation')),
         'retention': {
             'include_specials': _flag(retention_raw.get('include_specials', False)),
             'allow_estimated_dates': _flag(retention_raw.get('allow_estimated_dates', True)),
@@ -729,9 +828,16 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     if include_specials is None:
         include_specials = bool(retention.get('include_specials', False))
 
+    # The exclusion list outranks every condition, including this rule's own. It is the one
+    # answer that is never weighed against anything.
+    excluded = excluded_episodes(episodes, rule, settings)
     protected, candidates = [], []
     for episode in episodes:
         if not episode.get('path'):
+            continue
+        why = excluded.get(episode.get('episode_id'))
+        if why:
+            protected.append(dict(episode, reason=EXCLUSION_REASONS[why]))
             continue
         if episode.get('season') == 0 and not include_specials:
             protected.append(dict(episode, reason='Specials (season 0) are excluded'))
@@ -828,9 +934,14 @@ def keep_frame(episodes, rule, settings, now=None) -> dict:
     if include_specials is None:
         include_specials = bool(retention.get('include_specials', False))
 
+    # Set aside where specials are, and for the same reason: outside the frame, and so
+    # outside everything that acts on the frame. Never monitored by us, never unmonitored.
+    excluded = excluded_episodes(episodes, rule, settings)
     specials, considered = [], []
     for episode in episodes:
-        if episode.get('season') == 0 and not include_specials:
+        if excluded.get(episode.get('episode_id')):
+            specials.append(episode)
+        elif episode.get('season') == 0 and not include_specials:
             specials.append(episode)
         else:
             considered.append(episode)
