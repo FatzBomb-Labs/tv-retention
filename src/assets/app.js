@@ -278,7 +278,7 @@
           forced.delete(ruleId);
           renderRules();
           renderAlerts();
-          renderStats();
+          renderCounts();
         }
       }
     } finally {
@@ -302,7 +302,7 @@
         applyAlerts(fresh.alerts);
         renderRules();
         renderAlerts();
-        renderStats();
+        renderCounts();
         renderCheckBanner(progress);
         if (!progress.running) { clearInterval(pollTimer); pollTimer = null; renderCheckBanner({}); }
       } catch (error) {
@@ -835,7 +835,8 @@
     const plan = snapshot.plan || {};
     // The confirmation states the actual plan rather than describing runs in general.
     let warning = `Run ${plural(runnable.length, 'series')} now?\n\n`;
-    warning += plan.actionable ? `This will ${planText(plan)}.\n\n` : 'No changes are currently expected.\n\n';
+    const changes = changeSummary(plan).map((row) => `• ${row.text}`).join('\n');
+    warning += plan.actionable ? `Scheduled changes:\n${changes}\n\n` : 'No changes are currently expected.\n\n';
     if (testMode()) {
       warning += 'Test mode is on, so this changes nothing: it reports exactly what it would '
         + 'have done and writes neither to your files nor to Sonarr.';

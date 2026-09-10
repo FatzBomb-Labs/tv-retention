@@ -103,6 +103,18 @@ class Interface(unittest.TestCase):
         self.assertIn('startPolling', self.js)
         self.assertIn('data.busy', self.js)
 
+    def test_the_background_flows_call_nothing_that_is_not_defined(self):
+        """`renderStats()` and `planText(plan)` crashed live flows after later edits
+        removed their definitions.
+
+        renderStats aborted the check queue after its first completed rule and killed
+        sweep polling on its first tick; planText broke the Run confirmation whenever a
+        plan was actionable. The executable suite in tests/frontend/ exercises the
+        flows; this keeps the dangling names from coming back.
+        """
+        self.assertNotIn('renderStats()', self.js)
+        self.assertNotIn('planText', self.js)
+
     def test_every_module_constant_used_is_declared(self):
         """Catch a constant left behind when an edit replaced the block that declared it.
 

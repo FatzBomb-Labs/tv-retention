@@ -17,7 +17,8 @@ python3 -c "import sys; sys.path.insert(0, \"src/worker\"); import main, actions
   && echo "worker imports OK"
 if command -v node >/dev/null; then
   node --check src/assets/app.js && echo "app.js syntax OK"
+  node --test tests/frontend/*.test.js && echo "frontend runtime tests OK"
 else
-  echo "node not present; app.js not syntax checked"
+  echo "node not present; app.js not syntax checked, frontend runtime tests not run"
 fi
 '
