@@ -725,6 +725,23 @@ class Interface(unittest.TestCase):
         """
         self.assertRegex(self.js, r"const VIEWS = \[\.\.\.document\.querySelectorAll\('\.tvr-side \[data-view\]'\)\]")
 
+    def test_every_view_is_inside_the_main_column(self):
+        """Five of them were not, and rendered under the shell rather than in it.
+
+        A view outside `<main>` is a sibling of the whole layout, so it lays out below the
+        sidebar and the top bar instead of in the column beside them. `showView` still
+        finds it and still unhides it, which is why this looks like a styling problem and
+        is not one: the markup is wrong and every id check passes anyway.
+
+        The dialog and the busy overlay are deliberately outside and stay there — they
+        cover the page rather than sit in it.
+        """
+        inside = self.html.split('<main')[1].split('</main>')[0]
+        after = self.html.split('</main>')[1]
+        for view in re.findall(r'<section id="tvr-view-([a-z-]+)"', self.html):
+            self.assertIn(f'id="tvr-view-{view}"', inside, f'{view} renders outside <main>')
+        self.assertNotIn('<section id="tvr-view-', after, 'a view was left after </main>')
+
     def test_every_tab_has_a_panel_and_every_panel_has_a_tab(self):
         import re
         wanted = set(re.findall(r'data-view="([a-z-]+)"', self.html))
