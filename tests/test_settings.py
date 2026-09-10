@@ -211,3 +211,48 @@ class AutomationFromTheForm(unittest.TestCase):
         # The safety it always was, now visible: it appears on the series card as a cause
         # rather than quietly removing season 0 from consideration.
         self.assertIs(validate_settings(base())['automation']['exclude_specials'], True)
+
+
+class AirDates(unittest.TestCase):
+    """Which services may be asked, in what order, and what happens when none can answer."""
+
+    def air(self, **over):
+        return validate_settings(base(air_dates=over))['air_dates']
+
+    def test_the_order_is_the_setting(self):
+        # The first enabled provider that answers wins, so moving a row is the whole of how
+        # somebody says "ask Plex before TMDB".
+        found = self.air(providers=['plex', 'tmdb'])
+        self.assertEqual(found['providers'][:2], ['plex', 'tmdb'])
+
+    def test_a_provider_this_version_knows_about_is_never_silently_absent(self):
+        found = self.air(providers=['tmdb'])
+        self.assertEqual(set(found['providers']), set(DEFAULTS['air_dates']['providers']))
+
+    def test_a_provider_from_a_later_version_is_dropped_rather_than_refused(self):
+        # A settings document must still load after a provider is removed.
+        self.assertNotIn('napster', self.air(providers=['napster', 'tmdb'])['providers'])
+
+    def test_enabling_something_not_in_the_list_enables_nothing(self):
+        self.assertEqual(self.air(providers=['tmdb'], enabled=['napster'])['enabled'], [])
+
+    def test_estimating_is_the_default_and_reaches_the_evaluator(self):
+        # Two names for one decision, derived rather than stored twice, so the radio on the
+        # Safety page and the flag `evaluate` reads cannot drift apart.
+        document = validate_settings(base())
+        self.assertEqual(document['air_dates']['unresolved'], 'estimate')
+        self.assertIs(document['retention']['allow_estimated_dates'], True)
+
+    def test_leaving_it_unresolved_reaches_the_evaluator_too(self):
+        document = validate_settings(base(air_dates={'unresolved': 'leave'}))
+        self.assertIs(document['retention']['allow_estimated_dates'], False)
+
+    def test_a_document_written_before_the_page_existed_keeps_its_answer(self):
+        # The setting lived under `retention` and said the same thing the other way up.
+        document = validate_settings(base(retention={'allow_estimated_dates': False}))
+        self.assertEqual(document['air_dates']['unresolved'], 'leave')
+        self.assertIs(document['retention']['allow_estimated_dates'], False)
+
+    def test_an_answer_nobody_offered_is_refused(self):
+        with self.assertRaises(Rejected):
+            self.air(unresolved='guess')

@@ -95,9 +95,25 @@ DEFAULTS = {
         'exclude_folders': [],
         'exclude_episodes': [],
     },
+    # Where an air date comes from when Sonarr has none, and what happens when nothing can
+    # supply one. It matters more than its size suggests: a series with unresolvable dates
+    # cannot be kept by age at all, so this is the difference between a rule that works and
+    # one that silently processes nothing.
+    #
+    # TVDB is deliberately absent. It is Sonarr's own metadata source, so if Sonarr has no
+    # air date then TVDB has none either, and asking again costs a paid v4 key to learn
+    # nothing.
+    'air_dates': {
+        # Order is priority: the first enabled provider that answers, wins.
+        'providers': ['tmdb', 'tvmaze', 'anilist', 'imdb', 'plex', 'jellyfin'],
+        'enabled': ['tmdb'],
+        'unresolved': 'estimate',        # estimate | leave
+        'still_unresolved': 'exclude',   # exclude | disable
+    },
     'retention': {
-        # Sonarr's air date, then TMDB, then a date estimated from the episodes either
-        # side. With this off, an episode none of those can date is never deleted.
+        # Sonarr's air date, then a provider, then a date estimated from the episodes
+        # either side. With this off, an episode none of those can date is never deleted.
+        # This is `air_dates.unresolved` said in the shape `evaluate` reads.
         'allow_estimated_dates': True,
         # What the plugin does with Sonarr's monitored flags. See MONITORING_MODES: the
         # safe one is the default, because the other can start hundreds of downloads.
@@ -518,6 +534,54 @@ def validate_automation(raw) -> dict:
     }
 
 
+# Every service that could answer "when did this air", why it might not be available, and
+# whether this can talk to it yet. Listed rather than hidden, because a provider missing
+# from the page is indistinguishable from one nobody thought of.
+AIR_DATE_PROVIDERS = {
+    'tmdb': {'name': 'TMDB', 'needs': 'an API key, under Connections', 'built': True},
+    'tvmaze': {'name': 'TVMaze', 'needs': '', 'built': False},
+    'anilist': {'name': 'AniList', 'needs': '', 'built': False},
+    'imdb': {'name': 'IMDB', 'needs': 'no public API exists', 'built': False},
+    'plex': {'name': 'Plex', 'needs': 'a Plex connection', 'built': False},
+    'jellyfin': {'name': 'Jellyfin', 'needs': 'a Jellyfin connection', 'built': False},
+}
+AIR_DATE_ANSWERS = {
+    'unresolved': {
+        'estimate': 'Estimate the air date from neighbouring episodes or position',
+        'leave': 'Leave it unresolved',
+    },
+    'still_unresolved': {
+        'exclude': 'Add the episode to the exclusion list',
+        'disable': 'Disable the series and raise an error',
+    },
+}
+
+
+def validate_air_dates(raw) -> dict:
+    """Which services may be asked, in what order, and what happens when none can answer.
+
+    The order is the setting: the first enabled provider that answers wins, so moving a
+    row is the whole of how somebody expresses "ask Plex before TMDB". Unknown names are
+    dropped rather than refused — a provider removed in a later version should not stop a
+    settings document loading.
+    """
+    raw = raw or {}
+    order = [name for name in (raw.get('providers') or []) if name in AIR_DATE_PROVIDERS]
+    # Anything this version knows about and the document did not mention goes on the end,
+    # so a new provider appears rather than being silently absent.
+    order += [name for name in AIR_DATE_PROVIDERS if name not in order]
+    enabled = [name for name in order if name in set(raw.get('enabled') or [])]
+    return {
+        'providers': order,
+        'enabled': enabled,
+        'unresolved': _choice(raw.get('unresolved') or 'estimate',
+                              tuple(AIR_DATE_ANSWERS['unresolved']), 'Unresolved air dates'),
+        'still_unresolved': _choice(raw.get('still_unresolved') or 'exclude',
+                                    tuple(AIR_DATE_ANSWERS['still_unresolved']),
+                                    'Still-unresolved air dates'),
+    }
+
+
 # Said in the preview and in the journal, so "why was this skipped" never needs anyone to
 # go and read the settings to find out.
 EXCLUSION_REASONS = {
@@ -779,6 +843,12 @@ def validate_settings(raw, previous=None) -> dict:
     if tmdb_key and not re.match(r'^[A-Za-z0-9._\-]{16,128}$', tmdb_key):
         raise Rejected('TMDB API key looks malformed')
 
+    air_dates = validate_air_dates(raw.get('air_dates'))
+    # A document written before the Safety page existed carries the answer in the old
+    # place; the migration moves it, and this catches anything the migration did not see.
+    if 'air_dates' not in raw and 'allow_estimated_dates' in retention_raw:
+        air_dates['unresolved'] = 'estimate' if _flag(retention_raw['allow_estimated_dates']) else 'leave'
+
     alerts_raw = raw.get('alerts') or {}
     muted = [_text(kind, 'Alert kind', 32) for kind in (alerts_raw.get('muted') or [])]
     for kind in muted:
@@ -804,8 +874,12 @@ def validate_settings(raw, previous=None) -> dict:
         'rules': rules,
         'tmdb': {'api_key': tmdb_key},
         'automation': validate_automation(raw.get('automation')),
+        'air_dates': air_dates,
         'retention': {
-            'allow_estimated_dates': _flag(retention_raw.get('allow_estimated_dates', True)),
+            # One decision, stored twice on purpose: the radio on the Safety page is what
+            # somebody set, and this is the shape `evaluate` reads. Derived here so the two
+            # cannot drift.
+            'allow_estimated_dates': air_dates['unresolved'] == 'estimate',
             'monitoring': _choice(retention_raw.get('monitoring') or DEFAULTS['retention']['monitoring'],
                                   MONITORING_MODES, 'Monitoring'),
         },

@@ -287,14 +287,16 @@ def action_exclusions(settings, request):
     """
     rule, episodes, _ = series_episodes(settings, request)
     retention = settings.get('retention') or {}
-    active = effective_rule(rule, settings.get('profiles'))
-    specials = active.get('include_specials')
+    automation = settings.get('automation') or {}
+    override = rule.get('include_specials')
     mode = rule.get('monitoring') or ''
     return {
         'monitoring': mode or retention.get('monitoring') or 'unmonitor-only',
         'monitoring_default': not mode,
-        'specials': bool(retention.get('include_specials')) if specials is None else bool(specials),
-        'specials_default': specials is None,
+        # Whether specials are *kept*, which is the question the pane asks. The setting is
+        # phrased the other way round because it is an exclusion now.
+        'specials': bool(override) if override is not None else not automation.get('exclude_specials'),
+        'specials_default': override is None,
         'exclusions': exclusion_summary(episodes, rule, settings),
     }
 

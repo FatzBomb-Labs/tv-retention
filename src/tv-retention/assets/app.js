@@ -2291,20 +2291,25 @@
       const sayAutomation = (data) => {
         if (!existing) return;
         autoRow.hidden = false;
-        const found = (data && data.exclusions) || { seasons: [], patterns: [], manual: 0, total: 0 };
+        const found = Object.assign({ seasons: [], folders: [], episode_patterns: [],
+                                      manual: 0, specials: 0, total: 0 },
+                                    (data && data.exclusions) || {});
         const line = (className, label) => el('div', { className: `tvr-auto-line ${className}`,
                                                        textContent: label });
+        const from = (n) => `${plural(n, 'episode')}, from Automation`;
         const lines = [
           line('tvr-auto-plain', `Monitoring: ${MONITOR_NAMES[data.monitoring] || data.monitoring}`
             + (data.monitoring_default ? ' — from Automation' : ' — set on this series')),
-          line('tvr-auto-plain', `Specials: ${data.specials ? 'included' : 'excluded'}`
-            + (data.specials_default ? ' — from Automation' : ' — set on this series')),
         ];
+        if (!data.specials_default) lines.push(line('tvr-auto-plain',
+          `Specials: ${data.specials ? 'kept' : 'excluded'} — set on this series`));
+        if (found.specials) lines.push(line('tvr-auto-rule', `Specials excluded — ${from(found.specials)}`));
         found.seasons.forEach((entry) => lines.push(line('tvr-auto-rule',
-          `${entry.season === 0 ? 'Specials' : `Season ${entry.season}`} excluded — `
-          + `${plural(entry.episodes, 'episode')}, from Automation`)));
-        found.patterns.forEach((entry) => lines.push(line('tvr-auto-rule',
-          `Matches “${entry.pattern}” — ${plural(entry.episodes, 'episode')}, from Automation`)));
+          `Season ${entry.season} excluded — ${from(entry.episodes)}`)));
+        found.folders.forEach((entry) => lines.push(line('tvr-auto-rule',
+          `Folder matches “${entry.pattern}” — ${from(entry.episodes)}`)));
+        found.episode_patterns.forEach((entry) => lines.push(line('tvr-auto-rule',
+          `Matches “${entry.pattern}” — ${from(entry.episodes)}`)));
         if (found.manual) lines.push(line('tvr-auto-manual',
           `${plural(found.manual, 'episode')} excluded on this series`));
         if (!found.total) lines.push(line('tvr-auto-plain', 'Nothing is excluded from this series'));
@@ -2986,12 +2991,173 @@
   ];
   const mutedInputs = {};
 
+  // -- automation --------------------------------------------------------
+  // The questions, their answers, and which answer a fresh install starts on. Radios
+  // rather than a dropdown because the answers are the point: a closed select says
+  // "Ask me" and hides the two things it could have done instead, which is how a default
+  // ends up being something nobody chose because nobody saw it.
+  //
+  // The wording matches core's own ANSWERS maps, because the journal explains a run using
+  // those, and a run explaining itself differently from the page that configured it is
+  // worse than either wording alone.
+  const AUTOMATION_QUESTIONS = [
+    ['monitoring', 'tvr-auto-monitoring', [
+      ['in_scope_unmonitored', 'If an episode within the keep scope is unmonitored', [
+        ['monitor', 'Monitor all episodes within the keep scope automatically'],
+        ['ignore', 'Do not change monitoring status'],
+        ['ask', 'Ask me'],
+      ]],
+      ['out_scope_monitored', 'If an episode outside the keep scope is monitored', [
+        ['unmonitor', 'Unmonitor all episodes outside the keep scope automatically'],
+        ['exclude', 'Keep monitored, exclude from deletions'],
+        ['ask', 'Ask me'],
+      ]],
+    ]],
+    ['persistence', 'tvr-auto-persistence', [
+      ['unmonitored_in_scope',
+       'When Sonarr has unmonitored a previously monitored episode within the keep scope', [
+        ['ignore', 'Ignore'],
+        ['notice', 'Ignore, mark as notice'],
+        ['remonitor', 'Remonitor that episode automatically'],
+      ]],
+      ['monitored_out_scope',
+       'When Sonarr has monitored a previously unmonitored episode outside the keep scope', [
+        ['notice-exclude', 'Mark as notice and add to exclusion list'],
+        ['unmonitor', 'Unmonitor automatically'],
+      ]],
+    ]],
+  ];
+  // Stored as a flag rather than a word, because it only ever had two answers. Shown as
+  // two answers anyway: "off" is not a thing anybody decided, and "wait for the RSS pass"
+  // is.
+  const SEARCH_QUESTION = [
+    'When TV Retention has marked a previously unmonitored episode to monitor in Sonarr', [
+      ['wait', 'Wait for the Sonarr RSS pass to search for the newly monitored episode'],
+      ['search', 'Tell Sonarr to immediately begin a search on that series'],
+    ]];
+  const questionInputs = {};
+
+  function questionNode(group, name, label, answers, chosen) {
+    const boxes = [];
+    const rows = answers.map(([value, caption]) => {
+      const input = el('input', { type: 'radio', name: `tvr-${group}-${name}`,
+                                  value, checked: value === chosen });
+      boxes.push(input);
+      return el('label', { className: 'tvr-answer' }, [input, el('span', { textContent: caption })]);
+    });
+    questionInputs[`${group}.${name}`] = () =>
+      (boxes.find((box) => box.checked) || boxes[boxes.length - 1]).value;
+    return el('div', { className: 'tvr-question' },
+              [el('div', { className: 'tvr-question-ask', textContent: label }), ...rows]);
+  }
+
+  // A list of typed phrases, each with the button that removes it and one that adds
+  // another. A textarea would hold the same strings, but a row per phrase is what the
+  // thing actually is, and it makes an empty list look like an empty list.
+  function phraseList(box, values) {
+    const rows = [];
+    const draw = () => {
+      box.replaceChildren(...rows.map((row) => row.node),
+                          el('div', { className: 'tvr-phrase-add' }, [add]));
+    };
+    const addRow = (value) => {
+      const input = el('input', { type: 'text', spellcheck: false, value: value || '' });
+      const drop = el('button', { type: 'button', className: 'tvr-icon-button tvr-phrase-drop',
+                                  title: 'Remove this' }, [el('i', { className: 'fa fa-times' })]);
+      const row = { node: el('div', { className: 'tvr-phrase' }, [input, drop]), input };
+      drop.addEventListener('click', () => {
+        rows.splice(rows.indexOf(row), 1);
+        draw();
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      rows.push(row);
+      return row;
+    };
+    const add = el('button', { type: 'button', className: 'tvr-secondary tvr-small',
+                               textContent: 'Add' });
+    add.addEventListener('click', () => { const row = addRow(''); draw(); row.input.focus(); });
+    (values || []).forEach(addRow);
+    draw();
+    return () => rows.map((row) => row.input.value.trim()).filter((value) => value !== '');
+  }
+  let folderPhrases = () => [];
+  let episodePhrases = () => [];
+
+  // -- air dates ---------------------------------------------------------
+  // Every service that could answer "when did this air", with why it might not be
+  // available. Listed even when it cannot be reached: a provider missing from the page is
+  // indistinguishable from one nobody thought of, and "why isn't Plex here" is a question
+  // the page should answer rather than provoke.
+  const AIR_PROVIDERS = {
+    tmdb: { name: 'TMDB', needs: 'Add an API key under Connections' },
+    tvmaze: { name: 'TVMaze', needs: 'Not built yet — no key needed when it is' },
+    anilist: { name: 'AniList', needs: 'Not built yet — no key needed when it is' },
+    imdb: { name: 'IMDB', needs: 'No public API exists' },
+    plex: { name: 'Plex', needs: 'Needs a Plex connection' },
+    jellyfin: { name: 'Jellyfin', needs: 'Needs a Jellyfin connection' },
+  };
+  const AIR_QUESTIONS = [
+    ['unresolved', 'tvr-air-unresolved', 'If none of those can resolve an air date', [
+      ['estimate', 'Estimate the air date from neighbouring episodes or position'],
+      ['leave', 'Leave it unresolved'],
+    ]],
+    ['still_unresolved', 'tvr-air-still', 'If the air date is still unresolved', [
+      ['exclude', 'Add the episode to the exclusion list'],
+      ['disable', 'Disable the series and raise an error'],
+    ]],
+  ];
+  let airOrder = [];
+  let airEnabled = new Set();
+
+  // Only TMDB is wired to anything today, so only TMDB can be ticked. The rest carry the
+  // reason instead of a box that does nothing, because a checkbox that saves a preference
+  // no code reads is worse than an honest "not yet".
+  const airReady = (name) => name === 'tmdb' && !!((settings.tmdb || {}).api_key || '').trim();
+
+  function renderAirProviders() {
+    const box = $('tvr-air-providers');
+    box.replaceChildren(...airOrder.map((name, index) => {
+      const meta = AIR_PROVIDERS[name] || { name, needs: '' };
+      const ready = airReady(name);
+      const tick = el('input', { type: 'checkbox', className: 'tvr-pick',
+                                 checked: ready && airEnabled.has(name), disabled: !ready });
+      tick.addEventListener('change', () => {
+        if (tick.checked) airEnabled.add(name); else airEnabled.delete(name);
+        settingsDirty(true);
+      });
+      const move = (to) => {
+        if (to < 0 || to >= airOrder.length) return;
+        airOrder.splice(to, 0, airOrder.splice(index, 1)[0]);
+        renderAirProviders();
+        settingsDirty(true);
+      };
+      const up = el('button', { type: 'button', className: 'tvr-icon-button', title: 'Ask this earlier',
+                                disabled: index === 0 }, [el('i', { className: 'fa fa-caret-up' })]);
+      const down = el('button', { type: 'button', className: 'tvr-icon-button', title: 'Ask this later',
+                                  disabled: index === airOrder.length - 1 },
+                      [el('i', { className: 'fa fa-caret-down' })]);
+      up.addEventListener('click', () => move(index - 1));
+      down.addEventListener('click', () => move(index + 1));
+      return el('div', { className: `tvr-provider${ready ? '' : ' tvr-provider-off'}` }, [
+        el('span', { className: 'tvr-provider-rank', textContent: String(index + 1) }),
+        tick,
+        el('span', { className: 'tvr-provider-name', textContent: meta.name }),
+        el('span', { className: 'tvr-provider-why', textContent: ready ? '' : meta.needs }),
+        up, down,
+      ]);
+    }));
+  }
+
   function renderSettings() {
     const retention = settings.retention || {};
-    $('tvr-include-specials').checked = !!retention.include_specials;
-    $('tvr-estimated-dates').checked = retention.allow_estimated_dates !== false;
-    $('tvr-search-after').checked = !!retention.search_after_monitor;
     $('tvr-monitoring').value = retention.monitoring || 'unmonitor-only';
+    const air = settings.air_dates || {};
+    airOrder = (air.providers || Object.keys(AIR_PROVIDERS)).slice();
+    airEnabled = new Set(air.enabled || []);
+    renderAirProviders();
+    AIR_QUESTIONS.forEach(([name, target, label, answers]) => {
+      $(target).replaceChildren(questionNode('air', name, label, answers, air[name]));
+    });
     const describeMonitoring = () => {
       $('tvr-monitoring-help').textContent = $('tvr-monitoring').value === 'full-sync'
         ? 'Episodes inside the keep window are set to monitored, including ones with no file — '
@@ -3002,8 +3168,17 @@
     $('tvr-monitoring').onchange = describeMonitoring;
     describeMonitoring();
     const automation = settings.automation || {};
+    AUTOMATION_QUESTIONS.forEach(([group, target, questions]) => {
+      $(target).replaceChildren(...questions.map(([name, label, answers]) =>
+        questionNode(group, name, label, answers, (automation[group] || {})[name])));
+    });
+    $('tvr-auto-search').replaceChildren(
+      questionNode('search', 'after_monitor', SEARCH_QUESTION[0], SEARCH_QUESTION[1],
+                   automation.search_after_monitor ? 'search' : 'wait'));
+    $('tvr-exclude-specials').checked = automation.exclude_specials !== false;
     $('tvr-exclude-seasons').value = (automation.exclude_seasons || []).join(', ');
-    $('tvr-exclude-matching').value = (automation.exclude_matching || []).join('\n');
+    folderPhrases = phraseList($('tvr-exclude-folders'), automation.exclude_folders);
+    episodePhrases = phraseList($('tvr-exclude-episodes'), automation.exclude_episodes);
     $('tvr-tmdb-key').value = (settings.tmdb || {}).api_key || '';
     $('tvr-history-size').value = settings.log_retention_runs;
     $('tvr-log-level').value = (settings.logging || {}).level || 'info';
@@ -3026,15 +3201,29 @@
     const notifications = {};
     NOTIFICATIONS.forEach(([name]) => { notifications[name] = notifyInputs[name].checked; });
     return Object.assign({}, settings, {
-      retention: {
-        include_specials: $('tvr-include-specials').checked,
-        allow_estimated_dates: $('tvr-estimated-dates').checked,
-        search_after_monitor: $('tvr-search-after').checked,
-        monitoring: $('tvr-monitoring').value,
+      // `allow_estimated_dates` is not sent: it is derived from the air-date answer on the
+      // way in, so posting it as well would be two sources for one decision.
+      retention: { monitoring: $('tvr-monitoring').value },
+      air_dates: {
+        providers: airOrder.slice(),
+        enabled: airOrder.filter((name) => airEnabled.has(name)),
+        unresolved: questionInputs['air.unresolved'](),
+        still_unresolved: questionInputs['air.still_unresolved'](),
       },
       automation: {
+        monitoring: {
+          in_scope_unmonitored: questionInputs['monitoring.in_scope_unmonitored'](),
+          out_scope_monitored: questionInputs['monitoring.out_scope_monitored'](),
+        },
+        persistence: {
+          unmonitored_in_scope: questionInputs['persistence.unmonitored_in_scope'](),
+          monitored_out_scope: questionInputs['persistence.monitored_out_scope'](),
+        },
+        search_after_monitor: questionInputs['search.after_monitor']() === 'search',
+        exclude_specials: $('tvr-exclude-specials').checked,
         exclude_seasons: typedList($('tvr-exclude-seasons').value, ','),
-        exclude_matching: typedList($('tvr-exclude-matching').value, '\n'),
+        exclude_folders: folderPhrases(),
+        exclude_episodes: episodePhrases(),
       },
       tmdb: { api_key: $('tvr-tmdb-key').value },
       log_retention_runs: $('tvr-history-size').value,

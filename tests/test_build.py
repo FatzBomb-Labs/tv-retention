@@ -596,21 +596,70 @@ class Interface(unittest.TestCase):
                 continue
             self.assertIn(identifier, wired, f'{identifier} is on the schedule panel but never saved')
 
+    def _panel(self, view):
+        return self.html.split(f'id="tvr-view-{view}"')[1].split('</section>')[0]
+
     def test_every_automation_control_is_wired_to_save(self):
         """The same bug the schedule panel already has a guard for.
 
         Automation is where a control is most likely to be added and least likely to be
         noticed if it does nothing: every setting on it is global, so nothing on a series
         card contradicts a value that was never saved.
+
+        A mount point is exempt from the second half and only the second half: its value
+        travels through `questionInputs` rather than by id, and the test below is what
+        holds *those* to the same standard.
         """
-        panel = self.html.split('id="tvr-view-media-automation"')[1].split('</section>')[0]
         collect = self.js.split('function collectSettings()')[1].split('\n  }')[0]
         render = self.js.split('function renderSettings()')[1].split('\n  }\n')[0]
-        for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
-            if 'help' in identifier or 'field' in identifier:
-                continue
-            self.assertIn(identifier, collect, f'{identifier} is on Automation but never saved')
-            self.assertIn(identifier, render, f'{identifier} is on Automation but never filled in')
+        for view in ('media-automation', 'settings-safety'):
+            for identifier in re.findall(r'id="(tvr-[a-z-]+)"', self._panel(view)):
+                if 'help' in identifier or 'field' in identifier:
+                    continue
+                # A mount point holds controls built at render time: it is filled from a
+                # question table rather than by name, and its value reaches the document
+                # through a collector rather than by id. Naming that collector here is the
+                # point — a new mount cannot be added without saying what saves it, which
+                # is the whole failure this test exists to prevent.
+                if identifier in self.MOUNTS:
+                    self.assertIn(f"'{identifier}'", self.js,
+                                  f'{identifier} is a mount nothing fills')
+                    self.assertIn(self.MOUNTS[identifier], collect,
+                                  f'{identifier} is on {view} but nothing saves it')
+                    continue
+                self.assertIn(identifier, render, f'{identifier} is on {view} but never filled in')
+                self.assertIn(identifier, collect, f'{identifier} is on {view} but never saved')
+
+    MOUNTS = {
+        'tvr-auto-monitoring': "questionInputs['monitoring.",
+        'tvr-auto-persistence': "questionInputs['persistence.",
+        'tvr-auto-search': "questionInputs['search.after_monitor']",
+        'tvr-air-unresolved': "questionInputs['air.unresolved']",
+        'tvr-air-still': "questionInputs['air.still_unresolved']",
+        'tvr-air-providers': 'providers: airOrder',
+        'tvr-exclude-folders': 'folderPhrases()',
+        'tvr-exclude-episodes': 'episodePhrases()',
+    }
+
+    def test_every_question_offered_is_a_question_read_back(self):
+        """A radio group renders from one table and saves from a hand-written line.
+
+        Adding a question to the table puts it on the page and nowhere else: it renders,
+        it takes a click, it looks saved, and `collectSettings` never mentions it. That is
+        the mount-point version of the bug the test above catches for plain controls.
+        """
+        collect = self.js.split('function collectSettings()')[1].split('\n  }')[0]
+        groups = re.findall(r"^    \['([a-z_]+)', 'tvr-auto-([a-z]+)', \[", self.js, re.M)
+        asked = set()
+        for group, _ in groups:
+            block = self.js.split(f"['{group}', 'tvr-auto-")[1].split('\n    ]],')[0]
+            asked |= {f'{group}.{name}' for name in re.findall(r"^      \['([a-z_]+)',", block, re.M)}
+        asked.add('search.after_monitor')
+        asked |= {f'air.{name}' for name in re.findall(r"^    \['([a-z_]+)', 'tvr-air-", self.js, re.M)}
+        self.assertTrue(asked, 'the question tables were not found at all')
+        for key in sorted(asked):
+            self.assertIn(f"questionInputs['{key}']", collect,
+                          f'{key} is offered on a page but never saved')
 
     def test_a_remembered_view_is_checked_before_it_is_used(self):
         """localStorage outlives the view it names, and a rename is not a migration.
