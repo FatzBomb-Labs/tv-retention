@@ -12,7 +12,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 |---|---|
 | `python3 -m unittest discover -s tests` | 386 tests, all pass |
 | Worker imports | every module loads, server.py included |
-| `node --check src/tv-retention/assets/app.js` | no syntax errors |
+| `node --check src/assets/app.js` | no syntax errors |
 | `docker build` | 122 MB image |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; `snapshot` answers with settings migrated v7 to v8; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 

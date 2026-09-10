@@ -99,7 +99,7 @@ class UnmonitorOnDelete(unittest.TestCase):
         window that have no file — never the deletion itself.
         """
         from pathlib import Path
-        source = (Path(__file__).resolve().parents[1] / 'src' / 'tv-retention' / 'worker' / 'main.py').read_text()
+        source = (Path(__file__).resolve().parents[1] / 'src' / 'worker' / 'main.py').read_text()
         block = source.split('if deleted_ids and not dry_run:')[1].split('if (settings.get(')[0]
         self.assertIn('client.unmonitor(deleted_ids)', block)
         self.assertNotIn('auto_unmonitor', block)

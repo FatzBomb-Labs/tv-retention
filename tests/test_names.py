@@ -17,7 +17,7 @@ from pathlib import Path
 
 import context  # noqa: F401
 
-WORKER = Path(__file__).resolve().parents[1] / 'src' / 'tv-retention' / 'worker'
+WORKER = Path(__file__).resolve().parents[1] / 'src' / 'worker'
 BUILTINS = set(dir(builtins))
 
 
@@ -289,7 +289,7 @@ class Unused(unittest.TestCase):
     touching no filesystem and implying a capability the project had given up.
     """
 
-    ROOTS = sorted(WORKER.glob('*.py')) + sorted((WORKER.parents[2] / 'tests').glob('*.py'))
+    ROOTS = sorted(WORKER.glob('*.py')) + sorted((WORKER.parents[1] / 'tests').glob('*.py'))
 
     @classmethod
     def setUpClass(cls):

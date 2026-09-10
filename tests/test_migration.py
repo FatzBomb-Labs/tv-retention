@@ -227,6 +227,6 @@ class ToV9(unittest.TestCase):
         touches no filesystem at all* is true without qualification for the first time.
         """
         from pathlib import Path
-        root = Path(__file__).resolve().parents[1] / 'src' / 'tv-retention'
+        root = Path(__file__).resolve().parents[1] / 'src'
         self.assertNotIn('browseFolder', (root / 'assets' / 'app.js').read_text())
         self.assertNotIn('action_browse', (root / 'worker' / 'actions.py').read_text())

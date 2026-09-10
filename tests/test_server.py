@@ -56,7 +56,7 @@ class Startup(unittest.TestCase):
         X-Forwarded-For was spoofed to look local and skip authentication. Only an
         environment variable decides here, and nothing on the wire can forge one.
         """
-        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         # Where the request claims to come from is never read, in any form.
         self.assertNotIn("X-Forwarded-For')", source)
         self.assertNotIn('X-Real-IP', source)
@@ -103,7 +103,7 @@ class Sessions(unittest.TestCase):
         self.assertTrue(self.server.credentials_match('someone', 'a-long-enough-password'))
         self.assertFalse(self.server.credentials_match('someone', 'wrong'))
         self.assertFalse(self.server.credentials_match('wrong', 'a-long-enough-password'))
-        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         # `==` on the username leaks whether it was right, which is half the secret.
         self.assertIn('hmac.compare_digest(username, USERNAME)', source)
 
@@ -115,7 +115,7 @@ class Assets(unittest.TestCase):
     def test_the_cache_key_moves_when_either_asset_does(self):
         # Joining two digests and truncating takes every character from the first, which is
         # how four stylesheet-only releases shipped under the key the browser already held.
-        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         block = source.split('def asset_key()')[1].split('def ')[0]
         self.assertIn("for name in ('app.js', 'app.css', 'icons.css')", block)
         self.assertIn('digest.update', block)
@@ -134,8 +134,8 @@ class Assets(unittest.TestCase):
         button is present and there is nothing to click.
         """
         import re
-        assets = context.ROOT / 'src' / 'tv-retention' / 'assets'
-        markup = (context.ROOT / 'src' / 'tv-retention' / 'include' / 'interface.html').read_text()
+        assets = context.ROOT / 'src' / 'assets'
+        markup = (context.ROOT / 'src' / 'include' / 'interface.html').read_text()
         wanted = set(re.findall(r'fa fa-([a-z-]+)', (assets / 'app.js').read_text() + markup))
         wanted = {name for name in wanted if not name.endswith('-')}   # built from a template
         icons = (assets / 'icons.css').read_text()
@@ -143,7 +143,7 @@ class Assets(unittest.TestCase):
             self.assertIn(f'.fa-{name} {{', icons, f'fa-{name} has no glyph')
 
     def test_an_asset_name_cannot_describe_a_path(self):
-        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         block = source.split('def serve_asset')[1].split('def ')[0]
         self.assertIn("'/' in name or '\\\\' in name or name.startswith('.')", block)
 
@@ -155,7 +155,7 @@ class Worker(unittest.TestCase):
         Sonarr downloads without anyone logged in; this deletes on its schedule the same
         way. A login is for looking at it and changing it.
         """
-        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         block = source.split('def serve()')[1]
         self.assertIn('threading.Thread(target=main.serve_forever', block)
         self.assertIn('daemon=True', block)
@@ -234,10 +234,10 @@ class KeepAlive(unittest.TestCase):
         with socket.create_connection(('127.0.0.1', self.port), timeout=5) as sock:
             _, body = self.post(sock, sock.makefile('rb'), 'csrf_token=stale&payload=%7B%7D')
         self.assertTrue(jsonlib.loads(body)['expired'])
-        source = (context.ROOT / 'src' / 'tv-retention' / 'assets' / 'app.js').read_text()
+        source = (context.ROOT / 'src' / 'assets' / 'app.js').read_text()
         self.assertIn("if (data.expired) { window.location.href = '/login';", source)
 
     def test_an_oversized_body_closes_the_connection_instead_of_being_left_behind(self):
-        source = (context.ROOT / 'src' / 'tv-retention' / 'worker' / 'server.py').read_text()
+        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         block = source.split('def read_form')[1].split('def ')[0]
         self.assertIn('self.close_connection = True', block)

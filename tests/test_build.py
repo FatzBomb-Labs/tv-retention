@@ -12,7 +12,7 @@ class Interface(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        source = ROOT / 'src' / 'tv-retention'
+        source = ROOT / 'src'
         cls.css = (source / 'assets' / 'app.css').read_text()
         cls.js = (source / 'assets' / 'app.js').read_text()
         cls.html = (source / 'include' / 'interface.html').read_text()
@@ -94,7 +94,7 @@ class Interface(unittest.TestCase):
 
     def test_the_tick_asks_what_changed_whether_or_not_anyone_is_looking(self):
         # A problem the page discovers first is a notification that never fired.
-        worker = ROOT / 'src' / 'tv-retention' / 'worker'
+        worker = ROOT / 'src' / 'worker'
         tick = (worker / 'main.py').read_text().split('def tick()')[1].split('\ndef ')[0]
         self.assertIn('sync_from_sonarr', tick)
         self.assertIn("'watch': action_watch", (worker / 'actions.py').read_text())
@@ -129,7 +129,7 @@ class Interface(unittest.TestCase):
         self.assertIn('DEFAULT_TIMEOUT', declared, 'the test must be seeing real constants')
 
     def test_blocking_problems_are_visibly_different_from_advisory_ones(self):
-        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'assets' / 'app.css').read_text()
         self.assertIn('.tvr-dot-badge.error', css)
         self.assertIn('.tvr-dot-badge.warning', css)
         self.assertIn('.tvr-dot-badge.blocked', css)
@@ -167,7 +167,7 @@ class Interface(unittest.TestCase):
         self.assertIn('tvr-test-mode', self.js)
         self.assertRegex(self.js, r'Test mode is on, so this changes nothing')
         self.assertNotIn("$('tvr-preview')", self.js)
-        worker = (ROOT / 'src' / 'tv-retention' / 'worker' / 'main.py').read_text()
+        worker = (ROOT / 'src' / 'worker' / 'main.py').read_text()
         self.assertIn("test_mode = bool((settings.get('schedule') or {}).get('test_mode', True))",
                       worker)
         self.assertNotIn('test_mode = scheduled and', worker)
@@ -335,7 +335,7 @@ class Interface(unittest.TestCase):
         It said "already used" about a series a different Sonarr owns, and said nothing
         about a series whose folder had moved since its rule was written.
         """
-        actions = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        actions = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
         block = actions.split('def action_series')[1].split('\n\n\n')[0]
         self.assertIn("used = {(r['instance_id'], r['series_id'])", block)
         self.assertNotIn("{r['path'] for r in", block)
@@ -347,7 +347,7 @@ class Interface(unittest.TestCase):
         with no `offline=True` — against the rule that reads happen per show, in the
         background, and never hold anything but the show being read.
         """
-        actions = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        actions = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
         offered = set(re.findall(r"^    '([a-z-]+)': action_", actions, re.M))
         asked = set(re.findall(r"api\('([a-z-]+)'", self.js))
         self.assertEqual(sorted(offered - asked), [],
@@ -436,7 +436,7 @@ class Interface(unittest.TestCase):
         has to be written under #tv-retention or the generic rule wins and it renders as a
         grey rectangle with the number pushed off centre.
         """
-        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'assets' / 'app.css').read_text()
         import re
         shaping = re.search(r'#tv-retention \.tvr-dot-badge[^{]*\{([^}]*)\}', css)
         self.assertIsNotNone(shaping, 'the badge must be styled under #tv-retention')
@@ -446,7 +446,7 @@ class Interface(unittest.TestCase):
         self.assertNotRegex(css, r'(?m)^\.tvr-dot-badge\s*\{')
 
     def test_severity_is_carried_by_the_frame_not_a_colour_wash(self):
-        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'assets' / 'app.css').read_text()
         import re
         for match in re.finditer(r'\.tvr-alert-card\.(error|warning|notice)[^{]*\{([^}]*)\}', css):
             self.assertNotIn('background', match.group(2),
@@ -479,11 +479,11 @@ class Interface(unittest.TestCase):
 
     def test_a_fix_is_presented_as_an_action(self):
         self.assertIn('Quick action: ', self.js)
-        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'assets' / 'app.css').read_text()
         self.assertRegex(css, r'#tv-retention button\.tvr-action[^{]*\{[^}]*--tvr-action')
 
     def test_only_the_mark_and_the_card_edge_carry_severity(self):
-        css = (ROOT / 'src' / 'tv-retention' / 'assets' / 'app.css').read_text()
+        css = (ROOT / 'src' / 'assets' / 'app.css').read_text()
         import re
         # A tag tinted per severity is what made a page of warnings read as solid orange.
         for severity in ('error', 'warning', 'notice'):
@@ -802,8 +802,8 @@ class Interface(unittest.TestCase):
 
     def test_neither_the_list_nor_its_payload_carries_three_thousand_of_anything(self):
         self.assertIn('LIBRARY_LIMIT', self.js)
-        self.assertIn('LIST_FIELDS', (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text())
-        worker = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        self.assertIn('LIST_FIELDS', (ROOT / 'src' / 'worker' / 'actions.py').read_text())
+        worker = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
         for heavy in ("'overview'", "'seasons'"):
             self.assertNotIn(heavy, worker.split('LIST_FIELDS = (')[1].split(')')[0])
 
@@ -887,7 +887,7 @@ class Interface(unittest.TestCase):
         self.assertIn("api('refresh-series'", block)
         self.assertIn('Object.assign(series, data.series)', block)
         self.assertIn('readAt = data.read_at', block)          # dated by its own reading
-        actions = (ROOT / 'src' / 'tv-retention' / 'worker' / 'actions.py').read_text()
+        actions = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
         self.assertIn("'refresh-series': action_refresh_series,", actions)
 
     def test_the_panel_plan_does_not_total_three_lines_it_can_see(self):
@@ -1362,7 +1362,7 @@ class Theme(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        source = ROOT / 'src' / 'tv-retention'
+        source = ROOT / 'src'
         cls.css = (source / 'assets' / 'app.css').read_text()
         cls.js = (source / 'assets' / 'app.js').read_text()
         cls.html = (source / 'include' / 'interface.html').read_text()
@@ -1420,7 +1420,7 @@ class Bands(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        source = ROOT / 'src' / 'tv-retention'
+        source = ROOT / 'src'
         cls.js = (source / 'assets' / 'app.js').read_text()
         cls.css = (source / 'assets' / 'app.css').read_text()
         cls.html = (source / 'include' / 'interface.html').read_text()

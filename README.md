@@ -439,7 +439,7 @@ mask, and echoing the mask back means "keep the stored key".
 ## Architecture
 
 ```
-src/tv-retention/
+src/
   include/interface.html Markup for the sidebar shell and its thirteen views
   assets/app.js          UI logic; holds no authority, re-validates nothing itself
   assets/app.css         Styling

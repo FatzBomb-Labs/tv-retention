@@ -11,9 +11,9 @@ LABEL org.opencontainers.image.title="TV Retention" \
 RUN useradd --system --uid 1000 --create-home --home-dir /home/tvr tvr
 
 WORKDIR /app
-COPY src/tv-retention/worker/ /app/worker/
-COPY src/tv-retention/assets/ /app/assets/
-COPY src/tv-retention/include/ /app/include/
+COPY src/worker/ /app/worker/
+COPY src/assets/ /app/assets/
+COPY src/include/ /app/include/
 COPY VERSION LICENSE /app/
 
 ENV PYTHONUNBUFFERED=1 \
