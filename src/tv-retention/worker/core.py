@@ -20,7 +20,7 @@ from pathlib import Path
 import schedules
 
 VERSION = '0.1.0'
-SETTINGS_VERSION = 9
+SETTINGS_VERSION = 10
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -58,32 +58,47 @@ DEFAULTS = {
     'rules': [],
     # An API key is the switch: nobody enters one they do not want used.
     'tmdb': {'api_key': ''},
-    # Rules that put episodes on a series' exclusion list without anyone ticking them,
-    # evaluated every time rather than baked in: a list frozen at the moment a series was
-    # added would drift silently as the patterns changed.
-    #
-    # Specials are deliberately absent. Season 0 *is* specials in Sonarr, and
-    # `retention.include_specials` already decides them — globally, with a per-series
-    # override, which is strictly more than an automatic exclusion could offer. Two
-    # settings for one decision is how a rule ends up meaning different things depending
-    # on which page you last visited.
+    # What a run does without being asked. Every one of these is a decision that used to
+    # be taken silently by the code, which meant the only way to find out what it was was
+    # to read the code.
     'automation': {
-        # Whole seasons, by number.
-        'exclude_seasons': [],
-        # Matched against the episode's title and its file path, so a folder name is caught
-        # by the same box that catches a title. Sonarr has no season names to match on —
-        # its season object carries a number, a monitored flag and statistics, nothing else.
-        'exclude_matching': [],
-    },
-    'retention': {
-        # One decision: specials are kept, and counted in monitoring, together or not at all.
-        'include_specials': False,
-        # Sonarr's air date, then TMDB, then a date estimated from the episodes either
-        # side. With this off, an episode none of those can date is never deleted.
-        'allow_estimated_dates': True,
+        # The one-time pass offered when a keep window is set or moved. "Ask me" is the
+        # default for both halves because either can move hundreds of episodes, and a
+        # default that acts is a default nobody chose.
+        'monitoring': {
+            'in_scope_unmonitored': 'ask',    # monitor | ignore | ask
+            'out_scope_monitored': 'ask',     # unmonitor | exclude | ask
+        },
+        # Sonarr's monitored flags move on their own — an import, a hand edit, a series
+        # refresh. Noticing that is only useful if there is a stated answer for it.
+        'persistence': {
+            'unmonitored_in_scope': 'ignore',        # ignore | notice | remonitor
+            'monitored_out_scope': 'notice-exclude',  # notice-exclude | unmonitor
+        },
         # Monitoring an episode does not fetch it until Sonarr's next RSS pass. Searching
         # closes that gap, and can turn a metadata change into a great many downloads.
         'search_after_monitor': False,
+        # Exclusions. One gate, evaluated once, and everything that decides what a run may
+        # not touch goes through it — including specials, which had a branch of their own
+        # and so were a second gate saying the same kind of thing in a different place.
+        #
+        # Excluding specials is the safety it always was, and now it is a visible one: it
+        # appears on the series card beside every other cause rather than quietly removing
+        # fifteen episodes from consideration. Any series can still opt out, which is what
+        # its own `include_specials` now means.
+        'exclude_specials': True,
+        # Whole seasons, by number.
+        'exclude_seasons': [],
+        # Two lists, because they are two questions. A season folder is a container and an
+        # episode is a thing in it, and one box matching both cannot express "exclude the
+        # Extras folder but not an episode whose title happens to say extras".
+        'exclude_folders': [],
+        'exclude_episodes': [],
+    },
+    'retention': {
+        # Sonarr's air date, then TMDB, then a date estimated from the episodes either
+        # side. With this off, an episode none of those can date is never deleted.
+        'allow_estimated_dates': True,
         # What the plugin does with Sonarr's monitored flags. See MONITORING_MODES: the
         # safe one is the default, because the other can start hundreds of downloads.
         'monitoring': 'unmonitor-only',
@@ -420,20 +435,86 @@ def validate_queue(raw) -> dict:
     return queue
 
 
+def _answers(raw, allowed, field) -> dict:
+    """One of a fixed set per question, and never a blank.
+
+    A missing answer is the default rather than an error: this section grew a question at
+    a time, and a document written before one existed still has to load.
+    """
+    raw = raw or {}
+    return {name: _choice(raw.get(name) or allowed[name]['default'],
+                          allowed[name]['options'], f'{field} {name}')
+            for name in allowed}
+
+
+def _phrases(raw, field) -> list:
+    """A typed list, in the order it was typed, without the blanks or the repeats."""
+    found = []
+    for value in raw or []:
+        text = _text(value, field, 200)
+        if text and text not in found:
+            found.append(text)
+    return found
+
+
+# What the two monitoring questions may be answered with, and what each answer means. The
+# text is here rather than in the interface because the journal says it too, and a run
+# explaining itself differently from the page that configured it is worse than either.
+MONITORING_ANSWERS = {
+    'in_scope_unmonitored': {
+        'monitor': 'Monitor all episodes within the keep scope automatically',
+        'ignore': 'Do not change monitoring status',
+        'ask': 'Ask me',
+    },
+    'out_scope_monitored': {
+        'unmonitor': 'Unmonitor all episodes outside the keep scope automatically',
+        'exclude': 'Keep monitored, exclude from deletions',
+        'ask': 'Ask me',
+    },
+}
+PERSISTENCE_ANSWERS = {
+    'unmonitored_in_scope': {
+        'ignore': 'Ignore',
+        'notice': 'Ignore, mark as notice',
+        'remonitor': 'Remonitor that episode automatically',
+    },
+    'monitored_out_scope': {
+        'notice-exclude': 'Mark as notice and add to exclusion list',
+        'unmonitor': 'Unmonitor automatically',
+    },
+}
+
+AUTOMATION_CHOICES = {
+    'monitoring': {name: {'options': tuple(answers), 'default': default}
+                   for name, answers, default in (
+                       ('in_scope_unmonitored', MONITORING_ANSWERS['in_scope_unmonitored'], 'ask'),
+                       ('out_scope_monitored', MONITORING_ANSWERS['out_scope_monitored'], 'ask'))},
+    'persistence': {name: {'options': tuple(answers), 'default': default}
+                    for name, answers, default in (
+                        ('unmonitored_in_scope', PERSISTENCE_ANSWERS['unmonitored_in_scope'], 'ignore'),
+                        ('monitored_out_scope', PERSISTENCE_ANSWERS['monitored_out_scope'],
+                         'notice-exclude'))},
+}
+
+
 def validate_automation(raw) -> dict:
-    """What goes on an exclusion list without anyone ticking it."""
+    """What a run decides without being asked, and what goes on an exclusion list.
+
+    Every question here has a stated answer with a default, rather than behaviour buried
+    in whichever function happened to be doing the work.
+    """
     raw = raw or {}
     seasons = set()
     for value in raw.get('exclude_seasons') or []:
         seasons.add(_whole(value, 'Excluded season', 0, 999, allow_none=False))
-    patterns = []
-    for value in raw.get('exclude_matching') or []:
-        text = _text(value, 'Exclusion pattern', 200)
-        if text and text not in patterns:
-            patterns.append(text)
     return {
+        'monitoring': _answers(raw.get('monitoring'), AUTOMATION_CHOICES['monitoring'], 'Monitoring sync'),
+        'persistence': _answers(raw.get('persistence'), AUTOMATION_CHOICES['persistence'], 'Persistence'),
+        'search_after_monitor': _flag(raw.get('search_after_monitor', False)),
+        'exclude_specials': _flag(raw.get('exclude_specials', True)),
         'exclude_seasons': sorted(seasons),
-        'exclude_matching': patterns,
+        'exclude_folders': _phrases(raw.get('exclude_folders'), 'Excluded season folder'),
+        'exclude_episodes': _phrases(raw.get('exclude_episodes'), 'Excluded episode'),
     }
 
 
@@ -441,9 +522,26 @@ def validate_automation(raw) -> dict:
 # go and read the settings to find out.
 EXCLUSION_REASONS = {
     'manual': 'Excluded from this series by hand',
+    'specials': 'Specials are excluded automatically',
     'season': 'This whole season is excluded automatically',
-    'pattern': 'Excluded automatically: it matches an exclusion pattern',
+    'folder': 'Excluded automatically: its season folder matches',
+    'episode': 'Excluded automatically: the episode matches',
 }
+
+# Sonarr can be told to file specials as season 0 or into a folder of their own, and which
+# one you get depends on a naming setting nobody remembers choosing. Both are specials, so
+# both are caught: the season number where there is one, the folder where there is not.
+SPECIAL_FOLDERS = ('specials', 'extras', 'featurettes')
+
+
+def _folder_of(path: str) -> str:
+    """The season folder an episode's file sits in, lower-cased.
+
+    The last directory rather than the whole path: matching the lot would let a pattern
+    written for a folder catch a library root that happens to contain the word.
+    """
+    parts = [part for part in (path or '').replace('\\', '/').split('/') if part]
+    return parts[-2].lower() if len(parts) >= 2 else ''
 
 
 def excluded_episodes(episodes, rule, settings) -> dict:
@@ -468,9 +566,14 @@ def excluded_causes(episodes, rule, settings) -> dict:
     seasons = set(automation.get('exclude_seasons') or [])
     # Kept beside the text as typed, because the summary names it back to the person who
     # wrote it and lower-casing their phrase in the interface would be a small lie.
-    patterns = [(text, text.lower()) for text in automation.get('exclude_matching') or []]
+    folders = [(text, text.lower()) for text in automation.get('exclude_folders') or []]
+    titles = [(text, text.lower()) for text in automation.get('exclude_episodes') or []]
     manual = {(entry['season'], entry['episode']) for entry in rule.get('exclusions') or []}
     whole_seasons = {season for season, episode in manual if episode is None}
+    # The series' own answer first, then the global one. A series that says "include
+    # specials" is opting out of the safety, which is what that setting has always meant.
+    override = rule.get('include_specials')
+    specials = (not override) if override is not None else bool(automation.get('exclude_specials'))
 
     found = {}
     for episode in episodes:
@@ -479,16 +582,24 @@ def excluded_causes(episodes, rule, settings) -> dict:
         key = episode.get('episode_id')
         if key is None:
             continue
+        folder = _folder_of(episode.get('path') or '')
         if (season, number) in manual or season in whole_seasons:
             found[key] = ('manual', None)
+        elif specials and (season == 0 or folder in SPECIAL_FOLDERS):
+            found[key] = ('specials', None)
         elif season in seasons:
             found[key] = ('season', season)
-        elif patterns:
-            haystack = f'{episode.get("title") or ""}\n{episode.get("path") or ""}'.lower()
-            for shown, needle in patterns:
-                if needle in haystack:
-                    found[key] = ('pattern', shown)
+        else:
+            for shown, needle in folders:
+                if needle in folder:
+                    found[key] = ('folder', shown)
                     break
+            else:
+                haystack = f'{episode.get("title") or ""}\n{episode.get("path") or ""}'.lower()
+                for shown, needle in titles:
+                    if needle in haystack:
+                        found[key] = ('episode', shown)
+                        break
     return found
 
 
@@ -499,26 +610,36 @@ def exclusion_summary(episodes, rule, settings) -> dict:
     this series does not have, or a phrase nothing matches, is true of the settings rather
     than of this series, and listing it here would answer a question nobody asked.
     """
+    automation = settings.get('automation') or DEFAULTS['automation']
     causes = excluded_causes(episodes, rule, settings)
-    seasons, patterns, manual = {}, {}, 0
+    seasons, folders, titles = {}, {}, {}
+    manual = specials = 0
     for reason, detail in causes.values():
         if reason == 'manual':
             manual += 1
+        elif reason == 'specials':
+            specials += 1
         elif reason == 'season':
             seasons[detail] = seasons.get(detail, 0) + 1
+        elif reason == 'folder':
+            folders[detail] = folders.get(detail, 0) + 1
         else:
-            patterns[detail] = patterns.get(detail, 0) + 1
-    typed = (settings.get('automation') or {}).get('exclude_matching') or []
+            titles[detail] = titles.get(detail, 0) + 1
+    # In the order they were typed, which is the order the boxes they came from show them
+    # in. Sorted by count, the pane and the setting would disagree on sight. Written out
+    # twice rather than through a closure: the name checker cannot see into one, and a
+    # helper that has to be exempted from a guard costs more than the line it saved.
     return {
         'total': len(causes),
         'episodes': len(episodes),
         'manual': manual,
+        'specials': specials,
         'seasons': [{'season': season, 'episodes': count}
                     for season, count in sorted(seasons.items())],
-        # In the order they were typed, which is the order the box they came from shows
-        # them in. Sorted by count, the pane and the setting would disagree on sight.
-        'patterns': [{'pattern': text, 'episodes': patterns[text]}
-                     for text in typed if text in patterns],
+        'folders': [{'pattern': text, 'episodes': folders[text]}
+                    for text in automation.get('exclude_folders') or [] if text in folders],
+        'episode_patterns': [{'pattern': text, 'episodes': titles[text]}
+                             for text in automation.get('exclude_episodes') or [] if text in titles],
     }
 
 
@@ -684,9 +805,7 @@ def validate_settings(raw, previous=None) -> dict:
         'tmdb': {'api_key': tmdb_key},
         'automation': validate_automation(raw.get('automation')),
         'retention': {
-            'include_specials': _flag(retention_raw.get('include_specials', False)),
             'allow_estimated_dates': _flag(retention_raw.get('allow_estimated_dates', True)),
-            'search_after_monitor': _flag(retention_raw.get('search_after_monitor', False)),
             'monitoring': _choice(retention_raw.get('monitoring') or DEFAULTS['retention']['monitoring'],
                                   MONITORING_MODES, 'Monitoring'),
         },
@@ -868,13 +987,11 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     retention = settings.get('retention') or DEFAULTS['retention']
     allow_estimates = bool(retention.get('allow_estimated_dates', True))
-    # A rule may override the global specials decision; None means inherit it.
-    include_specials = rule.get('include_specials')
-    if include_specials is None:
-        include_specials = bool(retention.get('include_specials', False))
 
     # The exclusion list outranks every condition, including this rule's own. It is the one
-    # answer that is never weighed against anything.
+    # answer that is never weighed against anything — and it is the *only* one: specials
+    # used to be a second gate here, saying the same kind of thing a few lines further
+    # down, which meant "what will this run skip" had two places to be answered from.
     excluded = excluded_episodes(episodes, rule, settings)
     protected, candidates = [], []
     for episode in episodes:
@@ -883,9 +1000,6 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
         why = excluded.get(episode.get('episode_id'))
         if why:
             protected.append(dict(episode, reason=EXCLUSION_REASONS[why]))
-            continue
-        if episode.get('season') == 0 and not include_specials:
-            protected.append(dict(episode, reason='Specials (season 0) are excluded'))
             continue
         candidates.append(episode)
 
@@ -974,19 +1088,15 @@ def keep_frame(episodes, rule, settings, now=None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     today = now.date()
     retention = settings.get('retention') or {}
-    # One decision, shared with deletion: a special that is kept is a special that counts.
-    include_specials = rule.get('include_specials')
-    if include_specials is None:
-        include_specials = bool(retention.get('include_specials', False))
 
-    # Set aside where specials are, and for the same reason: outside the frame, and so
-    # outside everything that acts on the frame. Never monitored by us, never unmonitored.
+    # Set aside what is excluded, and for the same reason deletion does: outside the frame,
+    # and so outside everything that acts on the frame. Never monitored by us, never
+    # unmonitored. Specials arrive here through the exclusion list like everything else, so
+    # a special that is kept is still a special that counts.
     excluded = excluded_episodes(episodes, rule, settings)
     specials, considered = [], []
     for episode in episodes:
         if excluded.get(episode.get('episode_id')):
-            specials.append(episode)
-        elif episode.get('season') == 0 and not include_specials:
             specials.append(episode)
         else:
             considered.append(episode)
@@ -1104,7 +1214,7 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'include_specials': active.get('include_specials'),
         'path': active.get('path'),
         'series_id': active.get('series_id'),
-        'global_specials': retention.get('include_specials'),
+        'global_specials': (settings.get('automation') or {}).get('exclude_specials'),
         'monitoring': active.get('monitoring'),
         'global_monitoring': retention.get('monitoring'),
         'estimated_dates': retention.get('allow_estimated_dates'),

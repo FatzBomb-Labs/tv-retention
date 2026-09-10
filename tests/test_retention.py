@@ -136,7 +136,7 @@ class Protection(unittest.TestCase):
 
     def test_specials_can_be_included(self):
         episodes = [episode(0, 1, days_ago=4000)]
-        document = settings(retention={'include_specials': True})
+        document = settings(automation={'exclude_specials': False})
         result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, document, now=NOW)
         self.assertEqual(len(result['delete']), 1)
 
@@ -232,7 +232,7 @@ class Exclusions(unittest.TestCase):
         ]
 
     def deleted(self, rule=None, automation=None):
-        conf = settings(automation=automation or {'exclude_seasons': [], 'exclude_matching': []})
+        conf = settings(automation=automation or {"exclude_seasons": [], "exclude_episodes": []})
         rule = dict({'keep_episodes': 1, 'combine': 'earliest'}, **(rule or {}))
         result = evaluate(self.episodes(), rule, conf, now=NOW)
         return sorted(item['episode_id'] for item in result['delete'])
@@ -247,10 +247,10 @@ class Exclusions(unittest.TestCase):
         self.assertEqual(self.deleted(rule={'exclusions': [{'season': 1, 'episode': None}]}), [])
 
     def test_a_whole_season_can_be_excluded_automatically(self):
-        self.assertEqual(self.deleted(automation={'exclude_seasons': [1], 'exclude_matching': []}), [])
+        self.assertEqual(self.deleted(automation={"exclude_seasons": [1], "exclude_episodes": []}), [])
 
     def test_a_pattern_matches_the_title(self):
-        found = self.deleted(automation={'exclude_seasons': [], 'exclude_matching': ['lost pilot']})
+        found = self.deleted(automation={"exclude_seasons": [], "exclude_episodes": ['lost pilot']})
         self.assertEqual(found, [2])
 
     def test_a_pattern_matches_the_path_so_it_catches_a_folder(self):
@@ -261,13 +261,13 @@ class Exclusions(unittest.TestCase):
         """
         # And excluding one changes what the window holds: with S02E01 set aside, "keep 1"
         # keeps the newest of what is left rather than the newest overall.
-        found = self.deleted(automation={'exclude_seasons': [], 'exclude_matching': ['Specials Extras']})
+        found = self.deleted(automation={"exclude_seasons": [], "exclude_episodes": ['Specials Extras']})
         self.assertEqual(found, [1])
 
     def test_the_reason_travels_with_the_answer(self):
         # So the preview and the journal can say why something was skipped, without anyone
         # going to read the settings to find out.
-        conf = settings(automation={'exclude_seasons': [2], 'exclude_matching': []})
+        conf = settings(automation={"exclude_seasons": [2], "exclude_episodes": []})
         rule = {'keep_episodes': 1, 'combine': 'earliest',
                 'exclusions': [{'season': 1, 'episode': 1}]}
         result = evaluate(self.episodes(), rule, conf, now=NOW)
@@ -282,7 +282,7 @@ class Exclusions(unittest.TestCase):
         would be worth little if a run kept switching Sonarr's flags on the things on it.
         """
         from core import classify_monitoring
-        conf = settings(automation={'exclude_seasons': [], 'exclude_matching': []})
+        conf = settings(automation={"exclude_seasons": [], "exclude_episodes": []})
         rule = {'keep_episodes': 1, 'combine': 'earliest',
                 'exclusions': [{'season': 1, 'episode': 1}]}
         state = classify_monitoring(self.episodes(), rule, conf, now=NOW)
@@ -311,11 +311,11 @@ class ExclusionSummary(unittest.TestCase):
         ]
 
     def summarise(self, rule=None, **automation):
-        conf = settings(automation=dict({'exclude_seasons': [], 'exclude_matching': []}, **automation))
+        conf = settings(automation=dict({"exclude_seasons": [], "exclude_episodes": []}, **automation))
         return exclusion_summary(self.episodes(), rule or {}, conf)
 
     def test_the_two_readings_name_the_same_episodes(self):
-        conf = settings(automation={'exclude_seasons': [0], 'exclude_matching': ['behind the scenes']})
+        conf = settings(automation={"exclude_seasons": [0], "exclude_episodes": ["behind the scenes"]})
         rule = {'exclusions': [{'season': 2, 'episode': 1}]}
         causes = excluded_causes(self.episodes(), rule, conf)
         self.assertEqual(set(causes), set(excluded_episodes(self.episodes(), rule, conf)))
@@ -324,40 +324,109 @@ class ExclusionSummary(unittest.TestCase):
 
     def test_each_cause_is_counted_against_the_thing_that_caused_it(self):
         found = self.summarise(rule={'exclusions': [{'season': 2, 'episode': 1}]},
-                               exclude_seasons=[0], exclude_matching=['behind the scenes'])
+                               exclude_seasons=[0], exclude_episodes=['behind the scenes'])
         self.assertEqual(found['seasons'], [{'season': 0, 'episodes': 1}])
-        self.assertEqual(found['patterns'], [{'pattern': 'behind the scenes', 'episodes': 1}])
+        self.assertEqual(found['episode_patterns'], [{'pattern': 'behind the scenes', 'episodes': 1}])
         self.assertEqual(found['manual'], 1)
         self.assertEqual(found['total'], 3)
 
     def test_a_pattern_that_catches_nothing_here_is_not_listed(self):
         # True of the settings, not of this series. Listing it would answer a question
         # nobody standing in front of this series asked.
-        found = self.summarise(exclude_matching=['behind the scenes', 'director commentary'])
-        self.assertEqual([entry['pattern'] for entry in found['patterns']], ['behind the scenes'])
+        found = self.summarise(exclude_episodes=['behind the scenes', 'director commentary'])
+        self.assertEqual([entry['pattern'] for entry in found['episode_patterns']], ['behind the scenes'])
 
     def test_patterns_are_listed_in_the_order_they_were_typed(self):
         # The box they came from shows them that way. Sorted by count, the pane and the
         # setting disagree on sight.
-        found = self.summarise(exclude_matching=['behind the scenes', 'christmas'])
-        self.assertEqual([entry['pattern'] for entry in found['patterns']],
+        found = self.summarise(exclude_episodes=['behind the scenes', 'christmas'])
+        self.assertEqual([entry['pattern'] for entry in found['episode_patterns']],
                          ['behind the scenes', 'christmas'])
 
     def test_the_phrase_is_named_back_as_it_was_typed(self):
         # Matching is case-blind; reporting is not. Lower-casing somebody's phrase in the
         # interface is a small lie about what they wrote.
-        found = self.summarise(exclude_matching=['Behind The Scenes'])
-        self.assertEqual(found['patterns'][0]['pattern'], 'Behind The Scenes')
+        found = self.summarise(exclude_episodes=['Behind The Scenes'])
+        self.assertEqual(found['episode_patterns'][0]['pattern'], 'Behind The Scenes')
 
     def test_a_hand_picked_episode_outranks_a_pattern_that_also_caught_it(self):
         # Manual wins in `excluded_causes`, so it must not be counted twice.
         found = self.summarise(rule={'exclusions': [{'season': 1, 'episode': 2}]},
-                               exclude_matching=['behind the scenes'])
+                               exclude_episodes=['behind the scenes'])
         self.assertEqual(found['manual'], 1)
-        self.assertEqual(found['patterns'], [])
+        self.assertEqual(found['episode_patterns'], [])
         self.assertEqual(found['total'], 1)
 
     def test_a_series_with_nothing_excluded_says_so_with_zeroes(self):
         found = self.summarise()
-        self.assertEqual((found['total'], found['manual'], found['seasons'], found['patterns']),
+        self.assertEqual((found['total'], found['manual'], found['seasons'], found['episode_patterns']),
                          (0, 0, [], []))
+
+
+class SpecialsAreAnExclusion(unittest.TestCase):
+    """One gate, and specials go through it like everything else.
+
+    They used to be decided twice: once on the exclusion list, and again by a `season == 0`
+    branch a few lines further down in both `evaluate` and `keep_frame`. Two gates
+    answering the same kind of question meant "what will this run skip" had two answers,
+    and the second was invisible — nothing on screen ever said fifteen episodes had been
+    set aside.
+    """
+
+    def episodes(self):
+        return [
+            # Filed as season 0, which is what Sonarr does by default.
+            {'episode_id': 1, 'season': 0, 'episode': 1, 'title': 'Christmas',
+             'path': '/tv/Show/Season 00/s00e01.mkv', 'has_file': True, 'size': 10,
+             'air_date': '2010-12-25', 'air_source': 'sonarr', 'monitored': True},
+            # Filed into a folder instead, which is the other thing Sonarr can be told to
+            # do — and the reason the season number alone is not enough.
+            {'episode_id': 2, 'season': 3, 'episode': 99, 'title': 'Making of',
+             'path': '/tv/Show/Specials/s03e99.mkv', 'has_file': True, 'size': 10,
+             'air_date': '2011-01-01', 'air_source': 'sonarr', 'monitored': True},
+            {'episode_id': 3, 'season': 1, 'episode': 1, 'title': 'Pilot',
+             'path': '/tv/Show/Season 01/s01e01.mkv', 'has_file': True, 'size': 10,
+             'air_date': '2010-01-01', 'air_source': 'sonarr', 'monitored': True},
+        ]
+
+    def deleted(self, rule=None, **automation):
+        conf = settings(automation=dict({'exclude_specials': True}, **automation))
+        rule = dict({'keep_days': 1, 'combine': 'earliest'}, **(rule or {}))
+        return sorted(item['episode_id']
+                      for item in evaluate(self.episodes(), rule, conf, now=NOW)['delete'])
+
+    def test_season_zero_is_excluded(self):
+        self.assertNotIn(1, self.deleted())
+
+    def test_a_specials_folder_is_excluded_even_in_a_numbered_season(self):
+        # Sonarr can be told to file specials into a folder rather than as season 0, and
+        # which one you get depends on a naming setting nobody remembers choosing.
+        self.assertNotIn(2, self.deleted())
+
+    def test_an_ordinary_episode_is_untouched_by_any_of_it(self):
+        self.assertEqual(self.deleted(), [3])
+
+    def test_turning_it_off_lets_specials_be_deleted(self):
+        self.assertEqual(self.deleted(exclude_specials=False), [1, 2, 3])
+
+    def test_a_series_may_opt_out_of_the_safety(self):
+        # Which is exactly what its own include_specials has always meant.
+        self.assertEqual(self.deleted(rule={'include_specials': True}), [1, 2, 3])
+
+    def test_a_series_may_opt_in_where_the_setting_is_off(self):
+        self.assertEqual(self.deleted(rule={'include_specials': False}, exclude_specials=False), [3])
+
+    def test_the_reason_reaches_the_preview(self):
+        conf = settings(automation={'exclude_specials': True})
+        result = evaluate(self.episodes(), {'keep_days': 1, 'combine': 'earliest'}, conf, now=NOW)
+        reasons = {row['episode_id']: row['reason'] for row in result['protected']}
+        self.assertEqual(reasons[1], 'Specials are excluded automatically')
+        self.assertEqual(reasons[2], 'Specials are excluded automatically')
+
+    def test_a_folder_named_after_a_word_that_contains_specials_is_not_one(self):
+        # Whole folder name, not a substring of the path: matching the lot would let this
+        # catch a library root that happens to say Extras.
+        episodes = [dict(self.episodes()[2], path='/tv/Extras Archive/Show/Season 01/s01e01.mkv')]
+        conf = settings(automation={'exclude_specials': True})
+        result = evaluate(episodes, {'keep_days': 1, 'combine': 'earliest'}, conf, now=NOW)
+        self.assertEqual(len(result['delete']), 1)

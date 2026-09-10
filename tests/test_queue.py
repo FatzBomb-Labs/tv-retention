@@ -82,7 +82,9 @@ class SafetyMoved(unittest.TestCase):
 
     def test_searching_after_monitoring_is_off_by_default(self):
         # Monitoring many episodes at once means downloading many at once.
-        self.assertFalse(validate_settings({})['retention']['search_after_monitor'])
+        # It sits under `automation` now: telling Sonarr to search is something a run does
+        # on its own, not a condition on what is kept.
+        self.assertFalse(validate_settings({})['automation']['search_after_monitor'])
 
 
 if __name__ == '__main__':

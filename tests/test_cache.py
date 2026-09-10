@@ -37,8 +37,10 @@ class Fingerprint(unittest.TestCase):
         self.assertNotEqual(fingerprint(base()), fingerprint(other))
 
     def test_the_global_specials_setting_invalidates(self):
+        # It lives in `automation` now: excluding specials is an exclusion like any other,
+        # and the fingerprint has to follow the setting wherever it went.
         self.assertNotEqual(fingerprint(base()),
-                            fingerprint(base(retention={'include_specials': True})))
+                            fingerprint(base(automation={'exclude_specials': False})))
 
     def test_a_per_rule_specials_override_invalidates(self):
         document = base()
@@ -71,8 +73,9 @@ class Specials(unittest.TestCase):
                          'guards': {'max_percent_per_rule': 100, 'min_file_age_hours': 0}}
 
     def evaluate(self, rule, include_globally=False):
-        settings = dict(self.settings, retention=dict(self.settings['retention'],
-                                                      include_specials=include_globally))
+        # The global half moved to `automation`, inverted: excluding is the setting now,
+        # so "include specials globally" is "do not exclude them".
+        settings = dict(self.settings, automation={'exclude_specials': not include_globally})
         return evaluate(self.episodes, dict(rule, keep_days=30, combine='earliest'), settings, now=NOW)
 
     def test_inherits_the_global_exclusion(self):

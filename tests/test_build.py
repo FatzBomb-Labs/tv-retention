@@ -636,10 +636,12 @@ class Interface(unittest.TestCase):
         interface is silent: the episode is greyed out, and the line saying why is blank.
         """
         import core
-        self.assertEqual(sorted(core.EXCLUSION_REASONS), ['manual', 'pattern', 'season'])
-        picker = self.js.split('function exclusionTree(')[1].split('\n  function ')[0]
-        for reason in core.EXCLUSION_REASONS:
-            self.assertIn(f"'{reason}'", picker, f'the picker never mentions {reason}')
+        self.assertEqual(sorted(core.EXCLUSION_REASONS),
+                         ['episode', 'folder', 'manual', 'season', 'specials'])
+        named = set(re.findall(r'^\s{4}([a-z]+): \(', self.js.split('EXCLUDED_WHY = {')[1]
+                               .split('};')[0], re.M))
+        # `manual` is the one the picker does not explain, because it is the one you did.
+        self.assertEqual(named, set(core.EXCLUSION_REASONS) - {'manual'})
 
     def test_excluding_and_monitoring_do_not_share_a_tree(self):
         """A tick means "never touch this" in one and "Sonarr should have this" in the

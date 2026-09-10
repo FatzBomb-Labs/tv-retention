@@ -80,8 +80,42 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v8(document))
     if version < 9:
         document.pop('state_dir', None)
+    if version < 10:
+        document.update(_to_v10(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v10(document: dict) -> dict:
+    """Specials stop being a setting of their own and become an exclusion.
+
+    They were decided in two places: `excluded_episodes`, then a `season == 0` branch a few
+    lines further down in both `evaluate` and `keep_frame`. Two gates answering the same
+    kind of question is how "what will this run skip" ends up with two answers, and the
+    second one was invisible — nothing on screen ever said that fifteen episodes had been
+    set aside.
+
+    `include_specials: False` meant "exclude them", so it becomes `exclude_specials: True`.
+    The per-series tristate is untouched and keeps its meaning: a series that says it
+    includes specials is opting out of the safety.
+
+    `search_after_monitor` moves from `retention` to `automation` because it is an
+    automatic action rather than a retention condition, and this is the release where
+    everything automatic went to one page.
+    """
+    retention = dict(document.get('retention') or {})
+    automation = dict(document.get('automation') or {})
+    automation.setdefault('exclude_specials', not retention.pop('include_specials', False))
+    automation.setdefault('search_after_monitor', retention.pop('search_after_monitor', False))
+    # The one pattern list became two, because a season folder and an episode are two
+    # questions. A phrase written when there was one box could have meant either, so it is
+    # kept as both rather than guessed at: the alternative is silently dropping an
+    # exclusion somebody is relying on.
+    old = automation.pop('exclude_matching', None)
+    if old:
+        automation.setdefault('exclude_folders', list(old))
+        automation.setdefault('exclude_episodes', list(old))
+    return {'retention': retention, 'automation': automation}
 
 
 # v9 is a removal rather than a function: `state_dir` was a setting because the plugin had

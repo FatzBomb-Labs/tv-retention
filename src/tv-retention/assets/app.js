@@ -1727,6 +1727,15 @@
   // Seasons and episodes with a checkbox each, checked where Sonarr monitors them now.
   // The series and season boxes are three-state, because "some of this" is a real answer
   // and a box that can only say yes or no would have to lie about it.
+  // Every reason core can give, said in the picker's own words. A reason with no entry
+  // here falls back to naming Automation rather than to a template with a hole in it.
+  const EXCLUDED_WHY = {
+    specials: () => 'specials',
+    season: (episode) => `excluded season ${episode.excluded_by}`,
+    folder: (episode) => `folder matches “${episode.excluded_by}”`,
+    episode: (episode) => `matches “${episode.excluded_by}”`,
+  };
+
   // Excluding is not monitoring, so this is its own tree rather than a mode of the other
   // one. A tick here means "never touch this", a tick there means "Sonarr should have
   // this", and the day those two share a code path is the day one of them is wrong.
@@ -1777,10 +1786,7 @@
         // Named, not inferred. "Anything that is not a season is a pattern" renders a
         // reason nobody taught this about as `matches “undefined”`, which is worse than
         // saying less.
-        const why = !isAuto ? ''
-          : (episode.excluded === 'season' ? 'excluded season'
-             : (episode.excluded === 'pattern' ? `matches “${episode.excluded_by}”`
-                : 'excluded by Automation'));
+        const why = !isAuto ? '' : (EXCLUDED_WHY[episode.excluded] || (() => 'excluded by Automation'))(episode);
         list.append(el('label', { className: `tvr-tree-row tvr-tree-episode${isAuto ? ' tvr-tree-auto' : ''}` }, [
           tick,
           el('span', { textContent: `E${String(episode.episode).padStart(2, '0')} · ${episode.title || ''}` }),

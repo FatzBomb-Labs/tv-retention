@@ -85,7 +85,10 @@ class Upgrade(unittest.TestCase):
     def test_retention_keeps_what_still_means_something(self):
         # Unmonitoring what we delete is an invariant now, so its flag is gone; monitoring
         # missing episodes became a per-series decision.
-        self.assertTrue(self.new['retention']['include_specials'])
+        # `include_specials: True` meant "do not exclude them", and v10 says that the
+        # other way round in the section where every automatic decision now lives.
+        self.assertFalse(self.new['automation']['exclude_specials'])
+        self.assertNotIn('include_specials', self.new['retention'])
         self.assertNotIn('auto_unmonitor', self.new['retention'])
         self.assertNotIn('auto_monitor', self.new['retention'])
 
@@ -157,7 +160,7 @@ class ToVersionFive(unittest.TestCase):
                             'rules': [{'id': 'r1', 'monitor_missing': True}]})
         self.assertEqual(document['settings_version'], SETTINGS_VERSION)
         self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')
-        self.assertTrue(document['retention']['include_specials'], 'other settings survive')
+        self.assertFalse(document['automation']['exclude_specials'], 'other settings survive')
 
     def test_a_series_opted_into_downloads_is_not_carried_over(self):
         """An upgrade is the wrong moment to start hundreds of downloads."""

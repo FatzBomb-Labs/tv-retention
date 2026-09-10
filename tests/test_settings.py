@@ -171,16 +171,43 @@ class AutomationFromTheForm(unittest.TestCase):
     def test_phrases_keep_the_order_they_were_typed_in(self):
         # A pattern list is read top to bottom by whoever wrote it. Sorting it would make
         # the box disagree with itself the first time it was saved.
-        found = self.automation(exclude_matching=['christmas special', 'behind the scenes'])
-        self.assertEqual(found['exclude_matching'], ['christmas special', 'behind the scenes'])
+        found = self.automation(exclude_episodes=['christmas special', 'behind the scenes'])
+        self.assertEqual(found['exclude_episodes'], ['christmas special', 'behind the scenes'])
 
     def test_the_same_phrase_twice_is_stored_once(self):
-        found = self.automation(exclude_matching=['pilot', 'pilot'])
-        self.assertEqual(found['exclude_matching'], ['pilot'])
+        found = self.automation(exclude_episodes=['pilot', 'pilot'])
+        self.assertEqual(found['exclude_episodes'], ['pilot'])
 
     def test_a_document_with_no_automation_at_all_still_gets_the_keys(self):
-        # Settings written before the section existed. Every reader indexes both lists.
+        # Settings written before the section existed. Every reader indexes every key, and
+        # every question answers with its default rather than with nothing.
         document = base()
         document.pop('automation', None)
         found = validate_settings(document)['automation']
-        self.assertEqual(found, {'exclude_seasons': [], 'exclude_matching': []})
+        self.assertEqual(found['exclude_seasons'], [])
+        self.assertEqual(found['exclude_folders'], [])
+        self.assertEqual(found['exclude_episodes'], [])
+        self.assertIs(found['exclude_specials'], True)
+        self.assertIs(found['search_after_monitor'], False)
+        self.assertEqual(found['monitoring'],
+                         {'in_scope_unmonitored': 'ask', 'out_scope_monitored': 'ask'})
+        self.assertEqual(found['persistence'],
+                         {'unmonitored_in_scope': 'ignore', 'monitored_out_scope': 'notice-exclude'})
+
+    def test_ask_me_is_the_default_for_both_monitoring_questions(self):
+        """Either half can move hundreds of episodes.
+
+        A default that acts is a default nobody chose, and the two that act are the two
+        that download or stop downloading at scale.
+        """
+        found = validate_settings(base())['automation']['monitoring']
+        self.assertEqual(set(found.values()), {'ask'})
+
+    def test_an_answer_nobody_offered_is_refused(self):
+        with self.assertRaises(Rejected):
+            validate_settings(base(automation={'monitoring': {'in_scope_unmonitored': 'maybe'}}))
+
+    def test_specials_are_excluded_until_somebody_says_otherwise(self):
+        # The safety it always was, now visible: it appears on the series card as a cause
+        # rather than quietly removing season 0 from consideration.
+        self.assertIs(validate_settings(base())['automation']['exclude_specials'], True)
