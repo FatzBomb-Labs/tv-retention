@@ -10,15 +10,15 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5 and 7
-are landed, and phase 8 has started. Phase 6 is **partly done and deliberately
-paused**: `changeList` has moved into `changes.js`, but the alerts/navigation/topbar
-split is blocked on phase 8 and phase 7 was taken ahead of it. See "Phase plan and
-gates", and read the phase-6 entry before cutting anything there.
+Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5, 7 and 8
+are landed. Phase 6 is **partly done and paused, but no longer blocked**:
+`changeList` has moved into `changes.js`, and phase 8 has now taken the editor state
+that stood in its way. See "Phase plan and gates", and read the phase-6 entry before
+cutting anything there.
 
 ```text
 src/assets/
-  app.js            2,179 lines — entry, ten imports, everything not yet extracted
+  app.js            1,524 lines — entry, eleven imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -34,6 +34,11 @@ src/assets/
   series-removal.js createRemoval — the queued-removal banner and the dialog that
                     queues it; imports $/el/toggle/field/options, plural/ago,
                     monitorTree, guarded/dialog
+  series-editor.js  createSeriesEditor — the details pane and the rule form, which
+                    are one closure and cut as one module; imports
+                    $/el/text/toggle/field/options, bytes/plural/ago,
+                    exclusionTree/monitorTree, changeLines/changeList,
+                    notice/guarded/dialog
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -41,7 +46,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, eleven assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, twelve assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -397,16 +402,18 @@ Cross-feature interaction is wired at the composition root, not by importing
    both, which also fixes the order the factories are constructed in — a
    constraint nothing would state and a later edit would silently break.
 
-   The blocker to settle first: navigation reads `editing`, `forgetDrafts` and
-   `renderDetails`, which are editor state that **phase 8 moves**. Cutting
-   navigation before then binds it to three names that are about to relocate.
-   Either take phase 8's editor state first and navigation second, or accept
-   rebinding them later — but decide it deliberately rather than discovering it
-   mid-cut. The clusters are also not contiguous: navigation and topbar are
-   lines ~288–646, alerts ~1217–1414, with the library and cards in between.
+   The blocker is now cleared. Navigation used to read `editing`, `forgetDrafts`
+   and `renderDetails` directly; phase 8 took that state, and what navigation sees
+   today is final shape: `forgetDrafts()` and `closeEditor()` from the entry, and
+   one edge in the other direction — `openLibraryView()`, the callback the editor
+   is handed in place of `if (!LIBRARY[currentView]) showView('series-all');`.
+   That collapsed three names about one intent into one, so navigation has a
+   single edge to honour rather than three. The clusters are still not
+   contiguous: navigation and topbar are lines ~288–646, alerts ~1217–1414, with
+   the library and cards in between.
 
    **Phase 7 was taken ahead of the rest of this one**, because it is the only
-   remaining cluster with no stake in that argument. Resume here after phase 8.
+   remaining cluster with no stake in that argument. Resume here: phase 8 is done.
 7. **Checks — landed.** `checks.js`, 164 lines; `app.js` 2,436 → 2,308. Moved as
    a unit, as planned: `queueChecks`, `drainChecks`, `startPolling`, `watchTick`,
    `renderCheckBanner` and `isChecking`, plus `CHECK_PHASE` and `WATCH_SECONDS`.
@@ -473,6 +480,52 @@ Cross-feature interaction is wired at the composition root, not by importing
    (Two earlier filter-based scripts reported phantom differences by stripping
    `}` and `getSettings` lines from one side only. Reconstruction cannot lie that
    way, and is the better tool for a verbatim move.)
+
+   **The editor has landed, and phase 8 is done.** `series-editor.js`, 734 lines;
+   `app.js` 2,179 → 1,524. This is the largest module in the tree and it is one
+   cut on purpose: `renderDetails` calls `editing.build(body, top)` and
+   `editing.save(context, startEnabled)`, and `ruleForm` writes into the `drafts`
+   map that `renderDetails` reads and `forgetDrafts` clears. The pane and the form
+   are one closure, and the target tree named exactly one module for them.
+
+   A sub-cut *was* measured before being rejected, and the reason generalises. The
+   identity panel (old lines 1390–1598) showed only ten inbound names, which looks
+   like a seam — but eight of its locals (`identity`, `enabled`, `sayCounts`,
+   `sayNext`, `sayPlan`, `sayState`, `reread`, `readLine`) are consumed 160+ lines
+   later, at 1762–1764, 1805, 1847, 1853 and 1988–1989. **Dependency counts alone
+   do not find seams inside a closure**: grep the candidate's locals for uses past
+   the proposed boundary before believing a low number.
+
+   `seriesFor` was excluded, and it had been wrongly counted in every earlier
+   measurement because it sits under the `// -- adding and editing a series`
+   header directly above `ruleForm`. Its only caller is `loadLibrary`. Dropping it
+   moved the boundary to 1348 and removed `seriesCache` from the surface outright.
+   **Section headers in this file are not cluster boundaries.**
+
+   Eighteen callbacks in, six names out (`editing`/`setEditing`, `isOpen`,
+   `openEditor`, `renderDetails`, `forgetDrafts`). Four accessors rather than
+   objects — `getSettings`, `getSnapshot`, `getMonitoring`, `getLibrary` — all
+   four being bindings the entry reassigns wholesale. The one *write* the editor
+   did, `settings = matched.settings; snapshot.settings = settings;`, became
+   `applySaved(matched.settings)`, which already does both. No `wire()`: all
+   thirteen listeners attach to elements the module creates.
+
+   `openLibraryView()` is the navigation broker described in the phase-6 entry.
+   The reverse direction was already brokered: `showView` and `cardShell` now call
+   `closeEditor()` instead of assigning `editing = null`.
+
+   Verified by reconstruction: 700 of 700 lines identical. One warning from the
+   attempt — a substitution of `getLibrary()` without a lookbehind rewrote
+   `forgetLibrary()` into `forlibrary` and produced a phantom diff. **Every
+   identifier substitution in these moves needs `(?<![.\w$])name(?![\w$:])`**; the
+   trailing `:` guard keeps object keys intact.
+
+   Five `test_build.py` tests were updated. They read the whole module graph via
+   `interface_js()`, so the move itself was invisible to them — what changed was
+   the asserted *text*: `monitoring[rule.id]` → `getMonitoring()[rule.id]`,
+   `settings.profiles` → `getSettings().profiles`, `editing = null` →
+   `closeEditor()`, and two `split()` anchors that depended on the old
+   indentation.
 9. **Finish composition root:** remove transitional wiring/aliases only after
    callers and tests have migrated; verify no import-time side effects or cycles.
 
@@ -507,31 +560,24 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phases S, 2, 3, 4, 5 and 7 are landed; phase 6
-   is half done and paused. **Phase 8 is in progress** — its removal UI has
-   landed, and the editor is what remains of it.
+4. Begin only the approved phase. Phases S, 2, 3, 4, 5, 7 and 8 are landed.
+   **Phase 6 is the one to resume** — half done, paused, and now unblocked.
 
-Phase 6 was paused on purpose, and resuming it before phase 8 would undo the
-reason. Navigation reads `editing`, `forgetDrafts` and `renderDetails` — editor
-state phase 8 moves — so cutting navigation first binds it to three names about
-to relocate, then unbinds them again. Take the editor first and navigation
-after, and the callbacks navigation needs will already exist in their final
-shape. Phase 7 was pulled forward for the same reason in reverse: it shared none
-of that entanglement, so it was free to go early.
+Phase 6 was paused because navigation read `editing`, `forgetDrafts` and
+`renderDetails`, which were editor state phase 8 was about to move. That is done,
+and the two directions are already brokered in their final shape: outward,
+`showView` calls `forgetDrafts(); closeEditor(); renderDetails();`; inward, the
+editor calls `openLibraryView()`, the one callback replacing what used to be
+`if (!LIBRARY[currentView]) showView('series-all');`. Navigation has a single
+edge to honour rather than three names about to relocate.
 
-What is left of phase 8 is the editor, and it is the biggest cluster left by a
-wide margin. `ruleForm` alone runs from roughly line 1337 to 1785 — call it 450
-lines — with `openEditor`, `renderDetails`, `scopeOf`, the `drafts` map and the
-`editing` binding sitting around it. Expect several cuts, not one. Re-derive the
-boundaries from the call graph before cutting; the line numbers here will have
-moved.
-
-The editor is the cut phase 6 is waiting on, so it is worth doing with
-navigation's needs in mind. `showView` discards drafts when it leaves the
-library — `forgetDrafts(); editing = null; renderDetails();` — and `openEditor`
-calls `showView('series-all')` back the other way. That tie does not disappear
-when the editor moves; it becomes something the entry brokers. Decide its shape
-here, because navigation will be built against it.
+The remaining phase-6 numbers are in its entry above and are stale by at least
+the editor cut — re-derive them. The two structural facts should still hold: the
+clusters are not contiguous (navigation and topbar together, alerts separately,
+the library and cards in between), and topbar/alerts/navigation are tied to each
+other, so the entry has to broker those ties and thereby fix the order the
+factories are constructed in. That ordering constraint is not stated anywhere the
+compiler can see it, so write it down where the factories are built.
 
 Take it the way phases 4, 5 and 7 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,

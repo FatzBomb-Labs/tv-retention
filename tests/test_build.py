@@ -398,7 +398,7 @@ class Interface(unittest.TestCase):
         # Nothing in the editor is decided by it, and it was the one line long enough to
         # wrap the panel.
         block = self.js.split("const identity = el('div', { className: 'tvr-identity' }")[1] \
-                       .split('\n      ]);')[0]
+                       .split(']);')[0]
         self.assertNotIn('tvr-mono', block)
         self.assertNotIn('rule.path', block)
 
@@ -1143,7 +1143,9 @@ class Interface(unittest.TestCase):
         """
         self.assertIn('openEditor(rule, rule ? undefined : series);', self.js)
         self.assertNotIn('renderOneDetail', self.js)
-        self.assertIn('if (isOpen(rule)) { editing = null;', self.js)
+        # The card is outside the editor now, so closing the pane goes through the broker
+        # the entry hands it rather than assigning the editor's own state.
+        self.assertIn('if (isOpen(rule)) { closeEditor();', self.js)
 
     def test_each_column_scrolls_within_something(self):
         """overflow:auto with nothing to overflow moves the whole page instead.
@@ -1275,7 +1277,7 @@ class Interface(unittest.TestCase):
         """
         block = self.js.split("const presetSelect = el('select');")[1].split('presetSelect.value')[0]
         self.assertLess(block.index('Custom — values for this series only'),
-                        block.index('settings.profiles'),
+                        block.index('getSettings().profiles'),
                         'Custom is not the first option')
         self.assertIn("profile_id: '',", self.js)
 
@@ -1404,10 +1406,12 @@ class Interface(unittest.TestCase):
         and every connected series opened to an empty pane, while a new one was fine —
         because only a saved rule has a reading to look up.
         """
-        form = self.js.split('function ruleForm')[1].split('\n  // -- the details pane')[0]
+        form = self.js.split('function ruleForm')[1].split('// -- the details pane')[0]
         self.assertNotIn('const monitoring =', form)
         self.assertIn('const monitorMode = options(', form)
-        self.assertIn('const reading = existing ? (monitoring[rule.id] || {}) : {};', form)
+        # The readings arrive as an accessor now: the entry replaces the map wholesale on
+        # every health reading, so the editor may not hold the object it was built with.
+        self.assertIn('const reading = existing ? (getMonitoring()[rule.id] || {}) : {};', form)
 
     def test_only_the_settings_scroll(self):
         """The series and its plan are what the settings are being changed *about*.
@@ -1437,7 +1441,7 @@ class Interface(unittest.TestCase):
         self.assertIn('const drafts = new Map();', self.js)
         self.assertIn('drafts.set(context.draftKey, now)', self.js)
         self.assertIn('drafts.delete(context.draftKey)', self.js)
-        self.assertIn('forgetDrafts(); editing = null; renderDetails();', self.js)
+        self.assertIn('forgetDrafts(); closeEditor(); renderDetails();', self.js)
 
     def test_the_dirty_check_compares_against_what_was_saved(self):
         """Not against what the pane opened showing.
