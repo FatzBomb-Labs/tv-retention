@@ -11,14 +11,14 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 ## Current state
 
 Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5, 7 and 8
-are landed. Phase 6 is **partly done and paused, but no longer blocked**:
-`changeList` has moved into `changes.js`, and phase 8 has now taken the editor state
-that stood in its way. See "Phase plan and gates", and read the phase-6 entry before
-cutting anything there.
+are landed. Phase 6 is **in progress**: `changeList` moved into `changes.js` long ago,
+phase 8 took the editor state that stood in its way, and the alerts cluster has now
+been cut into `alerts.js`. What is left of phase 6 is navigation and the topbar. See
+"Phase plan and gates", and read the phase-6 entry before cutting anything there.
 
 ```text
 src/assets/
-  app.js            1,524 lines — entry, eleven imports, everything not yet extracted
+  app.js            1,347 lines — entry, twelve imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -39,6 +39,9 @@ src/assets/
                     $/el/text/toggle/field/options, bytes/plural/ago,
                     exclusionTree/monitorTree, changeLines/changeList,
                     notice/guarded/dialog
+  alerts.js         createAlerts — the series and system alert cards, the quick
+                    actions on them, the alerts tab and the re-check-all button;
+                    imports $/el/field, ago/plural, dialog/guarded/notice
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -46,7 +49,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, twelve assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, thirteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -393,27 +396,49 @@ Cross-feature interaction is wired at the composition root, not by importing
    handed and calls `dialog`, `el`, `changeLines` and `changeRows`, all already
    imports. Four callers, now on the import.
 
-   The rest of the phase did not survive contact with the call graph, and the
-   numbers are worth keeping so the next attempt starts from them rather than
-   from the sketch. Topbar needs **17** names from outside its range, alerts
-   **15**, navigation **8**. Two of the ties run *between* the three: topbar
-   calls `seriesAlertCard` and `systemAlertCard`, alerts calls `showView`. Since
-   sibling modules cannot import each other here, the entry would have to broker
-   both, which also fixes the order the factories are constructed in — a
-   constraint nothing would state and a later edit would silently break.
-
    The blocker is now cleared. Navigation used to read `editing`, `forgetDrafts`
    and `renderDetails` directly; phase 8 took that state, and what navigation sees
    today is final shape: `forgetDrafts()` and `closeEditor()` from the entry, and
    one edge in the other direction — `openLibraryView()`, the callback the editor
    is handed in place of `if (!LIBRARY[currentView]) showView('series-all');`.
    That collapsed three names about one intent into one, so navigation has a
-   single edge to honour rather than three. The clusters are still not
-   contiguous: navigation and topbar are lines ~288–646, alerts ~1217–1414, with
-   the library and cards in between.
+   single edge to honour rather than three.
 
-   **Phase 7 was taken ahead of the rest of this one**, because it is the only
-   remaining cluster with no stake in that argument. Resume here: phase 8 is done.
+   **Alerts is out** — 232 lines into `alerts.js`, verified line-for-line against
+   the previous commit at 209/209 after undoing every mechanical rewrite. It went
+   first because it was the only one of the three that was contiguous (one span,
+   no interleaving), and because cutting it *shrinks* the remaining problem rather
+   than deferring it. Fourteen names arrive from the entry; `settings`, `snapshot`,
+   `monitoring` and `systemAlerts` as accessors, because the entry replaces all
+   four wholesale and a captured value would go stale the first time a document
+   came back. `ALERT_TAG`, `ACTION_LABEL`, `alertItem` and `runAlertAction` had no
+   callers outside the span, so they stayed private rather than being re-exported.
+
+   The important move was **brokering navigation as two intents**. A card's "Show
+   in Series" button did `showView('series-all')`, set the search box and called
+   `renderRules()`; the open/test-instance action did `showView(…)`, found the
+   instance and called `editInstance`. Those are now `showSeriesInLibrary(rule)`
+   and `openInstance(id)`, implemented in the entry. That removes `showView`,
+   `renderRules` and `editInstance` from the surface entirely, which means the
+   navigation module has **no edge into alerts at all** — the same pattern as
+   phase 8's `openLibraryView`, and the reason alerts was worth doing first.
+
+   `wire()` is needed here, unlike the editor cut: `tvr-recheck-all` is a node in
+   `interface.html`, not one the module makes. Every other listener in the cluster
+   attaches to an element it creates, so the rest needed nothing.
+
+   **What is left: navigation and topbar.** They are adjacent in the entry and may
+   well be one cut rather than two — measure both surfaces again before deciding,
+   because alerts leaving changed them. The one tie that remains is topbar's
+   `showEverythingNeedingAttention`, which calls `seriesAlertCard` and
+   `systemAlertCard`. Since sibling modules cannot import each other here, the
+   entry must broker those two, and **that fixes the order the factories are
+   constructed in** — `createAlerts` before whatever takes the topbar. Nothing in
+   the code states that constraint, and a later edit would silently break it, so
+   say so in a comment where the factories are built.
+
+   **Phase 7 was taken ahead of the rest of this one**, because it was the only
+   remaining cluster with no stake in that argument.
 7. **Checks — landed.** `checks.js`, 164 lines; `app.js` 2,436 → 2,308. Moved as
    a unit, as planned: `queueChecks`, `drainChecks`, `startPolling`, `watchTick`,
    `renderCheckBanner` and `isChecking`, plus `CHECK_PHASE` and `WATCH_SECONDS`.
@@ -561,23 +586,24 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
 4. Begin only the approved phase. Phases S, 2, 3, 4, 5, 7 and 8 are landed.
-   **Phase 6 is the one to resume** — half done, paused, and now unblocked.
+   **Phase 6 is the one to resume** — `changeList` and alerts are out, navigation
+   and the topbar are what is left.
 
-Phase 6 was paused because navigation read `editing`, `forgetDrafts` and
-`renderDetails`, which were editor state phase 8 was about to move. That is done,
-and the two directions are already brokered in their final shape: outward,
+Navigation's two directions are already brokered in their final shape: outward,
 `showView` calls `forgetDrafts(); closeEditor(); renderDetails();`; inward, the
 editor calls `openLibraryView()`, the one callback replacing what used to be
-`if (!LIBRARY[currentView]) showView('series-all');`. Navigation has a single
-edge to honour rather than three names about to relocate.
+`if (!LIBRARY[currentView]) showView('series-all');`. And alerts leaving took
+navigation's other edge with it — both of its `showView` calls became intents the
+entry implements, so there is nothing left tying navigation to alerts.
 
-The remaining phase-6 numbers are in its entry above and are stale by at least
-the editor cut — re-derive them. The two structural facts should still hold: the
-clusters are not contiguous (navigation and topbar together, alerts separately,
-the library and cards in between), and topbar/alerts/navigation are tied to each
-other, so the entry has to broker those ties and thereby fix the order the
-factories are constructed in. That ordering constraint is not stated anywhere the
-compiler can see it, so write it down where the factories are built.
+Re-derive the surfaces for navigation and topbar before cutting: every recorded
+number predates the editor and alerts cuts. Decide one module or two from the
+call graph rather than from the sketch — they are adjacent in the entry, which
+the earlier clusters were not. The one remaining tie is topbar's
+`showEverythingNeedingAttention` calling `seriesAlertCard` and `systemAlertCard`;
+the entry has to broker those, and doing so fixes the order the factories are
+constructed in. That constraint is not stated anywhere the compiler can see it,
+so write it down where the factories are built.
 
 Take it the way phases 4, 5 and 7 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,
