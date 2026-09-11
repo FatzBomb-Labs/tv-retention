@@ -10,13 +10,13 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3 and 4 are
-landed, and **phase 5 is under way: `activity.js` is out, `settings.js` is next.**
+Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4 and 5 are
+landed: **`activity.js` and `settings.js` are both out, and phase 6 is next.**
 See "Phase plan and gates".
 
 ```text
 src/assets/
-  app.js            2,900 lines — entry, seven imports, everything not yet extracted
+  app.js            2,505 lines — entry, eight imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -24,6 +24,8 @@ src/assets/
   transport.js      busy, resetBusy, createApi, TIMEOUTS, DEFAULT_TIMEOUT — imports $
   feedback.js       notice, guarded, dialog — imports $, el
   activity.js       createActivity — stats, run reports, history, live log
+  settings.js       createSettings — schedule, notifications, automation, air
+                    dates, alert preferences, About
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -323,7 +325,7 @@ Cross-feature interaction is wired at the composition root, not by importing
    by that assertion. And exported constants use a trailing `export { … }` list like
    every other module, not `export const`: the constant-declaration test scans for
    `const NAME`, and `export const NAME` reads as undeclared.
-5. **Peripheral features — in progress.** The sketch named four modules; the call
+5. **Peripheral features — landed.** The sketch named four modules; the call
    graph cut it to two. `saveSettings` is a hub — `deleteSeries`, `editInstance`,
    `editPreset`, `queuedBanner`, `renderInstances` and `ruleForm` all call it, and
    it calls `render` — so three of the four sketched modules would have imported it,
@@ -348,12 +350,28 @@ Cross-feature interaction is wired at the composition root, not by importing
    is where module evaluation used to attach them. They cannot run at import: the
    purity test enforces that for every file but the entry.
 
-   Still owed to `settings.js`, which must preserve whole-document collection and
-   masked-key semantics: the wiring at the old L2365, L2392/L2394, L2809/L2817, and
-   the TMDB listener. It will import `showResult` from `activity.js`, and
-   `renderAirProviders` stays in the entry. Fold in one known cleanup when its code
-   moves — `renderAlertSettings` declares a local `const options` shadowing the
-   `dom.js` import, inert only by luck.
+   **`settings.js` — landed.** 457 lines, `app.js` 2,900 → 2,505. The sketch was
+   wrong a second time: the cluster is ~29 declarations, not nine, and nearly all of
+   them are cluster-private. It came out as two non-contiguous spans, cut bottom-up,
+   because `renderInstances`/`editInstance` sit between them and stay in the entry.
+   Exports `renderSchedule`, `renderSettings`, `renderAlertSettings`, `renderAbout`,
+   `renderAirProviders`, `saveSettings`, `collectSettings` and `wire()`. Two
+   predictions in the sketch did not survive contact: `showResult` turned out to be
+   unused here, so there is no edge to `activity.js` at all, and `renderAirProviders`
+   moved rather than staying behind — nothing outside the cluster referenced it.
+
+   Three things are worth knowing about it. **The entry keeps ownership of the
+   state.** `saveSettings` *writes* `settings`, `snapshot.settings` and
+   `snapshot.schedule_text`, which accessors cannot do, so the entry passes
+   `applySaved(data)` — the one hook that assigns them, keeping every write to those
+   bindings in one file. **`saveScheduleNow` gained an `overrides` argument rather
+   than a second save path**: it used to set `settings.schedule` locally and then
+   save, relying on `collectSettings` spreading the mutated document. Passing the
+   schedule through as an override posts the identical payload without leaving local
+   state changed when a save fails. **The `options` shadow is gone** — it had to be:
+   `renderAlertSettings`'s local `const options` and `renderSchedule`'s use of the
+   imported `options()` landed in the same file, where luck runs out. It is now
+   `alerts`.
 6. **Alerts/navigation/topbar:** explicit view transitions, action callbacks and
    confirmation flows; maintain draft-discard and log-start/stop rules.
 7. **Checks:** move queue/poll/watch as a unit with tested lifecycle callbacks.
@@ -378,9 +396,10 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 - Dirty tracking refers to nonexistent `#tvr-view-settings-schedule`; schedule is
   already excluded by the surrounding `.tvr-view:has(.tvr-save)` selection.
 - `renderRules` aliases `renderLibrary`; retain until callers are migrated.
-- `seriesAlertCard` and `renderAlertSettings` each declare a local `const options`,
-  which shadows the one imported from `dom.js`. Neither scope calls `options(...)`,
-  so it is inert — but by luck. Rename when their surrounding code moves.
+- `seriesAlertCard` declares a local `const options`, which shadows the one imported
+  from `dom.js`. That scope never calls `options(...)`, so it is inert — but by luck.
+  Rename when its surrounding code moves. `renderAlertSettings` had the same problem
+  and was fixed on the move into `settings.js`, where it stopped being inert.
 - Documentation and static HTML contain outdated plugin/Test Mode wording. Backend
   actions and current tests must be traced before assuming every documented
   invariant is enforced by every manual action.
@@ -392,23 +411,23 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phases S, 2, 3 and 4 are landed, and phase 5 is
-   part-done: `activity.js` is out and `settings.js` is next.
+4. Begin only the approved phase. Phases S, 2, 3, 4 and 5 are landed; phase 6
+   (alerts, navigation, topbar) is next.
 
-`settings.js` is the rest of phase 5. It is not leaf code and not a mechanical
-move: it is a render/collect/save cluster reached from the settings view, so the
-boundary to find is what the entry must still call and what can become private.
-Preserve whole-document collection and masked-key semantics — a settings save
-reads the whole document rather than one panel, and a masked key left unedited
-must not be written back as its mask. Presets and connections deliberately stay
-in the entry; the phase-5 entry above says why.
+Phase 6 is navigation and alerts. Take it the way phases 4 and 5 went: a factory
+if it needs entry state, accessors for `snapshot`/`settings` rather than values,
+and every top-level listener in the cluster moved into an exported `wire()` the
+entry calls at start-up. Grep the cut range for `addEventListener` *before*
+cutting — the listeners are statements between the functions, and leaving one
+behind produces no error, just a dead control. Where a module must *write* entry
+state, take a setter from the entry rather than reaching for the binding;
+`applySaved` in `settings.js` is the pattern.
 
-Take it the way `activity.js` went: a `createSettings({ … })` factory, accessors
-for `snapshot`/`settings` rather than values, and every top-level listener in the
-cluster moved into an exported `wire()` the entry calls at start-up. Grep the
-cut range for `addEventListener` *before* cutting — the listeners are statements
-between the functions, and leaving one behind produces no error, just a dead
-control.
+Settings still carries two contracts no test can see, so do not let a later
+change quietly drop them: a save posts the whole document rather than the panel
+that was edited, and a masked key left unedited must not be written back as its
+mask. Presets and connections deliberately stayed in the entry; the phase-5
+entry above says why.
 
 Read the cluster before deciding its module count. Phase 4's plan said one module
 and the code said two; phase 5's said four and the code said two. The call graph
