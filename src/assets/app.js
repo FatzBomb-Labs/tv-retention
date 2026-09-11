@@ -2913,7 +2913,9 @@ function start(root) {
       el('span', { className: 'tvr-inline-label', textContent: name }),
       el('span', { textContent: String(value) }),
     ])));
-  }  $('tvr-tmdb-test').addEventListener('click', () => guarded('', async () => {
+  }
+
+  $('tvr-tmdb-test').addEventListener('click', () => guarded('', async () => {
     const result = $('tvr-tmdb-result');
     try {
       await api('test-tmdb', { tmdb: { api_key: $('tvr-tmdb-key').value } }, 'Contacting TMDB…');
