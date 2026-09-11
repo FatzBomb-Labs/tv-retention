@@ -76,7 +76,7 @@ function start(root) {
     applyHealth,
     applyAlerts,
     render: () => render(),
-    renderRules: () => libraryView.renderRules(),
+    renderLibrary: () => libraryView.renderLibrary(),
     renderAlerts: () => renderAlerts(),
     renderCounts: () => renderCounts(),
   });
@@ -116,7 +116,6 @@ function start(root) {
     deleteSeries: (rule) => deleteSeries(rule),
     forgetLibrary: () => libraryView.forgetLibrary(),
     render: () => render(),
-    renderRules: () => libraryView.renderRules(),
     renderLibrary: () => libraryView.renderLibrary(),
     openLibraryView: () => { if (!isLibraryView()) showView('series-all'); },
   });
@@ -148,7 +147,7 @@ function start(root) {
     showSeriesInLibrary: (rule) => {
       showView('series-all');
       $('tvr-search').value = rule.series_title || rule.path;
-      renderRules();
+      renderLibrary();
     },
     openInstance: (instanceId) => {
       showView('settings-connections');
@@ -302,7 +301,7 @@ function start(root) {
     openEditor: (rule, series) => openEditor(rule, series),
     presetSummary: (preset) => presetSummary(preset),
   });
-  const { renderLibrary, renderRules } = libraryView;
+  const { renderLibrary } = libraryView;
 
   function render() {
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
@@ -311,7 +310,7 @@ function start(root) {
     $('tvr-test-chip').hidden = !testMode() || banner !== 'chip';
     renderCounts();
     renderTopBar();
-    renderRules();
+    renderLibrary();
     renderAlerts();
     renderPresets();
     renderInstances();

@@ -56,7 +56,7 @@ function createApi(endpoint, csrf) {
       } catch (error) {
         if (error.name === 'AbortError') {
           throw new Error(`The server did not answer "${action}" within ${Math.round(limit / 1000)}s. `
-                          + 'Check the plugin worker in the system log.');
+                          + 'Check the TV Retention worker in the system log.');
         }
         throw new Error(`Could not reach the TV Retention backend (${error.message}). Reload the page.`);
       }

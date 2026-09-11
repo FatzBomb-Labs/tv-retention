@@ -26,7 +26,7 @@ export function createSeriesEditor({
   api, getSettings, getSnapshot, getMonitoring, getLibrary, applySaved, saveSettings,
   applyAlerts, conditionFields, presetSummary, posterNode, sonarrLink,
   seriesAlertCard, seriesAlerts, queuedBanner, queueChecks, deleteSeries,
-  forgetLibrary, render, renderRules, renderLibrary, openLibraryView,
+  forgetLibrary, render, renderLibrary, openLibraryView,
 }) {
     function ruleForm(existing, preselect) {
       const rule = Object.assign({
@@ -235,7 +235,7 @@ export function createSeriesEditor({
               if (data.busy) throw new Error('A run is in progress. Try again when it finishes.');
               if (data.state) getMonitoring()[data.rule_id] = data.state;
               applyAlerts(data.alerts);
-              renderRules();
+              renderLibrary();
               sayRead();
               sayPlan((getMonitoring()[rule.id] || {}).plan);
             } else {

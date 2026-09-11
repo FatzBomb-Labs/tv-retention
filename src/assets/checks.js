@@ -10,7 +10,7 @@ import { $, el, text } from './dom.js';
 // and `snapshot` are handed over as getters because the entry reassigns both wholesale
 // (a refresh replaces them), while this module only ever writes *into* them.
 export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, applyAlerts,
-                               render, renderRules, renderAlerts, renderCounts }) {
+                               render, renderLibrary, renderAlerts, renderCounts }) {
   const checking = new Set();
   const forced = new Set();
   let checkQueue = [];
@@ -31,7 +31,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     // A sweep empties the list: a card left standing during a re-read looks like a
     // result, and it would be a stale one.
     if (checking.size > 1) bulkChecking = true;
-    renderRules();
+    renderLibrary();
     drainChecks();
   }
 
@@ -62,7 +62,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
         } finally {
           checking.delete(ruleId);
           forced.delete(ruleId);
-          renderRules();
+          renderLibrary();
           renderAlerts();
           renderCounts();
         }
@@ -70,7 +70,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     } finally {
       checkRunning = false;
       bulkChecking = false;
-      renderRules();
+      renderLibrary();
     }
   }
 
@@ -86,7 +86,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
         bulkChecking = !!progress.running;
         const fresh = await api('alerts', {}, '', true);
         applyAlerts(fresh.alerts);
-        renderRules();
+        renderLibrary();
         renderAlerts();
         renderCounts();
         renderCheckBanner(progress);

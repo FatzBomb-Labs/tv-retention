@@ -314,7 +314,7 @@
     <div class="tvr-card">
       <p><strong>TV Retention</strong></p>
       <p>Keeps a chosen number of days, episodes, or seasons per series and removes the rest through Sonarr, so Sonarr's database and monitoring stay correct.</p>
-      <p class="tvr-lede">The plugin touches no filesystem of its own. Sizes, air dates, import dates and monitoring all arrive with the episodes, and deletion is a Sonarr call — so Sonarr's recycle bin, its extra-file handling and its empty-folder cleanup all apply as they are.</p>
+      <p class="tvr-lede">TV Retention touches no media filesystem. Sizes, air dates, import dates and monitoring all arrive with the episodes, and deletion is a Sonarr call — so Sonarr's recycle bin, its extra-file handling and its empty-folder cleanup all apply as they are.</p>
       <div id="tvr-about-state"></div>
     </div>
   </section>
@@ -423,7 +423,7 @@
           <option value="chip">Show a small marker in the header</option>
         </select>
       </div>
-      <small>Never nothing. A schedule in Test Mode reports and deletes nothing, and a plugin that stops saying so is one you will find has done nothing for months.</small>
+      <small>Never nothing. A schedule in Test Mode reports and deletes nothing, and an application that stops saying so is one you will find has done nothing for months.</small>
     </div>
     <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
       <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
@@ -458,7 +458,7 @@
           <option value="minimal">Minimal — only what stops work</option>
           <option value="error">Errors</option>
           <option value="warning">Warnings and errors</option>
-          <option value="info">Normal — what the plugin did</option>
+          <option value="info">Normal — what TV Retention did</option>
           <option value="verbose">Verbose — every series, every check</option>
         </select>
       </div>

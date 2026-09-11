@@ -89,7 +89,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     ['run_completed', 'A run has finished'],
     ['series_removed', 'A series was removed from Sonarr'],
     ['series_ended', 'Sonarr reports a series has ended'],
-    ['series_added', 'Sonarr has a new series this plugin does not manage'],
+    ['series_added', 'Sonarr has a new series TV Retention does not manage'],
     ['health_problems', 'A check found something wrong'],
     ['health_ok', 'A check found nothing wrong'],
     ['errors', 'Any error'],
@@ -428,7 +428,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     document.querySelectorAll('.tvr-view:has(.tvr-save)').forEach((view) => {
       view.addEventListener('change', (event) => {
         if (event.target.closest('#tvr-instances')) return;   // instance cards save themselves
-        if (event.target.closest('#tvr-view-settings-schedule')) return;  // and so does the schedule
         settingsDirty(true);
       });
       view.addEventListener('input', () => settingsDirty(true));

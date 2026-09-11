@@ -364,8 +364,6 @@ export function createLibrary({
                                  textContent: `${rows.length - LIBRARY_LIMIT} more — search, or narrow the filters.` }));
     }
   }
-  const renderRules = renderLibrary;
-
   // One card for a series, whether or not it has a rule. The check is the difference, and
   // it is the only difference the eye needs: everything else follows from it.
   function libraryCard(row) {
@@ -582,6 +580,6 @@ export function createLibrary({
 
   return {
     getLibrary, forgetLibrary, forgetSeriesCache, ruleFor, posterNode, sonarrLink,
-    renderLibrary, renderRules, wire,
+    renderLibrary, wire,
   };
 }

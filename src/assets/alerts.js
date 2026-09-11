@@ -93,13 +93,13 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
   }
 
   function seriesAlertCard(rule, list, config) {
-    const options = config || {};
+    const alertOptions = config || {};
     const severity = worstSeverity(list);
     const blocked = list.some((alert) => alert.blocking);
     // Compact is the series editor, where the panel above has already named the series,
     // counted its issues, dated the reading and offered a re-read. Repeating all four
     // under a heading made an ended series with no episodes say the same thing four ways.
-    const compact = !!options.compact;
+    const compact = !!alertOptions.compact;
     const card = el('div', { className: `tvr-alert-card ${severity}${compact ? ' compact' : ''}` });
     if (!compact) {
       const head = el('div', { className: 'tvr-alert-card-head' }, [
@@ -115,7 +115,7 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
     list.forEach((alert) => card.append(alertItem(alert)));
     if (compact) return card;
     const foot = el('div', { className: 'tvr-alert-foot' });
-    if (!options.hideOpen) {
+    if (!alertOptions.hideOpen) {
       const open = el('button', { type: 'button', className: 'tvr-small', textContent: 'Show in Series' });
       open.addEventListener('click', () => {
         showSeriesInLibrary(rule);
@@ -202,13 +202,11 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
     // The counts describe what this tab shows — system problems — with series problems
     // summarised by the roll-up, because they are acted on from the series card.
     const system = getSystemAlerts().slice();
-    const matches = () => true;
     const systemBox = $('tvr-alerts-system');
     systemBox.replaceChildren();
-    const shown = system.filter(matches);
-    $('tvr-alerts-system-empty').hidden = shown.length > 0;
+    $('tvr-alerts-system-empty').hidden = system.length > 0;
     const byInstance = new Map();
-    shown.forEach((alert) => {
+    system.forEach((alert) => {
       const instance = (getSettings().instances || []).find((i) => i.id === alert.instance_id);
       const name = instance ? instance.name : 'TV Retention';
       byInstance.set(name, (byInstance.get(name) || []).concat([alert]));
