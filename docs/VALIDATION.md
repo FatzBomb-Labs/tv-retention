@@ -13,7 +13,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 |---|---|
 | `python3 -m unittest discover -s tests` | 482 tests, all pass |
 | Worker imports | every module loads, server.py included |
-| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — ten files now: the entry plus `format`, `dom`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks` |
+| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — eleven files now: the entry plus `format`, `dom`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks`, `series-removal` |
 | `node --test tests/frontend/*.test.js` | 13 tests, all pass — 8 runtime flows, 4 settings-contract tests, plus module-import purity |
 | `docker build` | 129 MB image — last built 2026-09-11 from the phase-4 tree; the module split changes no build step, only which files `COPY src/assets/` picks up |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; `snapshot` answers with settings migrated v7 to v8; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
@@ -93,9 +93,9 @@ This is the first browser session the split module graph has had. Until it, the 
 namespace and the seven-file import graph were validated only statically and over curl.
 
 The counts below are that session's and are left as recorded. The tree has since grown
-`activity.js`, `settings.js` and `checks.js`, so a repeat run should see ten files rather
-than seven; what the session established — that a digest holds a whole graph and that a
-stale one is refused — does not change with the count.
+`activity.js`, `settings.js`, `checks.js` and `series-removal.js`, so a repeat run should
+see eleven files rather than seven; what the session established — that a digest holds a
+whole graph and that a stale one is refused — does not change with the count.
 
 | Check | Result |
 |---|---|

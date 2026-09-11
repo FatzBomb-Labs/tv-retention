@@ -11,14 +11,14 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 ## Current state
 
 Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5 and 7
-are landed. Phase 6 is **partly done and deliberately paused**: `changeList` has
-moved into `changes.js`, but the alerts/navigation/topbar split is blocked on
-phase 8 and phase 7 was taken ahead of it. See "Phase plan and gates", and read
-the phase-6 entry before cutting anything there.
+are landed, and phase 8 has started. Phase 6 is **partly done and deliberately
+paused**: `changeList` has moved into `changes.js`, but the alerts/navigation/topbar
+split is blocked on phase 8 and phase 7 was taken ahead of it. See "Phase plan and
+gates", and read the phase-6 entry before cutting anything there.
 
 ```text
 src/assets/
-  app.js            2,308 lines — entry, nine imports, everything not yet extracted
+  app.js            2,179 lines — entry, ten imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -31,6 +31,9 @@ src/assets/
                     dates, alert preferences, About
   checks.js         createChecks — the background check queue, sweep polling and
                     the heartbeat; imports $, el, text
+  series-removal.js createRemoval — the queued-removal banner and the dialog that
+                    queues it; imports $/el/toggle/field/options, plural/ago,
+                    monitorTree, guarded/dialog
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -38,7 +41,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, ten assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, eleven assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -438,6 +441,38 @@ Cross-feature interaction is wired at the composition root, not by importing
    poll — so the move has behavioural coverage, not just a syntax check.
 8. **Series features:** removal UI, then editor and library using the established
    callback boundaries. Preserve scope/save ordering, selection and drafts.
+   **Started — the removal UI has landed.** `series-removal.js`, 148 lines;
+   `app.js` 2,308 → 2,179. `REMOVAL_ACTIONS`, `REMOVAL_CONFIRM`, `REMOVAL_SONARR`,
+   `REMOVAL_FILES`, `queuedRemoval`, `queuedBanner` and `deleteSeries` moved as a
+   block — they were already contiguous, lines 2041–2165, with the constants
+   immediately above their only readers.
+
+   The surface is the narrowest of any cut so far: **four callbacks in**
+   (`api`, `getSettings`, `saveSettings`, `renderDetails`), **three names out**
+   (`queuedRemoval`, `queuedBanner`, `deleteSeries`). All four constants proved
+   private — zero references outside the span — so they went with the code rather
+   than being re-exported. `queuedRemoval` has four outside callers, all cheap
+   predicates (`scheduledFor`, `posterNode`, a band filter, `changeMarks`).
+
+   `getSettings()` rather than `settings`, for the reason established in phase 5:
+   the binding is reassigned wholesale every time a document comes back, so a
+   captured object would go stale the first time a save succeeded. `saveSettings`
+   is passed as the function it is — it is never reassigned, only destructured
+   from `settingsView` above.
+
+   **No `wire()` here**, and the difference from phase 7 is worth knowing. All
+   four of this module's `addEventListener` calls attach to elements the module
+   itself just created, inside the functions that create them. Nothing binds to a
+   document-level or pre-existing node, so there is nothing to register at start
+   and nothing that could double-bind on a re-render.
+
+   Verified by reconstruction rather than by filtering: the module body was
+   re-indented and the accessor rewrite undone, then compared to the original
+   span — 125 lines identical byte-for-byte, comments included. The entry
+   remainder diffs to exactly two additions, the import and the factory block.
+   (Two earlier filter-based scripts reported phantom differences by stripping
+   `}` and `getSettings` lines from one side only. Reconstruction cannot lie that
+   way, and is the better tool for a verbatim move.)
 9. **Finish composition root:** remove transitional wiring/aliases only after
    callers and tests have migrated; verify no import-time side effects or cycles.
 
@@ -473,8 +508,8 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
 4. Begin only the approved phase. Phases S, 2, 3, 4, 5 and 7 are landed; phase 6
-   is half done and paused. **Phase 8 (series features) is next**, and the order
-   is the decision to confirm first.
+   is half done and paused. **Phase 8 is in progress** — its removal UI has
+   landed, and the editor is what remains of it.
 
 Phase 6 was paused on purpose, and resuming it before phase 8 would undo the
 reason. Navigation reads `editing`, `forgetDrafts` and `renderDetails` — editor
@@ -484,13 +519,19 @@ after, and the callbacks navigation needs will already exist in their final
 shape. Phase 7 was pulled forward for the same reason in reverse: it shared none
 of that entanglement, so it was free to go early.
 
-Phase 8 is the biggest cluster left by a wide margin. `ruleForm` alone runs from
-roughly line 1337 to 1914 — call it 578 lines, a quarter of what remains — and
-`renderDetails`, `openEditor`, `scopeOf`, the drafts map and the removal UI sit
-around it. Expect it to be several cuts, not one, and expect the removal UI
-(`deleteSeries`, `queuedBanner`, `queuedRemoval`) to come out first, as the plan
-says: it is the smaller, better-bounded half. Re-derive the boundaries from the
-call graph before cutting; the line numbers here will have moved.
+What is left of phase 8 is the editor, and it is the biggest cluster left by a
+wide margin. `ruleForm` alone runs from roughly line 1337 to 1785 — call it 450
+lines — with `openEditor`, `renderDetails`, `scopeOf`, the `drafts` map and the
+`editing` binding sitting around it. Expect several cuts, not one. Re-derive the
+boundaries from the call graph before cutting; the line numbers here will have
+moved.
+
+The editor is the cut phase 6 is waiting on, so it is worth doing with
+navigation's needs in mind. `showView` discards drafts when it leaves the
+library — `forgetDrafts(); editing = null; renderDetails();` — and `openEditor`
+calls `showView('series-all')` back the other way. That tie does not disappear
+when the editor moves; it becomes something the entry brokers. Decide its shape
+here, because navigation will be built against it.
 
 Take it the way phases 4, 5 and 7 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,
