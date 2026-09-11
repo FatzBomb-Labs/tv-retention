@@ -180,6 +180,13 @@ are immutable.
 behind the decisions that shaped it. Delete from it as things land, so it always describes
 what is left.
 
+The frontend refactor is the exception, and it has a file of its own:
+[docs/REFACTOR-HANDOFF.md](docs/REFACTOR-HANDOFF.md) is the plan of record for breaking
+up `src/assets/app.js`, phase by phase. Look there, not in PLAN.md, for what the interface
+split has landed and what it does next — including the contracts extraction must not
+break, which is the part worth reading before touching any of it. It follows the same
+delete-as-it-lands rule.
+
 **It is a container.** The plugin is gone: no `.plg`, no `.page`, no PHP, no cron entry, no
 Unraid paths. [docs/CONTAINER.md](docs/CONTAINER.md) records what the port was and
 [docs/PLAN.md](docs/PLAN.md) records why, including what the survey of the neighbouring

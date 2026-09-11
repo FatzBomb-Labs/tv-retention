@@ -1,106 +1,54 @@
 # Frontend refactor handoff
 
-Session handoff, 2026-09-10. Read this with `AGENTS.md`, `README.md`, and
-`docs/PLAN.md`. This records the conversation and distinguishes approved work from
-proposals still needing review. Implementation and tests outrank historical prose.
+The plan of record for breaking up `src/assets/app.js`. Read it with `AGENTS.md` and
+`README.md`. Implementation and tests outrank anything written here.
+
+Phases land one at a time, each validated and committed before the next begins.
+**Delete from this file as work lands**, the same rule `docs/PLAN.md` follows: what
+is left should describe what is left. Sections recording resolved arguments have
+been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-- Repository: `/config/workspace/containers/tv-retention`.
-- Earlier investigation used `/config/workspace/plugins/TV-Delete`. Do not work in
-  that old directory; it retained files absent from the current repository.
-- Branch: `master`.
-- Latest commits:
-  - `c9df46b` — Phase S: stabilization (two unresolved references fixed, frontend
-    executable test suite added).
-  - `c04a2f8` — Flatten the source tree for the container.
-  - `b9d68e3` — Refresh the application icons.
-  - Previous baseline: `c244f07` — Five views were rendering outside the layout.
-- Working tree has uncommitted Phase 2 changes (see "Phase 2 — module delivery"
-  below).
-- `src/tv-retention/` has been flattened to `src/`:
+Branch `master`, working tree clean as of 2026-09-11. Phases S, 2 and 3 are landed;
+**Phase 4 (transport/data boundaries) is next.** See "Phase plan and gates".
 
-  ```text
-  src/
-    assets/                 app.js, app.css, icons.css, icon PNGs
-    include/interface.html
-    worker/                 Python application
-  tests/
-  tools/check-on-host.sh
-  ```
+```text
+src/assets/
+  app.js            3,121 lines — entry, four imports, everything not yet extracted
+  format.js         bytes, when, plural, ago, range — imports nothing
+  dom.js            $, el, text, toggle, field, options — imports nothing
+  episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
+  changes.js        REMOVAL_SUMMARY, changeSummary, changeLines, changeRows
+```
 
-- Dockerfile, test source paths, validation script, README architecture tree, and
-  the documented syntax-check path were updated for the move.
-- The last missed path fixes were `tests/test_migration.py` and the unused-code
-  scanner in `tests/test_names.py`: `WORKER.parents[2]` became `WORKER.parents[1]`
-  when locating repository tests.
-- The user removed ignored, untracked `dist/` plugin-release artifacts. That
-  directory is absent in this repository.
-- The user intentionally regenerated six icon PNGs. Their content updates were
-  committed separately before flattening. The flattening commit also recorded
-  existing executable permissions on those six PNGs (100644 → 100755). This was
-  disclosed; no subsequent permission change was made.
-- **Phase S (pre-refactor stabilization) landed** in `c9df46b` — see "Phase plan
-  and gates" below. Phase 2 (module delivery) is done in the working tree but
-  uncommitted: `app.js` is now a module loaded via `<script type="module">`, the
-  release-namespace serving is fully implemented, and the import-purity test
-  enforces the invariant file by file. No extraction into separate files has begun.
-- Nothing has been deployed or pushed during this work.
+The entry began at 3,496 lines. Phase 3 moved four modules out of it without
+changing behavior: definitions dedented two spaces and carried across verbatim.
 
-### Validation completed
+The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
+both send the same remote script. Last green run 2026-09-11: 482 Python tests,
+worker imports, five assets parsing as ES modules, 9 frontend runtime tests.
 
-`./tools/check-on-host.sh` passed after the path fixes:
-
-- 472 Python unit tests passed.
-- Worker import check passed.
-- `app.js` syntax check passed.
-- `git diff --check` passed before committing.
-
-This validates the flattening; it does not establish that all browser behavior is
-correct. Most frontend tests inspect source strings rather than execute UI flows.
-No Docker image build or browser interaction test was performed for the flattening.
-
-Phase S (`c9df46b`) re-validated `./tools/check-on-host.sh` end to end, with the
-new executable frontend suite now part of it:
-
-- 473 Python unit tests passed (472 + the new static guard).
-- 8 frontend runtime tests passed (`tests/frontend/`, `node:test` over a fake DOM
-  with a fixture-backed `fetch` that contacts nothing).
-- Worker import check and `app.js` syntax check passed.
-- `git diff --check` clean.
-
-Phase 2 (uncommitted) added:
-
-- 482 Python tests (473 + 9 release-namespace and asset-serving tests in
-  `test_server.py`; the static-guard count shifted slightly during the merge).
-- 9 frontend runtime tests (8 original + the import-purity test in
-  `module-purity.test.js`).
-- Module-syntax check now covers every `src/assets/*.js` as ES modules.
-- `app.js` converted from IIFE to `<script type="module">` entry.
-- `server.py` serves a versioned release namespace (`/assets/<digest>/<file>`).
-- Flat asset names kept as a 1-week compatibility path.
-- `AGENTS.md` records the new constraints (release namespace, import purity).
+Nothing has been deployed or pushed during this work. No browser session against a
+built image has been run for the module split.
 
 ### Commit identity
 
-The user supplied:
+`Keith Litfin <fatzbomb75@yahoo.com>`, passed command-scoped —
+`git -c user.name=... -c user.email=... commit`. Git configuration holds no
+identity and should not be given one. Commits also carry the `Co-authored-by`
+trailer for the assistant.
 
-- Author: Keith Litfin
-- Nick: FatzBomb
-- Company, as supplied: FatzBomb Entertianment
-- Email: fatzbomb75@yahoo.com
-
-The two commits used `Keith Litfin <fatzbomb75@yahoo.com>` as author and committer
-through command-scoped environment variables. Git configuration was not changed.
-Earlier commit attempts failed because identity was missing; those attempts created
-no commits. Do not assume persistent Git identity is now configured.
+`core.filemode` is set `false` in this clone. On Windows, Git otherwise reads
+NTFS's fake `100644` off every file and reports `tools/check-on-host.sh` as
+modified forever, and a commit made from Windows silently drops its exec bit.
 
 ## User goals and constraints
 
 Refactor toward cohesive single-responsibility modules, with `app.js` ultimately
 being the composition root/bootstrap rather than a collection of feature bodies.
 
-- Preserve behavior during extraction; stabilize known defects separately first.
+- Preserve behavior during extraction; stabilize known defects separately.
 - No framework rewrite, new functionality, arbitrary splitting, or one-function-per-file.
 - No dependencies or build system without unusually strong justification.
 - Every incremental phase must remain runnable and testable.
@@ -109,9 +57,8 @@ being the composition root/bootstrap rather than a collection of feature bodies.
 - Do not silently turn proposed bug fixes into approved semantics.
 - Do not change production services as part of refactoring.
 
-The user approved and completed icon commits and source flattening. They asked for
-another review/question before beginning frontend work. Creating this handoff is
-the current authorization; it is not authorization to start stabilization or extraction.
+Each phase is approved on its own before it starts. Landing one is not authorization
+to begin the next.
 
 ## Architectural findings
 
@@ -164,8 +111,8 @@ from `snapshot.settings`, not an independently deep-cloned document.
   `data-csrf`. Currently it loads one classic script at the end of the body.
 - RPC uses form POST `/api`: `csrf_token` plus JSON `payload` containing `action`.
   Preserve action names, payloads, timeout/quiet flags, and response handling.
-- `actions.py` owns dispatch; backend validation remains authoritative. There are
-  25 registered actions in the reviewed surface (earlier replies said 26).
+- `actions.py` owns dispatch; backend validation remains authoritative. `ACTIONS`
+  holds 25 entries, and a test asserts the interface can reach every one of them.
 - `/poster` is a separate authenticated GET, keyed by instance, series and artwork
   stamp; the browser does not receive Sonarr API keys.
 - HTML IDs, `data-view`, `data-section`, `data-section-head`, CSS state classes,
@@ -187,18 +134,14 @@ from `snapshot.settings`, not an independently deep-cloned document.
   `test_server.py` and `test_migration.py` also read JavaScript source directly.
   RPC reachability, icons and HTML/CSS contracts are checked this way.
 
-## Revisions requested by the independent review
+## Settled design directions
 
-The user explicitly challenged four parts of the first proposal:
-
-1. Versioning only the entry script does not version transitive ES-module imports.
-2. `state.js` must not contain mutable UI/render callback registries.
-3. A roughly 2,200-line `series.js` is not justified by library/editor coupling.
-4. Imports execute before the entry body; its root guard cannot protect import-time
-   DOM access, timers, storage access, or event binding.
-
-These concerns stand. The subsequent assistant response did not fully resolve all
-of them. The following is the corrected direction to review before implementation.
+Four objections to the original proposal shaped these, and all four were sustained.
+Two are now enforced by shipped code: asset versioning covers transitive imports
+(the release namespace, phase 2) and import purity is a test that runs file by file
+(phase 2). The other two are constraints on phases still to come — no mutable
+callback registry in a state module, and no 2,200-line `series.js`. What follows is
+the direction, not an open question.
 
 ### Explicit orchestration, not a registry
 
@@ -253,129 +196,27 @@ need ownership documented; cancellation/race fixes are separate behavioral chang
 unless specifically approved. A root-absent import/bootstrap test should prove that
 no DOM access, fetch, interval or event registration leaks through imports.
 
-## Module caching: unresolved proposal corrected
+## Landed before extraction began
 
-Current `server.py` hashes only `app.js`, `app.css`, `icons.css`; PNG content does
-not change that key. Earlier claims that icon edits automatically bust it were wrong.
-Assets currently receive a one-week cache lifetime. Asset serving rejects names
-containing `/` or `\\`.
+**Phase S (`c9df46b`) fixed two crashes** that would have been extracted along with
+their bugs. `drainChecks` and `startPolling` both called an undefined
+`renderStats()` — a casualty of the sidebar redesign, which replaced it with
+`renderCounts()` and `renderTopBar()` but missed the two asynchronous callers. The
+queue exited after its first completed rule; the poll tick cleared its own interval
+and hid the progress banner early. Both became `renderCounts()`, which restores the
+overview without fetching Stats. Separately, the Run confirmation called an undefined
+`planText(plan)`, so a run with an actionable plan failed before `window.confirm`
+and issued nothing; it now builds its confirmation from `changeSummary`'s rows.
 
-Neither `app.js?v=KEY` nor dynamically importing only its immediate children with
-`?v=KEY` solves unversioned static imports inside those children. The earlier
-dynamic-import recommendation was incomplete. Do not implement it as recorded in
-the conversation.
+Neither was caught by source-string assertions, which is why the executable frontend
+suite exists: a regex over `render*` names cannot see `planText`, an imported
+alias, or any other runtime name error. That suite is the regression record for both.
 
-A complete, no-build candidate is a versioned URL namespace:
-
-```text
-/assets/<release-digest>/app.js
-/assets/<release-digest>/dom.js
-/assets/<release-digest>/series-editor.js
-```
-
-Static `import './dom.js'` then resolves within the same digest namespace at every
-depth. Source files can remain flat in `src/assets/`.
-
-Requirements before adopting this design:
-
-- Digest a deterministic manifest of asset filenames and bytes, not just the entry.
-- Serve each digest only from exactly the bytes used to compute it (for example,
-  an immutable in-memory asset snapshot created at server startup).
-- Emit entry and stylesheet URLs from that same snapshot; version relevant icons
-  too if promising icon cache invalidation.
-- Allow only the exact `<digest>/<allowlisted-flat-filename>` route shape; retain
-  traversal protection, correct MIME types and `nosniff`.
-- Give successful digest-addressed responses long-lived immutable caching.
-- An unavailable old digest must fail with a non-cacheable response, never redirect
-  to or silently serve the current release. An upgrade mid-load may require reload,
-  but must not assemble a mixed-version graph.
-- Existing flat asset URLs need an explicit compatibility policy; the new module
-  graph must not use them. No runtime regex rewriting of JavaScript imports.
-- Test transitive import resolution, changed-child invalidation, old-key rejection,
-  MIME/cache headers and traversal. Test a partially cached old graph across upgrade.
-
-An import map covering every transitive specifier is another viable design, but no
-caching design was finally approved. Prefer reviewing the namespace design rather
-than adding query strings only to the first level of dynamic imports.
-
-## Pre-refactor stabilization: confirmed defects, fixes still to settle
-
-Resolved in `c9df46b`; retained below as the record of the defects and of the
-testing approach that justified the fix.
-
-These line numbers remain valid in the moved `src/assets/app.js`.
-
-### Undefined `renderStats()` — lines 281 and 305
-
-Confirmed in `drainChecks`' per-rule `finally` and `startPolling`'s tick. The defined
-`renderStatsView()` at line 3281 is a different responsibility: it fetches `/api`
-`stats` for the Stats page on navigation.
-
-Historical evidence: old `renderStats()` updated the overview counts/badges; the
-sidebar redesign (`42b8522`) replaced full-render calls with `renderCounts()` and
-`renderTopBar()`. The Stats page appeared in `2a265bf`. The two asynchronous callers
-were left behind.
-
-Current effects:
-
-- Queue: exception in the inner finally exits the drain after its first completed
-  rule; outer finally resets running/bulk flags, leaving remaining queued work.
-- Polling: exception is caught as a poll failure, clears the interval and hides the
-  progress banner before normal completion handling.
-
-Do not blindly rename these calls to `renderStatsView()`; that adds unrelated RPCs.
-The later advice to simply delete both calls also missed the historical badge
-refresh responsibility. The likely minimal repair is `renderCounts()` at these
-sites, preserving overview updates without fetching Stats. Review and test this
-before approving it. Do not fabricate a fresh aggregate plan: these responses do
-not themselves return a replacement `snapshot.plan`.
-
-Regression tests should execute the flows with controlled responses/timers:
-
-- Two queued checks both complete, alerts/header/sidebar counts update, queue
-  state clears, no rejection and no `stats` RPC.
-- A running progress tick retains polling and renders its banner; a later finished
-  tick clears it. Verify count updates and quiet requests.
-
-### Undefined `planText(plan)` — line 838
-
-Confirmed reference with no definition in current source. Run with a truthy
-`plan.actionable` fails before `window.confirm`; `guarded` reports the error and no
-run request is issued.
-
-Intended responsibility: describe the actual pending deletion, monitoring and
-removal plan inside the confirmation. Reuse `changeSummary(plan)`'s semantics and
-removal descriptions rather than introducing another independent description table.
-
-The earlier proposed `changeSummary(...).map(row => row.text).join('; ')` cannot
-simply follow `This will`: rows are already complete sentences (e.g. "2 series will
-..."). Decide a grammatical confirmation framing, such as a labelled multiline
-summary, and review Test Mode wording. Keep no-actionable, blocked, and no-runnable
-branches, confirmation cancellation, and run RPC ordering intact.
-
-Regression tests must execute the Run handler for mixed actions and Test/live
-modes: confirmation includes counts/bytes/removal consequences; cancel sends no
-`run`; accept sends one; blocked routes to attention; no-work follows its existing
-branch. Do not exercise real Sonarr writes.
-
-The earlier claim that `planText` never existed anywhere in history was not proven
-by the searches performed. Only its absence in current source is established here.
-
-### Testing approach
-
-Add meaningful executable regression coverage before moving these flows. Node's
-built-in test/assert/vm facilities and narrowly scoped DOM/timer/fetch fixtures are
-a no-dependency option; choose the harness explicitly. Source-string assertions
-alone did not catch either crash. A regex over `render*` names cannot catch
-`planText`, imported aliases or general runtime name errors.
-
-When modules arrive, adapt existing tests to their owning files or to the actual
-reachable module manifest. Blindly concatenating arbitrary JS files alphabetically
-can hide unresolved imports/dead modules and break block-slicing assertions. Retain
-the safety assertions and supplement with executable flow/import-graph checks.
-Syntax-check every shipped module in ES-module mode; do not assume a wildcard
-passed to `node --check` checks every file or that every Node version treats `.js`
-as ES modules automatically.
+**Phase 2 settled asset delivery.** The release namespace, its digest and the
+import-purity rule are stated as constraints in `AGENTS.md` and enforced by
+`test_server.py` and `module-purity.test.js`. The arguments that produced them —
+why `app.js?v=KEY` cannot version a transitive static import, and why a per-file
+digest joined and truncated follows only the first file — are recorded there too.
 
 ## Revised target tree — four of these exist; the rest are candidates
 
@@ -427,44 +268,27 @@ Cross-feature interaction is wired at the composition root, not by importing
 
 ## Phase plan and gates
 
-Completed:
-- Separate icon update and source-flattening commits, validated above.
-- **Stabilization (Phase S) — `c9df46b`:** the two unresolved references are
-  fixed, the `node:test`/`vm` runtime suite is added, and `tools/check-on-host.sh`
-  runs it. Baseline: 473 Python tests + 8 frontend runtime tests, all green.
-- **Module delivery (Phase 2) — uncommitted:** `app.js` converted from IIFE to
-  `<script type="module">` entry (top-level strict, `start(root)`, trailing root
-  lookup). `server.py` serves a versioned release namespace
-  (`/assets/<digest>/...`) computed over every allowlisted file's name and bytes;
-  flat names kept as a 1-week compatibility path. Import-purity test enforces the
-  invariant file by file. `check-on-host.sh` syntax-checks every shipped module as
-  ES modules. 482 Python tests + 9 frontend tests, all green. Browser smoke test
-  of the module graph has not been run.
-
-Before implementation: review the module tree and callback boundaries with the
-user. (Stabilization and module delivery are settled; they are no longer open
-choices.)
-
-1. **Stabilization — landed (`c9df46b`).**
-2. **Module delivery — landed.** The entry is a module, the release namespace is
-   served, the purity test enforces import-time invariants, and `check-on-host.sh`
-   checks every shipped file.
+1. **Stabilization — landed (`c9df46b`).** Two unresolved references fixed, the
+   `node:test`/`vm` runtime suite added and wired into the gate.
+2. **Module delivery — landed.** `app.js` converted from IIFE to a
+   `<script type="module">` entry (top-level strict, `start(root)`, trailing root
+   lookup). `server.py` serves the release namespace, computed over every
+   allowlisted file's name and bytes; flat names remain as a one-week compatibility
+   path. The purity test enforces import-time invariants file by file, and the gate
+   syntax-checks every shipped module as an ES module. The module graph has not
+   been exercised in a real browser.
 3. **Leaf helpers — landed.** Four modules out of the entry, in this order and each
    validated before the next: `format.js` and `dom.js` (no imports at all),
    `episode-trees.js` (imports `el`), `changes.js` (imports `el`, `bytes`,
-   `plural`). `app.js` went 3,496 → 3,123 lines. Behavior preserved exactly:
+   `plural`). `app.js` went 3,496 → 3,121 lines. Behavior preserved exactly:
    definitions were dedented two spaces and moved verbatim, with the explanatory
    comments carried across.
 
-   Two things this phase taught, worth repeating in phase 4. **Comments strand.**
-   Twice, a banner-to-closing-brace span did not line up with the comment blocks
-   around it, and prose belonging to moved code was left behind in the entry — once
-   above the wrong function. Read the seam in *both* files after every extraction.
-   **Local names can shadow a new import.** `seriesAlertCard` and
-   `renderAlertSettings` each declare a local `const options`, which now shadows the
-   one imported from `dom.js`. Neither scope calls `options(...)`, so it is inert —
-   but it is inert by luck, and renaming those two locals is cheap cleanup whenever
-   their surrounding code moves.
+   One hazard worth repeating in phase 4: **comments strand.** Twice, a
+   banner-to-closing-brace span did not line up with the comment blocks around it,
+   and prose belonging to moved code was left behind in the entry — once above the
+   wrong function, where it read as an explanation of something it had nothing to do
+   with. Read the seam in *both* files after every extraction.
 4. **Transport/data boundaries:** extract RPC and genuinely shared state with
    explicit update notifications wired locally in `app.js`, not a registry.
 5. **Peripheral features:** activity, presets, connections and settings; preserve
@@ -493,6 +317,9 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 - Dirty tracking refers to nonexistent `#tvr-view-settings-schedule`; schedule is
   already excluded by the surrounding `.tvr-view:has(.tvr-save)` selection.
 - `renderRules` aliases `renderLibrary`; retain until callers are migrated.
+- `seriesAlertCard` and `renderAlertSettings` each declare a local `const options`,
+  which shadows the one imported from `dom.js`. Neither scope calls `options(...)`,
+  so it is inert — but by luck. Rename when their surrounding code moves.
 - Documentation and static HTML contain outdated plugin/Test Mode wording. Backend
   actions and current tests must be traced before assuming every documented
   invariant is enforced by every manual action.
