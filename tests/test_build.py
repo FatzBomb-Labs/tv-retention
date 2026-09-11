@@ -508,7 +508,7 @@ class Interface(unittest.TestCase):
         self.assertIn('sectionDefault(section)', self.js)
         self.assertIn('remember(`last.${section}`, name)', self.js)
         block = self.js.split('function sectionDefault(section)')[1].split('\n  }')[0]
-        self.assertIn("(settings.rules || []).length ? 'series-connected' : 'series-all'", block)
+        self.assertIn("(getSettings().rules || []).length ? 'series-connected' : 'series-all'", block)
 
     def test_the_sidebar_says_watching_rather_than_connected(self):
         # "Connected" also describes Sonarr, TMDB and everything else under Connections.

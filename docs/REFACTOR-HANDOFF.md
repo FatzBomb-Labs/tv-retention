@@ -12,13 +12,14 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5, 7 and 8
 are landed. Phase 6 is **in progress**: `changeList` moved into `changes.js` long ago,
-phase 8 took the editor state that stood in its way, and the alerts cluster has now
-been cut into `alerts.js`. What is left of phase 6 is navigation and the topbar. See
+phase 8 took the editor state that stood in its way, and the alerts cluster and
+navigation have now been cut into `alerts.js` and `navigation.js`. What is left of
+phase 6 is the topbar. See
 "Phase plan and gates", and read the phase-6 entry before cutting anything there.
 
 ```text
 src/assets/
-  app.js            1,347 lines — entry, twelve imports, everything not yet extracted
+  app.js            1,278 lines — entry, thirteen imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -42,6 +43,9 @@ src/assets/
   alerts.js         createAlerts — the series and system alert cards, the quick
                     actions on them, the alerts tab and the re-check-all button;
                     imports $/el/field, ago/plural, dialog/guarded/notice
+  navigation.js     createNavigation — which view is on screen, which sidebar
+                    section is open, and the library's three-views-one-panel
+                    filter; imports $, guarded
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -49,7 +53,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, thirteen assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, fourteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -427,15 +431,32 @@ Cross-feature interaction is wired at the composition root, not by importing
    `interface.html`, not one the module makes. Every other listener in the cluster
    attaches to an element it creates, so the rest needed nothing.
 
-   **What is left: navigation and topbar.** They are adjacent in the entry and may
-   well be one cut rather than two — measure both surfaces again before deciding,
-   because alerts leaving changed them. The one tie that remains is topbar's
+   **Navigation is out** — 116 lines into `navigation.js`, verified 88/88 against
+   the previous commit. It went as its own cut rather than joined to the topbar,
+   and measuring is what decided it: navigation and the topbar are adjacent in the
+   entry but they call *nothing* of each other's, so adjacency was the only
+   argument for joining them, against a 21-name surface and a 33-name one. Ten
+   names arrive, `settings` as an accessor; three leave. `remember`/`remembered`
+   stayed in the entry and are passed in, because series, presets and instances
+   use them too — promoting them to a `storage.js` is a separate question and one
+   this cut did not have to answer.
+
+   Three names became two accessors on the way out. `LIBRARY[currentView]` had two
+   readers outside the span and `libraryFilter` had two more; exporting the tables
+   would have handed out the internals, so `isLibraryView()` and
+   `getLibraryFilter()` answer the questions instead. The cut also confirmed the
+   editor's `openLibraryView` was the right shape: it needed no change at all, only
+   `isLibraryView()` in place of the table lookup.
+
+   **What is left: the topbar** (now L255–457). The one tie that remains is
    `showEverythingNeedingAttention`, which calls `seriesAlertCard` and
    `systemAlertCard`. Since sibling modules cannot import each other here, the
    entry must broker those two, and **that fixes the order the factories are
    constructed in** — `createAlerts` before whatever takes the topbar. Nothing in
    the code states that constraint, and a later edit would silently break it, so
-   say so in a comment where the factories are built.
+   say so in a comment where the factories are built. Note also that
+   `$('tvr-refresh-all')` writes `settings` and `snapshot` directly; that becomes
+   `applySaved(data)` plus accessors, exactly as the alerts cut did.
 
    **Phase 7 was taken ahead of the rest of this one**, because it was the only
    remaining cluster with no stake in that argument.
@@ -586,24 +607,23 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
 4. Begin only the approved phase. Phases S, 2, 3, 4, 5, 7 and 8 are landed.
-   **Phase 6 is the one to resume** — `changeList` and alerts are out, navigation
-   and the topbar are what is left.
+   **Phase 6 is the one to resume** — `changeList`, alerts and navigation are out,
+   the topbar is what is left.
 
-Navigation's two directions are already brokered in their final shape: outward,
-`showView` calls `forgetDrafts(); closeEditor(); renderDetails();`; inward, the
-editor calls `openLibraryView()`, the one callback replacing what used to be
-`if (!LIBRARY[currentView]) showView('series-all');`. And alerts leaving took
-navigation's other edge with it — both of its `showView` calls became intents the
-entry implements, so there is nothing left tying navigation to alerts.
+The topbar is L255–457 of the entry: the counts band, the changes menu, the theme
+control, the run button and its state machine, `syncedAgo`, and
+`showEverythingNeedingAttention`. Re-derive its surface before cutting; the last
+measurement said 33 unresolved names, but that predates navigation leaving.
 
-Re-derive the surfaces for navigation and topbar before cutting: every recorded
-number predates the editor and alerts cuts. Decide one module or two from the
-call graph rather than from the sketch — they are adjacent in the entry, which
-the earlier clusters were not. The one remaining tie is topbar's
-`showEverythingNeedingAttention` calling `seriesAlertCard` and `systemAlertCard`;
-the entry has to broker those, and doing so fixes the order the factories are
-constructed in. That constraint is not stated anywhere the compiler can see it,
-so write it down where the factories are built.
+Two things are known about it already. `showEverythingNeedingAttention` calls
+`seriesAlertCard` and `systemAlertCard`, which the entry must broker because
+sibling modules cannot import each other — and that fixes `createAlerts` ahead of
+it in construction order, a constraint now written into the comment above the
+alerts factory. And `$('tvr-refresh-all')` assigns `settings` and `snapshot`
+directly; it becomes `applySaved(data)` plus accessors, the same move the alerts
+cut made. Its listeners are at `tvr-changes-button`, a `document` click for menu
+dismissal, `tvr-alert-total`, `tvr-refresh-all` and `tvr-run` — all on markup the
+page already holds, so all of them belong in `wire()`.
 
 Take it the way phases 4, 5 and 7 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,

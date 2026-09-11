@@ -29,6 +29,7 @@ import { createChecks } from './checks.js';
 import { createRemoval } from './series-removal.js';
 import { createSeriesEditor } from './series-editor.js';
 import { createAlerts } from './alerts.js';
+import { createNavigation } from './navigation.js';
 
 function start(root) {
   const api = createApi(root.dataset.api, root.dataset.csrf);
@@ -93,9 +94,8 @@ function start(root) {
 
   // -- the series editor -------------------------------------------------
   // Navigation is mutual: the pane needs a library view on screen, and leaving the library
-  // discards drafts. Rather than hand the editor `showView`, `LIBRARY` and `currentView`,
-  // the entry brokers the one intent behind them — which is the edge phase 6's navigation
-  // module will be built against.
+  // discards drafts. Rather than hand the editor `showView` and the view tables, the entry
+  // brokers the one intent behind them, which is why the two modules have no edge.
   const editor = createSeriesEditor({
     api,
     getSettings: () => settings,
@@ -118,7 +118,7 @@ function start(root) {
     render: () => render(),
     renderRules: () => renderRules(),
     renderLibrary: () => renderLibrary(),
-    openLibraryView: () => { if (!LIBRARY[currentView]) showView('series-all'); },
+    openLibraryView: () => { if (!isLibraryView()) showView('series-all'); },
   });
   const { isOpen, openEditor, renderDetails, forgetDrafts } = editor;
   // Closing the pane is the only thing outside the editor does to its state.
@@ -128,6 +128,10 @@ function start(root) {
   // The two navigation callbacks are intents, not views: a card wants this series found in
   // the library, or this instance's settings open. Naming them that way keeps the alerts
   // module off `showView` entirely, so the navigation module has nothing here to honour.
+  //
+  // This has to be built before whatever takes the topbar: `showEverythingNeedingAttention`
+  // calls both alert cards, and sibling modules cannot import each other, so the entry
+  // brokers them — which only works if the cards exist by then.
   const alerts = createAlerts({
     api,
     getSettings: () => settings,
@@ -153,6 +157,26 @@ function start(root) {
     },
   });
   const { seriesAlertCard, systemAlertCard, showSeriesAlerts, renderAlerts } = alerts;
+
+  // -- navigation --------------------------------------------------------
+  // Built after the editor and the alerts, because both reach navigation and neither is
+  // reachable from it: the editor's `openLibraryView` and the alerts' two intents are
+  // callbacks the entry brokers, so nothing above has to exist when this is constructed.
+  // `remember`/`remembered` are wrapped rather than passed, because they are declared
+  // further down and a direct reference here would be read before its initialiser runs.
+  const navigation = createNavigation({
+    getSettings: () => settings,
+    forgetDrafts: () => forgetDrafts(),
+    closeEditor: () => closeEditor(),
+    renderDetails: () => renderDetails(),
+    renderLibrary: () => renderLibrary(),
+    renderStatsView: () => renderStatsView(),
+    startLog: () => startLog(),
+    stopLog: () => stopLog(),
+    remember: (name, value) => remember(name, value),
+    remembered: (name, fallback) => remembered(name, fallback),
+  });
+  const { showView, isLibraryView, getLibraryFilter } = navigation;
 
   // The one way a saved document gets back into the entry's state. `settings.js` posts the
   // whole document and needs to write both bindings; handing it a setter keeps the entry
@@ -231,96 +255,6 @@ function start(root) {
     renderHistory();
     renderAbout();
   }
-
-  // -- navigation --------------------------------------------------------
-  // One view at a time, named by the sidebar item that reaches it. The list comes from the
-  // markup so the two cannot disagree, which is the failure that blanked four tabs.
-  const VIEWS = [...document.querySelectorAll('.tvr-side [data-view]')].map((b) => b.dataset.view);
-  let currentView = 'series-list';
-
-  // The three series views are one panel with a different filter, because that is what
-  // they are: one library, narrowed. A series Sonarr knows about belongs here whether or
-  // not it has a rule, which is why "add" is no longer a separate place.
-  const LIBRARY = { 'series-all': 'all', 'series-connected': 'connected',
-                    'series-unconnected': 'unconnected' };
-  const TITLES = { all: 'All series', connected: 'Connected series', unconnected: 'Not connected' };
-  let libraryFilter = 'all';
-
-  // -- sections ----------------------------------------------------------
-  // One open at a time. Nineteen items in five groups is a wall; four collapsed headings
-  // and the group you are working in is a list.
-  const sectionOf = (view) => {
-    const button = document.querySelector(`.tvr-side [data-view="${view}"]`);
-    return button ? button.closest('[data-section]').dataset.section : null;
-  };
-
-  // Where a section opens when you have never been in it. Series is the exception: with
-  // nothing connected yet, "All" is the only list with anything in it.
-  function sectionDefault(section) {
-    if (section === 'series') {
-      return (settings.rules || []).length ? 'series-connected' : 'series-all';
-    }
-    const first = document.querySelector(`[data-section="${section}"] [data-view]`);
-    return first ? first.dataset.view : 'series-all';
-  }
-
-  function openSection(section) {
-    document.querySelectorAll('.tvr-side [data-section]').forEach((group) => {
-      const open = group.dataset.section === section;
-      group.classList.toggle('open', open);
-      const head = group.querySelector('[data-section-head]');
-      head.setAttribute('aria-expanded', String(open));
-      head.querySelector('.fa').className = `fa fa-caret-${open ? 'down' : 'right'}`;
-    });
-  }
-
-  document.querySelectorAll('.tvr-side [data-section-head]').forEach((head) => {
-    head.addEventListener('click', () => {
-      const section = head.dataset.sectionHead;
-      // Clicking the section you are already in collapses nothing: there would be no open
-      // section and no view to show. It just returns you to where you were.
-      //
-      // Where you were is in the browser, and it outlives the view it names. Renaming
-      // `media-rules` to `media-automation` left every existing browser remembering a view
-      // that no longer exists: `showView` fell back to `series-all`, which is in another
-      // section, so clicking Media management appeared to do nothing at all. A remembered
-      // name is only worth having if it still names something.
-      const last = remembered(`last.${section}`, '');
-      showView(VIEWS.includes(last) ? last : sectionDefault(section));
-    });
-  });
-
-  function showView(name) {
-    if (!VIEWS.includes(name)) name = 'series-all';
-    // Unsaved edits belong to the library. Leaving it closes the pane, and a draft kept
-    // past that would be a second copy of the settings, invisible until it reappeared
-    // over whatever the rule had become in the meantime.
-    if (!LIBRARY[name] && LIBRARY[currentView]) { forgetDrafts(); closeEditor(); renderDetails(); }
-    currentView = name;
-    const panel = LIBRARY[name] ? 'series-all' : name;
-    [...new Set(VIEWS)].forEach((view) => {
-      const section = $(`tvr-view-${LIBRARY[view] ? 'series-all' : view}`);
-      if (section) section.hidden = (LIBRARY[view] ? 'series-all' : view) !== panel;
-    });
-    document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
-      button.classList.toggle('active', button.dataset.view === name);
-    });
-    // Where you were, per section, so a heading is a place you return to rather than a
-    // label that always drops you at the top.
-    const section = sectionOf(name);
-    if (section) { remember(`last.${section}`, name); openSection(section); }
-    if (LIBRARY[name]) {
-      libraryFilter = LIBRARY[name];
-      $('tvr-library-title').textContent = TITLES[libraryFilter];
-      renderLibrary();          // it fetches itself if what it needs is not in hand
-    }
-    if (name === 'media-stats') guarded('', renderStatsView);
-    if (name === 'system-logs') startLog(); else stopLog();
-  }
-
-  document.querySelectorAll('.tvr-side [data-view]').forEach((button) => {
-    button.addEventListener('click', () => showView(button.dataset.view));
-  });
 
   // Everything on screen is answered from one reading, so its age is said once, here,
   // rather than repeated against every series.
@@ -641,7 +575,7 @@ function start(root) {
   function forgetLibrary() {
     library = null;
     seriesCache = {};
-    if (LIBRARY[currentView]) loadLibrary().catch(() => { libraryLoading = false; });
+    if (isLibraryView()) loadLibrary().catch(() => { libraryLoading = false; });
   }
 
   const ruleFor = (series) => (settings.rules || []).find(
@@ -684,8 +618,8 @@ function start(root) {
       } else if (mode === 'scheduled') {
         if (!scheduledFor(rule)) return;
       } else {
-        if (libraryFilter === 'connected' && !rule) return;
-        if (libraryFilter === 'unconnected' && rule) return;
+        if (getLibraryFilter() === 'connected' && !rule) return;
+        if (getLibraryFilter() === 'unconnected' && rule) return;
         // The toggle hides what is ended *and* unmanaged. A connected series is never
         // hidden: it is your own rule, and an ended one is where retention matters most.
         if (hideEnded && series.ended && !rule) return;
@@ -1330,6 +1264,7 @@ function start(root) {
   settingsView.wire();
   checks.wire();
   alerts.wire();
+  navigation.wire();
 
   // Whatever happens, the page must end up interactive with a readable message.
   refresh().catch((error) => {
