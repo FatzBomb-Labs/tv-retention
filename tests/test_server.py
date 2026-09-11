@@ -156,10 +156,14 @@ class Assets(unittest.TestCase):
         """
         import re
         assets = context.ROOT / 'src' / 'assets'
-        markup = (context.ROOT / 'src' / 'include' / 'interface.html').read_text()
-        wanted = set(re.findall(r'fa fa-([a-z-]+)', (assets / 'app.js').read_text() + markup))
+        markup = (context.ROOT / 'src' / 'include' / 'interface.html').read_text(encoding='utf-8')
+        # Every module, not just the entry: an icon is asked for wherever the element that
+        # carries it is built, and moving that code to another module does not ship a glyph.
+        scripts = ''.join(path.read_text(encoding='utf-8')
+                          for path in sorted(assets.glob('*.js')))
+        wanted = set(re.findall(r'fa fa-([a-z-]+)', scripts + markup))
         wanted = {name for name in wanted if not name.endswith('-')}   # built from a template
-        icons = (assets / 'icons.css').read_text()
+        icons = (assets / 'icons.css').read_text(encoding='utf-8')
         for name in sorted(wanted):
             self.assertIn(f'.fa-{name} {{', icons, f'fa-{name} has no glyph')
 
@@ -452,8 +456,9 @@ class KeepAlive(Serves):
         with socket.create_connection(('127.0.0.1', self.port), timeout=5) as sock:
             _, body = self.post(sock, sock.makefile('rb'), 'csrf_token=stale&payload=%7B%7D')
         self.assertTrue(jsonlib.loads(body)['expired'])
-        source = (context.ROOT / 'src' / 'assets' / 'app.js').read_text()
-        self.assertIn("if (data.expired) { window.location.href = '/login';", source)
+        scripts = ''.join(path.read_text(encoding='utf-8') for path
+                          in sorted((context.ROOT / 'src' / 'assets').glob('*.js')))
+        self.assertIn("if (data.expired) { window.location.href = '/login';", scripts)
 
     def test_an_oversized_body_closes_the_connection_instead_of_being_left_behind(self):
         source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()

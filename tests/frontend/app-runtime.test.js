@@ -3,10 +3,15 @@
 /* Executable regression coverage for the browser flows the source-string tests cannot
  * reach: the background check queue, sweep polling, and the Run confirmation.
  *
- * The real page script is evaluated in a vm context over a fake DOM, a fetch that
- * answers from fixtures, and timers the test fires by hand. Nothing touches a network
- * and nothing can write to Sonarr: every "run" is answered from a fixture, so no test
- * here can perform a live deletion.
+ * The real page is evaluated as a module graph in a vm context over a fake DOM, a fetch
+ * that answers from fixtures, and timers the test fires by hand. Nothing touches a
+ * network and nothing can write to Sonarr: every "run" is answered from a fixture, so no
+ * test here can perform a live deletion.
+ *
+ * The entry is linked and evaluated the way the browser does it — imports resolved
+ * relative to the importing file, each module instantiated once per page — so an import
+ * the release namespace could not satisfy fails here rather than in a browser. This
+ * needs `--experimental-vm-modules`; `tools/check-on-host.sh` passes it.
  */
 
 const fs = require('node:fs');
@@ -15,8 +20,47 @@ const vm = require('node:vm');
 const test = require('node:test');
 const assert = require('node:assert');
 
-const APP = path.join(__dirname, '..', '..', 'src', 'assets', 'app.js');
-const SOURCE = fs.readFileSync(APP, 'utf8');
+const ASSETS = path.join(__dirname, '..', '..', 'src', 'assets');
+const APP = path.join(ASSETS, 'app.js');
+
+/* Link and evaluate the entry in `context`, resolving relative imports against the
+ * assets directory. Each page gets its own module registry: a module instantiated once
+ * per context is what keeps one page's state out of the next one's.
+ */
+async function evaluateGraph(context) {
+  assert.equal(typeof vm.SourceTextModule, 'function',
+    'run node with --experimental-vm-modules: the page is a module graph, not a script');
+
+  const registry = new Map();
+
+  const load = (file) => {
+    const resolved = path.resolve(file);
+    if (registry.has(resolved)) return registry.get(resolved);
+    const module = new vm.SourceTextModule(fs.readFileSync(resolved, 'utf8'), {
+      context,
+      identifier: resolved,
+      initializeImportMeta(meta) { meta.url = `file://${resolved.replace(/\\/g, '/')}`; },
+    });
+    registry.set(resolved, module);
+    return module;
+  };
+
+  const linker = (specifier, referencing) => {
+    const from = path.basename(referencing.identifier);
+    assert.ok(specifier.startsWith('./') || specifier.startsWith('../'),
+      `${from} imports "${specifier}": the page ships no bare specifiers`);
+    const target = path.resolve(path.dirname(referencing.identifier), specifier);
+    assert.ok(target.startsWith(ASSETS + path.sep),
+      `${from} imports "${specifier}", which escapes the assets directory`);
+    assert.ok(fs.existsSync(target),
+      `${from} imports "${specifier}", which is not a shipped asset`);
+    return load(target);
+  };
+
+  const entry = load(APP);
+  await entry.link(linker);
+  await entry.evaluate();
+}
 
 const SECTIONS = {
   series: ['series-all', 'series-connected', 'series-unconnected'],
@@ -179,7 +223,7 @@ function snapshotFixture(overrides = {}) {
   };
 }
 
-function loadPage(setup) {
+async function loadPage(setup) {
   const fixtures = setup();
   const { document, elements } = makeDocument();
   const fetchLog = [];
@@ -227,8 +271,8 @@ function loadPage(setup) {
     console,
   };
   sandbox.window.document = document;
-  vm.createContext(sandbox);
-  vm.runInContext(SOURCE, sandbox, { filename: 'app.js' });
+  const context = vm.createContext(sandbox);
+  await evaluateGraph(context);
 
   async function flush(rounds = 25) {
     for (let round = 0; round < rounds; round += 1) {
@@ -254,7 +298,7 @@ function loadPage(setup) {
 }
 
 test('queued background checks all complete, update the counts, and fetch nothing else', async () => {
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({ stale_rules: ['rule-1', 'rule-2'] }),
     checkRule: (payload) => (payload.rule_id === 'rule-2'
       ? { rule_id: 'rule-2', state: { ok: true, label: 'Checked' },
@@ -281,7 +325,7 @@ test('queued background checks all complete, update the counts, and fetch nothin
 
 test('sweep polling continues while the sweep runs and stops when it finishes', async () => {
   let running = true;
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({ progress: { running: true, phase: 'rules', current: 'rule-1',
                                              done: 1, total: 3, scheduled: true } }),
     progress: () => ({
@@ -315,7 +359,7 @@ test('sweep polling continues while the sweep runs and stops when it finishes', 
 });
 
 test('an actionable Run states the actual plan, and accepting it sends exactly one run', async () => {
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({
       plan: { actionable: 7, trustworthy: true, delete: 2, delete_bytes: 2048,
               monitor: 1, unmonitor: 3, removals_by_action: { 'delete-series': 1 } },
@@ -349,7 +393,7 @@ test('an actionable Run states the actual plan, and accepting it sends exactly o
 });
 
 test('cancelling the Run confirmation sends no run request', async () => {
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({
       plan: { actionable: 3, trustworthy: true, delete: 3, delete_bytes: 1024 },
     }),
@@ -366,7 +410,7 @@ test('cancelling the Run confirmation sends no run request', async () => {
 });
 
 test('a blocked Run shows what is stopping it and sends nothing', async () => {
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({
       plan: { actionable: 2, trustworthy: true, delete: 2, delete_bytes: 1024 },
       alerts: [{ scope: 'system', severity: 'error', blocking: true, title: 'Sonarr unreachable',
@@ -385,7 +429,7 @@ test('a blocked Run shows what is stopping it and sends nothing', async () => {
 });
 
 test('a Run with no enabled series says so and sends nothing', async () => {
-  const page = loadPage(() => ({ snapshot: snapshotFixture({ rulesDisabled: true }) }));
+  const page = await loadPage(() => ({ snapshot: snapshotFixture({ rulesDisabled: true }) }));
   await page.flush();
 
   page.click('tvr-run');
@@ -398,7 +442,7 @@ test('a Run with no enabled series says so and sends nothing', async () => {
 });
 
 test('a Run with nothing scheduled stays disabled rather than promising nothing', async () => {
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({ plan: { actionable: 0, trustworthy: true } }),
   }));
   await page.flush();
@@ -413,7 +457,7 @@ test('a Run with nothing scheduled stays disabled rather than promising nothing'
 });
 
 test('a live Run confirmation says what a real run does', async () => {
-  const page = loadPage(() => ({
+  const page = await loadPage(() => ({
     snapshot: snapshotFixture({
       testMode: false,
       plan: { actionable: 2, trustworthy: true, delete: 2, delete_bytes: 1024 },

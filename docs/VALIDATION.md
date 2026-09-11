@@ -1,20 +1,21 @@
 # Validation record
 
-Last run: 2026-09-10, from the Webtop development container against FatzServer
+Last run: 2026-09-11, from Windows via `tools\check-on-host.ps1` against FatzServer
 (Unraid 7.3.2, Python 3.11.15, Node 22.18.0).
 
 ## Automated
 
-`./tools/check-on-host.sh` — source staged under `/tmp` on the host, removed afterwards.
+`./tools/check-on-host.sh`, or `tools\check-on-host.ps1` — source staged under `/tmp` on
+the host, removed afterwards.
 It installs nothing, touches no `/boot` path, reads no media, and contacts no Sonarr.
 
 | Check | Result |
 |---|---|
 | `python3 -m unittest discover -s tests` | 482 tests, all pass |
 | Worker imports | every module loads, server.py included |
-| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules |
+| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — five files now: the entry plus `format`, `dom`, `episode-trees`, `changes` |
 | `node --test tests/frontend/*.test.js` | 9 tests, all pass — the 8 runtime flows plus module-import purity |
-| `docker build` | 122 MB image |
+| `docker build` | 122 MB image — last built 2026-09-10; the module split changes no build step, only which files `COPY src/assets/` picks up |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; `snapshot` answers with settings migrated v7 to v8; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
 ### Coverage by area

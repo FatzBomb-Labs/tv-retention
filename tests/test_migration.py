@@ -228,5 +228,7 @@ class ToV9(unittest.TestCase):
         """
         from pathlib import Path
         root = Path(__file__).resolve().parents[1] / 'src'
-        self.assertNotIn('browseFolder', (root / 'assets' / 'app.js').read_text())
+        # Across every module: "gone" means gone from the graph, not moved out of the entry.
+        for path in sorted((root / 'assets').glob('*.js')):
+            self.assertNotIn('browseFolder', path.read_text(encoding='utf-8'), path.name)
         self.assertNotIn('action_browse', (root / 'worker' / 'actions.py').read_text())

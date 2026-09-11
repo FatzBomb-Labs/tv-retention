@@ -377,12 +377,18 @@ Syntax-check every shipped module in ES-module mode; do not assume a wildcard
 passed to `node --check` checks every file or that every Node version treats `.js`
 as ES modules automatically.
 
-## Revised target tree — candidate, not implemented or finally approved
+## Revised target tree — four of these exist; the rest are candidates
+
+`dom.js`, `format.js`, `episode-trees.js` and `changes.js` shipped in phase 3. The
+one deviation from the sketch below: the dialog, notice and feedback factories did
+*not* go into `dom.js`. They call the RPC surface and raise the busy overlay, which
+makes them transport concerns rather than construction, so they are phase 4's.
+`dom.js` holds element construction and controls only, and imports nothing.
 
 ```text
 src/assets/
   app.js              composition root, explicit full/targeted render orchestration
-  dom.js              DOM construction, controls, dialog/notice/feedback factories
+  dom.js              DOM construction and controls
   format.js           formatting helpers (bytes, dates, plurals)
   transport.js        RPC, timeouts, session handling; injected busy feedback
   state.js            shared application data and derived queries; no UI callbacks
@@ -440,11 +446,25 @@ user. (Stabilization and module delivery are settled; they are no longer open
 choices.)
 
 1. **Stabilization — landed (`c9df46b`).**
-2. **Module delivery — done (uncommitted).** The entry is a module, the release
-   namespace is served, the purity test enforces import-time invariants, and
-   `check-on-host.sh` checks every shipped file.
-3. **Leaf helpers:** formatting, DOM/control builders, separate episode-tree
-   builders, shared change presentation. Preserve event and dialog behavior.
+2. **Module delivery — landed.** The entry is a module, the release namespace is
+   served, the purity test enforces import-time invariants, and `check-on-host.sh`
+   checks every shipped file.
+3. **Leaf helpers — landed.** Four modules out of the entry, in this order and each
+   validated before the next: `format.js` and `dom.js` (no imports at all),
+   `episode-trees.js` (imports `el`), `changes.js` (imports `el`, `bytes`,
+   `plural`). `app.js` went 3,496 → 3,123 lines. Behavior preserved exactly:
+   definitions were dedented two spaces and moved verbatim, with the explanatory
+   comments carried across.
+
+   Two things this phase taught, worth repeating in phase 4. **Comments strand.**
+   Twice, a banner-to-closing-brace span did not line up with the comment blocks
+   around it, and prose belonging to moved code was left behind in the entry — once
+   above the wrong function. Read the seam in *both* files after every extraction.
+   **Local names can shadow a new import.** `seriesAlertCard` and
+   `renderAlertSettings` each declare a local `const options`, which now shadows the
+   one imported from `dom.js`. Neither scope calls `options(...)`, so it is inert —
+   but it is inert by luck, and renaming those two locals is cheap cleanup whenever
+   their surrounding code moves.
 4. **Transport/data boundaries:** extract RPC and genuinely shared state with
    explicit update notifications wired locally in `app.js`, not a registry.
 5. **Peripheral features:** activity, presets, connections and settings; preserve
@@ -484,6 +504,13 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phase S and Phase 2 (module delivery) are
-   settled; the next phase is Leaf helpers (Phase 3). Commit Phase 2 before
-   starting it.
+4. Begin only the approved phase. Phases S, 2 and 3 are landed; the next is
+   Transport/data boundaries (Phase 4).
+
+Phase 4 moves, in `app.js` order: `busy`, `TIMEOUTS`, `DEFAULT_TIMEOUT` and `api`
+under the `// -- transport` banner, then `notice`, `guarded` and `dialog`.
+`showResult` and `changeList` sit next to them but call `dialog`, so they travel
+with it or stay; decide that from the seam rather than in advance. Unlike phase 3
+this is not pure leaf code — `busy` touches the DOM and `api` touches the network —
+so the purity test is the thing to watch: neither may run at import, only when
+called.

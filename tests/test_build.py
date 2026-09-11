@@ -5,6 +5,54 @@ from pathlib import Path
 import context  # noqa: F401
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / 'src' / 'assets'
+ENTRY = 'app.js'
+
+
+def interface_js() -> str:
+    """Every shipped module as one string, the entry first.
+
+    The interface is a module graph rather than a single file, so a test asking whether
+    the page does something has to ask the whole graph: a helper that moved from `app.js`
+    to `format.js` is still shipped, and a check reading only the entry would call it
+    gone. Order is the entry then the rest sorted, so a failure message is stable.
+
+    Reading the graph rather than the entry is what makes an extraction a no-op here,
+    which is the point: these tests describe the interface's behaviour, and moving a
+    function between files does not change it. The few tests that genuinely care *which*
+    file something is in read that file directly through `module_js`.
+    """
+    return '\n'.join(module_js(name) for name in module_names())
+
+
+def module_names() -> list[str]:
+    """The shipped modules, entry first, then the rest sorted."""
+    rest = sorted(p.name for p in ASSETS.glob('*.js') if p.name != ENTRY)
+    return [ENTRY] + rest
+
+
+def function_body(source: str, name: str) -> str:
+    """The body of a named function declaration, found by its own indentation.
+
+    Splitting on the next `\\n  function ` worked while every function sat two spaces deep
+    inside one IIFE. At module scope they sit at column zero and their nested helpers sit
+    where they used to, so a fixed indent either stops at the first nested function or
+    runs past the end. Matching the declaration's own indent and closing on the brace at
+    that same indent gives the same body either way, which is what lets these tests
+    survive an extraction unchanged.
+    """
+    opener = re.search(r'^([ \t]*)function ' + re.escape(name) + r'\(', source, re.M)
+    assert opener, f'no declaration of {name}()'
+    tail = source[opener.end():]
+    end = re.search(r'\n' + opener.group(1) + r'\}', tail)
+    assert end, f'unterminated body for {name}()'
+    return tail[:end.start()]
+
+
+def module_js(name: str) -> str:
+    # Explicit encoding: the source carries characters outside the Windows default
+    # codepage, and read_text() would decode with it and fail off the container.
+    return (ASSETS / name).read_text(encoding='utf-8')
 
 
 class Interface(unittest.TestCase):
@@ -13,9 +61,10 @@ class Interface(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         source = ROOT / 'src'
-        cls.css = (source / 'assets' / 'app.css').read_text()
-        cls.js = (source / 'assets' / 'app.js').read_text()
-        cls.html = (source / 'include' / 'interface.html').read_text()
+        cls.css = (source / 'assets' / 'app.css').read_text(encoding='utf-8')
+        cls.js = interface_js()
+        cls.entry = module_js(ENTRY)
+        cls.html = (source / 'include' / 'interface.html').read_text(encoding='utf-8')
 
     def test_the_hidden_attribute_is_forced_to_win(self):
         self.assertRegex(self.css, r'#tv-retention \[hidden\][^{]*\{[^}]*display:\s*none\s*!important')
@@ -60,13 +109,15 @@ class Interface(unittest.TestCase):
     def test_the_script_is_not_prefixed_by_a_stray_fragment(self):
         # A build-time edit once prepended a fragment above the opening comment, which
         # broke the whole file. The header is cheap to assert and would have caught it.
-        self.assertTrue(self.js.lstrip().startswith('/* TV Retention web UI.'))
+        # Against the entry: it is the file with the header, and the one a build-time
+        # edit would have prepended to.
+        self.assertTrue(self.entry.lstrip().startswith('/* TV Retention web UI.'))
         self.assertEqual(self.js.count("function render() {"), 1)
 
     def test_braces_and_parentheses_balance(self):
         for pair in ('{}', '()', '[]'):
             self.assertEqual(self.js.count(pair[0]), self.js.count(pair[1]),
-                             f'unbalanced {pair} in app.js')
+                             f'unbalanced {pair} across the shipped modules')
 
     def test_the_manual_check_button_is_gone(self):
         # The pill reads from the cache; the operator should never have to ask it to look.
@@ -123,6 +174,11 @@ class Interface(unittest.TestCase):
         leaving two uses behind. Only SCREAMING_SNAKE names are considered — that is the
         shape every constant in this file has, and it keeps prose like "TVDB" or "HTTP"
         out of the comparison without needing an allowlist to be maintained.
+
+        The scan reads the whole graph, so a constant declared in one module and used in
+        another is declared as far as this is concerned — which is right: the import is
+        checked for real by the runtime test, which links the graph and would fail on a
+        binding no module exports.
         """
         import re
         code = re.sub(r'/\*.*?\*/', ' ', self.js, flags=re.S)
@@ -136,7 +192,7 @@ class Interface(unittest.TestCase):
         declared = set(re.findall(r'\b(?:const|let|var)\s+' + shape, code))
         used = set(re.findall(shape, code))
         missing = sorted(used - declared)
-        self.assertEqual(missing, [], f'used but never declared in app.js: {missing}')
+        self.assertEqual(missing, [], f'used but never declared: {missing}')
         # Prove the scan is actually finding constants rather than passing on an empty set.
         self.assertIn('DEFAULT_TIMEOUT', declared, 'the test must be seeing real constants')
 
@@ -699,7 +755,8 @@ class Interface(unittest.TestCase):
         import core
         self.assertEqual(sorted(core.EXCLUSION_REASONS),
                          ['episode', 'folder', 'manual', 'season', 'specials'])
-        named = set(re.findall(r'^\s{4}([a-z]+): \(', self.js.split('EXCLUDED_WHY = {')[1]
+        # Any indent: the keys sit one level inside the declaration, wherever that lands.
+        named = set(re.findall(r'^\s+([a-z]+): \(', self.js.split('EXCLUDED_WHY = {')[1]
                                .split('};')[0], re.M))
         # `manual` is the one the picker does not explain, because it is the one you did.
         self.assertEqual(named, set(core.EXCLUSION_REASONS) - {'manual'})
@@ -709,7 +766,7 @@ class Interface(unittest.TestCase):
         other. The day they share a code path, one of them is wrong."""
         self.assertIn('function exclusionTree(', self.js)
         self.assertIn('function monitorTree(', self.js)
-        picker = self.js.split('function exclusionTree(')[1].split('\n  function ')[0]
+        picker = function_body(self.js, 'exclusionTree')
         self.assertNotIn('monitorTree(', picker)
         self.assertNotIn('monitored', picker.split('picked:')[1])
 
@@ -1375,9 +1432,9 @@ class Theme(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         source = ROOT / 'src'
-        cls.css = (source / 'assets' / 'app.css').read_text()
-        cls.js = (source / 'assets' / 'app.js').read_text()
-        cls.html = (source / 'include' / 'interface.html').read_text()
+        cls.css = (source / 'assets' / 'app.css').read_text(encoding='utf-8')
+        cls.js = interface_js()
+        cls.html = (source / 'include' / 'interface.html').read_text(encoding='utf-8')
 
     def test_the_page_sets_its_own_type_and_colour(self):
         """It used to inherit both from the WebGUI.
@@ -1433,9 +1490,9 @@ class Bands(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         source = ROOT / 'src'
-        cls.js = (source / 'assets' / 'app.js').read_text()
-        cls.css = (source / 'assets' / 'app.css').read_text()
-        cls.html = (source / 'include' / 'interface.html').read_text()
+        cls.js = interface_js()
+        cls.css = (source / 'assets' / 'app.css').read_text(encoding='utf-8')
+        cls.html = (source / 'include' / 'interface.html').read_text(encoding='utf-8')
 
     def test_hiding_a_severity_does_not_stop_it_counting(self):
         """The toggles are about what you want in front of you, not about what is true.
