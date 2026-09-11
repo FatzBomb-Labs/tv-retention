@@ -31,6 +31,7 @@ import { createSeriesEditor } from './series-editor.js';
 import { createAlerts } from './alerts.js';
 import { createNavigation } from './navigation.js';
 import { createTopBar } from './topbar.js';
+import { remember, remembered } from './storage.js';
 
 function start(root) {
   const api = createApi(root.dataset.api, root.dataset.csrf);
@@ -163,8 +164,6 @@ function start(root) {
   // Built after the editor and the alerts, because both reach navigation and neither is
   // reachable from it: the editor's `openLibraryView` and the alerts' two intents are
   // callbacks the entry brokers, so nothing above has to exist when this is constructed.
-  // `remember`/`remembered` are wrapped rather than passed, because they are declared
-  // further down and a direct reference here would be read before its initialiser runs.
   const navigation = createNavigation({
     getSettings: () => settings,
     forgetDrafts: () => forgetDrafts(),
@@ -174,8 +173,6 @@ function start(root) {
     renderStatsView: () => renderStatsView(),
     startLog: () => startLog(),
     stopLog: () => stopLog(),
-    remember: (name, value) => remember(name, value),
-    remembered: (name, fallback) => remembered(name, fallback),
   });
   const { showView, isLibraryView, getLibraryFilter } = navigation;
 
@@ -341,12 +338,6 @@ function start(root) {
     return link;
   }
 
-  // Remembered per browser, because it is a preference about looking rather than a
-  // setting about behaviour — it belongs to the person at the screen, not to the plugin.
-  const remember = (name, value) => { try { localStorage.setItem(`tvr.${name}`, value); } catch (error) { /* private window */ } };
-  const remembered = (name, fallback) => {
-    try { return localStorage.getItem(`tvr.${name}`) || fallback; } catch (error) { return fallback; }
-  };
   let layout = remembered('layout', 'list');
 
   // Three states, because "follow the system" is a real answer rather than the absence of

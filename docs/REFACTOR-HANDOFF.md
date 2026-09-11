@@ -15,13 +15,16 @@ are landed. **Phase 6 is complete**: `changeList` moved into `changes.js` long a
 phase 8 took the editor state that stood in its way, and the alerts cluster,
 navigation and the top bar have now been cut into `alerts.js`, `navigation.js` and
 `topbar.js`. See "Phase plan and gates", and read the phase-6 entry for how the three
-cuts were sequenced.
+cuts were sequenced. Since then `storage.js` has been taken out too — the first cut
+belonging to no numbered phase.
 
 ```text
 src/assets/
-  app.js            1,109 lines — entry, fourteen imports, everything not yet extracted
+  app.js            1,100 lines — entry, fifteen imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
+  storage.js        remember, remembered — the per-browser preferences, wrapped
+                    because localStorage throws in a private window; imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
   changes.js        REMOVAL_SUMMARY, changeSummary, changeLines, changeRows,
                     changeList — imports el, bytes/plural, dialog
@@ -45,7 +48,7 @@ src/assets/
                     imports $/el/field, ago/plural, dialog/guarded/notice
   navigation.js     createNavigation — which view is on screen, which sidebar
                     section is open, and the library's three-views-one-panel
-                    filter; imports $, guarded
+                    filter; imports $, guarded, remember/remembered
   topbar.js         createTopBar — the age of the reading, the changes menu, the
                     sidebar counts, the Run button's three states and the one
                     overview of everything wrong; imports $/el, ago/plural,
@@ -57,7 +60,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, fifteen assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, sixteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -182,7 +185,7 @@ the direction, not an open question.
 
 - `app.js` constructs features and passes named callbacks/capabilities directly.
 - No exported mutable `ui.render` table, event bus, subscriber registry, or generic
-  service locator in `state.js` (or simply relocated to another module).
+  service locator anywhere — including relocated into another module.
 - Library receives `onOpenSeries`, selection information and preview/alert actions;
   it does not import the editor.
 - Editor receives save/check/removal actions and `onSelectionChanged`/completion
@@ -272,7 +275,7 @@ src/assets/
   format.js           formatting helpers (bytes, dates, plurals)
   transport.js        RPC, timeouts and the busy overlay
   feedback.js         notice, guarded, dialog
-  state.js            shared application data and derived queries; no UI callbacks
+  storage.js          per-browser preferences (remember/remembered)
   changes.js          plan descriptions, change rows, preview/result presentation
   checks.js           check queue, polling, heartbeat and lifecycle callbacks
   navigation.js       sections/views; explicit enter/leave callbacks
@@ -340,8 +343,11 @@ Cross-feature interaction is wired at the composition root, not by importing
 
    Shared state was *not* extracted, though the phase as planned bundled it with
    RPC: the transport half is cohesive on its own, and shipping it alone kept the
-   diff mechanical. `state.js` is still a candidate, now unscheduled — no phase
-   below depends on it, so it can be taken whenever the shared data is clear.
+   diff mechanical. `state.js` was left a candidate, unscheduled. It has since been
+   **struck from the target tree**: every phase after this one passed accessors into
+   factories instead, and that has held across sixteen modules. A `state.js` would
+   put back the ambient mutable binding the accessor pattern removed, and nothing
+   asks for it.
 
    Two things this phase learned. A mechanical rewrite must **assert the old symbol
    is absent** afterwards — `str.replace()` fails silently, and the `busyDepth` miss
@@ -634,17 +640,29 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
 4. Begin only the approved phase. **Every numbered phase is landed** — S, 2, 3, 4,
-   5, 6, 7 and 8. What remains of the entry is the library, the series list, the
-   presets, the connections and `remember`/`remembered`, none of which has an
-   agreed cut yet.
+   5, 6, 7 and 8. What remains of the entry has no numbered phase; the agreed
+   order for it is presets, then connections, then the library.
 
-The library is the obvious next cluster, and phase 6 left two notes for whoever
-takes it. `renderCounts` sits in `topbar.js` but reads `library`, `ruleFor` and
-`seriesAlertList`; `syncedAgo` is exported from `topbar.js` for exactly one caller,
-`alertBadge`. Both edges are honest today and both may want to move when the
-library goes. `remember`/`remembered` are still in the entry, passed into
-`navigation.js` as wrapped callbacks, because series, presets and instances use
-them too; whether they deserve a `storage.js` is still open.
+`storage.js` came out first and is done. `remember`/`remembered` had eleven call
+sites across navigation, theme, library, bands, scale and layout, and
+`navigation.js` was already taking them as wrapped callbacks — the count answered
+a question that had been deferred twice. They are two pure functions, so it is a
+plain module like `format.js`, not a factory, and `navigation.js` now imports them
+directly rather than being handed them. That second half was the point of the cut:
+a module that needs a preference imports one.
+
+Presets (~99 lines) and connections (~124) are cuttable independently of the
+library — neither touches library state, and each has one or two external callers
+that already exist as working edges. The library is the last hard cut, and phase 6
+left two notes for whoever takes it: `renderCounts` sits in `topbar.js` but reads
+`library`, `ruleFor` and `seriesAlertList`, and `syncedAgo` is exported from
+`topbar.js` for exactly one caller, `alertBadge`. Both edges are honest today and
+both may want to move when the library goes.
+
+The "series" section is four groups, not one, and the module count should follow
+the call graph rather than the name: the library proper, the cards, the display
+preferences (`layout`/`theme`/`scale`, scattered rather than contiguous) and a
+handful of small shared helpers.
 
 Take the next cut the way phases 4, 5, 6, 7 and 8 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,

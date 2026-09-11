@@ -1,5 +1,6 @@
 import { $ } from './dom.js';
 import { guarded } from './feedback.js';
+import { remember, remembered } from './storage.js';
 
 // Navigation: which view is on screen, which sidebar section is open, and the two things
 // that have to happen on the way in and out of one.
@@ -17,8 +18,7 @@ import { guarded } from './feedback.js';
 // the library discards drafts, so the editor's three calls arrive as callbacks rather than
 // as its state.
 export function createNavigation({ getSettings, forgetDrafts, closeEditor, renderDetails,
-                                   renderLibrary, renderStatsView, startLog, stopLog,
-                                   remember, remembered }) {
+                                   renderLibrary, renderStatsView, startLog, stopLog }) {
   // One view at a time, named by the sidebar item that reaches it. The list comes from the
   // markup so the two cannot disagree, which is the failure that blanked four tabs.
   const VIEWS = [...document.querySelectorAll('.tvr-side [data-view]')].map((b) => b.dataset.view);
