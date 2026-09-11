@@ -17,12 +17,13 @@ navigation and the top bar have now been cut into `alerts.js`, `navigation.js` a
 `topbar.js`. See "Phase plan and gates", and read the phase-6 entry for how the three
 cuts were sequenced. Since then `storage.js`, `presets.js` and `connections.js`
 have been taken out too — the first cuts belonging to no numbered phase. The
-independent theme control has since moved into `topbar.js`; **the library is all
-that is left.**
+independent theme control has since moved into `topbar.js`, and the catalogue,
+cards, bands and display preferences have moved into `library.js`. **The frontend
+module refactor is complete.**
 
 ```text
 src/assets/
-  app.js            875 lines — entry, seventeen imports, everything not yet extracted
+  app.js            349 lines — composition root, fourteen imports
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   storage.js        remember, remembered — the per-browser preferences, wrapped
@@ -56,6 +57,10 @@ src/assets/
                     overview of everything wrong; imports $/el, ago/plural,
                     changeSummary/changeList, dialog/guarded/notice,
                     remember/remembered
+  library.js        createLibrary — the stored catalogue and series cache, filters,
+                    bands, cards, layout and scale preferences; imports
+                    $/el/text/toggle, bytes/when/plural/ago,
+                    changeLines/changeList, guarded, remember/remembered
   presets.js        createPresets — the preset list and its editor, plus the two
                     keep-window helpers the series editor borrows
                     (conditionFields, presetSummary); imports $/el/field/options,
@@ -70,7 +75,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, eighteen assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, nineteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -646,81 +651,32 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 - Do not fix unrelated defects, redesign scheduling/automation, or perform the
   planned backend staged-run work as part of module extraction.
 
-## Next-session starting point
+## Refactor complete
 
-1. Verify current directory, Git status/log and applicable guidance.
-2. Read this handoff, then inspect implementation for any decision being acted on.
-3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. **Every numbered phase is landed** — S, 2, 3, 4,
-   5, 6, 7 and 8. What remains of the entry has no numbered phase; the agreed
-   remaining work is the library, and nothing else.
-
-`storage.js` came out first and is done. `remember`/`remembered` had eleven call
-sites across navigation, theme, library, bands, scale and layout, and
-`navigation.js` was already taking them as wrapped callbacks — the count answered
-a question that had been deferred twice. They are two pure functions, so it is a
-plain module like `format.js`, not a factory, and `navigation.js` now imports them
-directly rather than being handed them. That second half was the point of the cut:
-a module that needs a preference imports one.
-
-Presets came out next, and was the easiest cut so far: one external caller
-(`renderPresets`, from `render`), one listener, and `settings` the only entry state
-it touches. `conditionFields` and `presetSummary` were already brokered into the
-series editor as callbacks, so the entry now passes the module's own exports
-straight through instead. `editPreset` is not exported — nothing outside the
-module calls it.
-
-Connections followed, and verified 122 of 122. Its two external callers were both
-existing working edges — `renderInstances` from `render`, `editInstance` from the
-alerts' `openInstance` intent — and the second is reached only from inside a
-callback, so ordering in the entry never came into it. The one thing worth noting
-is `seriesCache`: the instance editor clears it on save, because moving a Sonarr
-invalidates every series list read from the old one. It leaves as
-`forgetSeriesCache()`, a named intent, rather than as a binding the module could
-reassign. That is the `applySaved` pattern applied to a cache.
+Every numbered phase is landed — S, 2, 3, 4, 5, 6, 7 and 8 — together with the
+four final cuts: `storage.js`, `presets.js`, `connections.js` and `library.js`.
+There is no remaining extraction planned.
 
 Theme was measured separately before the library cut. It has no call edge to the
 catalogue, cards or layout, and its control lives in the top bar, so its 23 lines
 moved into `topbar.js`; exact reconstruction was 23/23. Initialization and the
-listener moved into `wire()` to retain import purity, and the host gate stayed
-green. Keeping it in `library.js` would have made a global control depend on the
-catalogue for no reason; making a separate module would have created a factory
-for one control and no independent lifecycle.
+listener moved into `wire()` to retain import purity.
 
-The library is the last hard cut, and phase 6 left two notes for whoever takes it:
-`renderCounts` sits in `topbar.js` but reads
-`library`, `ruleFor` and `seriesAlertList`, and `syncedAgo` is exported from
-`topbar.js` for exactly one caller, `alertBadge`. Both edges are honest today and
-will stay brokered by the entry when the library moves.
+The remaining series block reconstructed exactly, 549/549, into one
+`createLibrary` factory. The catalogue and series caches, lazy loading, filters,
+bands, cards, layout, scale and their listeners are one closure. Splitting cards
+or display preferences would have passed redraws, editor actions, alert actions
+and layout state across sibling boundaries without creating an independent
+responsibility.
 
-The remaining "series" section was measured as the library proper, cards,
-layout/scale preferences and a handful of small helpers. They form one closure:
-splitting cards or display preferences would pass library redraws, editor actions,
-alert actions and layout state across sibling boundaries without creating an
-independent responsibility. They therefore leave as one `library.js`, even though
-the resulting module will remain comparatively large.
+Two cross-feature edges remain explicit and brokered by the entry:
+`topbar.js` reads `getLibrary` and `ruleFor` for sidebar counts, while
+`library.js` reads `syncedAgo` for a clear card's tooltip. `connections.js` calls
+the library's `forgetSeriesCache` intent after an instance save. None is a sibling
+import or service locator, and every callback is deferred until after composition.
 
-Take the next cut the way phases 4, 5, 6, 7 and 8 went: a factory
-if it needs entry state, accessors for `snapshot`/`settings` rather than values,
-and every top-level listener in the cluster moved into an exported `wire()` the
-entry calls at start-up. Grep the cut range for `addEventListener` *before*
-cutting — the listeners are statements between the functions, and leaving one
-behind produces no error, just a dead control. Where a module must *write* entry
-state, take a setter from the entry rather than reaching for the binding;
-`applySaved` in `settings.js` is the pattern.
-
-Settings carries two contracts that used to be invisible to the gate: a save
-posts the whole document rather than the panel that was edited, and a masked key
-left unedited goes back as its mask, which the worker reads as "keep the stored
-key". Both are now pinned by tests in
-[tests/frontend/app-runtime.test.js](../tests/frontend/app-runtime.test.js),
-along with the third thing the phase-5 `overrides` change bought — a refused save
-leaves the held document untouched. Each was confirmed to fail against a
-deliberately broken `settings.js` before being trusted, because a contract test
-that cannot fail is worse than none: it reports safety it is not providing.
-Presets and connections deliberately stayed in the entry; the phase-5 entry
-above says why.
-
-Read the cluster before deciding its module count. Phase 4's plan said one module
-and the code said two; phase 5's said four and the code said two. The call graph
-is the authority, not the sketch.
+The final extraction was reviewed for initialization order, stale state, cache
+invalidation, listener timing, render ordering and hidden dependency cycles.
+Local source-reading and runtime suites passed, followed by the authoritative
+host gate: 482 Python tests, worker imports, nineteen ES modules and 13 frontend
+runtime tests.
