@@ -34,8 +34,9 @@ export function createSeriesEditor({
         instance_id: (preselect && preselect.instance_id) || (getSettings().instances[0] || {}).id || '',
         series_id: null, series_title: '', tvdb_id: null, path: '',
         profile_id: '',
-        keep_days: '', keep_episodes: '', keep_seasons: '', combine: 'earliest',
+        keep_days: '', keep_episodes: '', keep_seasons: '', combine: 'any',
         include_specials: null,
+        auto_reenable: false,
       }, existing || {});
 
       if (!getSettings().instances.length) {
@@ -172,6 +173,10 @@ export function createSeriesEditor({
             guarded('', async () => {
               try {
                 target.enabled = rule.enabled = on;
+                if (on) {
+                  target.auto_reenable = rule.auto_reenable = false;
+                  autoReenable.input.checked = false;
+                }
                 await saveSettings(null, true);
                 sayState();
               } catch (error) {
@@ -304,6 +309,10 @@ export function createSeriesEditor({
                                                   ['unmonitor-only', 'Unmonitor only'],
                                                   ['full-sync', 'Full sync']],
                                    rule.monitoring || '');
+        const autoReenable = toggle(
+          'Re-enable when Sonarr reports a new episode or the series resumes',
+          rule.auto_reenable, null, { className: 'tvr-row-switch' });
+        autoReenable.node.hidden = !(existing && series.ended && !rule.enabled);
 
         // Two one-time actions, not getSettings(). They happen when you save and never again,
         // which is why each says so and says what it will ask Sonarr to do.
@@ -488,8 +497,9 @@ export function createSeriesEditor({
         top.append(identity);
         // The banner names what this form does, under the series it does it to. Enabling a
         // series is not one of the things it does, which is why the switch sits above it.
-        top.append(el('div', { className: 'tvr-form-banner',
-                               textContent: existing ? 'Edit series' : 'Add series' }));
+        const formBanner = el('div', { className: 'tvr-form-banner',
+                                       textContent: existing ? 'Edit series' : 'Add series' });
+        top.append(formBanner);
         if (existing) {
           const queued = queuedBanner(rule);
           if (queued) body.append(queued);
@@ -502,6 +512,7 @@ export function createSeriesEditor({
           conditions.node,
           field('Season 0 / specials', specials),
           field('Monitoring', monitorMode, 'Unmonitor only never asks Sonarr to fetch anything.'),
+          autoReenable.node,
           autoRow, scopeRow, unmonitorNote);
         const formState = () => JSON.stringify({ profile_id: presetSelect.value,
                                           keep_days: conditions.days.value,
@@ -510,6 +521,7 @@ export function createSeriesEditor({
                                           combine: conditions.combine.value,
                                           include_specials: specials.value,
                                           monitoring: monitorMode.value,
+                                          auto_reenable: autoReenable.input.checked,
                                           once: monitorNew.input.checked });
         // What Update compares against: the rule as saved, captured before any half-typed
         // draft is put back. Taken after the restore it would call the draft the baseline,
@@ -523,7 +535,7 @@ export function createSeriesEditor({
             conditions.days.value = values.keep_days || '';
             conditions.episodes.value = values.keep_episodes || '';
             conditions.seasons.value = values.keep_seasons || '';
-            conditions.combine.value = values.combine || 'earliest';
+            conditions.combine.value = values.combine || 'any';
             specials.value = values.include_specials || '';
             monitorMode.value = values.monitoring || '';
             applyPreset();
@@ -533,11 +545,11 @@ export function createSeriesEditor({
           }
         }
         return { presetSelect, conditions, specials, monitoring: monitorMode, monitorNew,
-                 before, enabled, draftKey, saved, reread, readLine,
+                 autoReenable, before, enabled, draftKey, saved, reread, readLine, formBanner,
                  tree: () => (monitorNew.input.checked ? tree : null),
                  // A rule needs somewhere to keep from: a preset, or at least one value.
-                 valid: () => !!(presetSelect.value || conditions.days.value
-                                 || conditions.episodes.value || conditions.seasons.value),
+                 valid: () => conditions.valid() && !!(presetSelect.value || conditions.days.value
+                                                        || conditions.episodes.value || conditions.seasons.value),
                  state: formState };
       },
         save: async (context, startEnabled) => {
@@ -552,6 +564,7 @@ export function createSeriesEditor({
           combine: context.conditions.combine.value,
           include_specials: context.specials.value,
           monitoring: context.monitoring.value,
+          auto_reenable: context.autoReenable.input.checked,
           queue: rule.queue || undefined,
         };
         if (!existing && series.selectable === false) {
@@ -606,7 +619,12 @@ export function createSeriesEditor({
     // you can name. Thirty ticked boxes and a forgotten one is not a third, and this app
     // deletes things.
     let editing = null;          // the form currently open in the pane, if any
-    const isOpen = (rule) => !!(editing && rule && editing.rule && editing.rule.id === rule.id);
+    const isOpen = (rule, series) => !!(editing && (
+      (rule && editing.rule && editing.rule.id === rule.id)
+      || (!rule && series && editing.series
+          && editing.series.instance_id === series.instance_id
+          && editing.series.series_id === series.series_id)
+    ));
 
     // Half-typed edits, kept while the getLibrary() is on screen. Clicking a second poster to
     // check something and clicking back is browsing, not abandoning: nothing was saved, so
@@ -670,6 +688,18 @@ export function createSeriesEditor({
         editing.context = context;
         refresh.addEventListener('click', () => context.reread(refresh));
         headMain.append(context.readLine);
+        if (!editing.existing && !editing.expanded) {
+          context.formBanner.hidden = true;
+          body.hidden = true;
+          const add = el('button', { type: 'button', className: 'tvr-primary',
+                                     textContent: 'Add to Retention' });
+          add.addEventListener('click', () => {
+            editing.expanded = true;
+            renderDetails();
+          });
+          pane.append(el('div', { className: 'tvr-details-add' }, [add]));
+          return;
+        }
         const actions = el('div', { className: 'tvr-actions' });
         const commit = (startEnabled) => guarded('', async () => {
           await editing.save(context, startEnabled);
@@ -725,7 +755,7 @@ export function createSeriesEditor({
     // A rule's keep window, as the one-time pass needs to remember it.
     function scopeOf(rule) {
       return { keep_days: rule.keep_days ?? null, keep_episodes: rule.keep_episodes ?? null,
-               keep_seasons: rule.keep_seasons ?? null, combine: rule.combine || 'earliest',
+               keep_seasons: rule.keep_seasons ?? null, combine: rule.combine || 'any',
                profile_id: rule.profile_id || '' };
     }
 

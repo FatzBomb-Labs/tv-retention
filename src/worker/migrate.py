@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 9
+SETTINGS_VERSION = 11
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -82,8 +82,32 @@ def migrate(raw: dict) -> dict:
         document.pop('state_dir', None)
     if version < 10:
         document.update(_to_v10(document))
+    if version < 11:
+        document.update(_to_v11(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v11(document: dict) -> dict:
+    """Replace two identical timeline names with the decision they actually express.
+
+    `earliest` and `latest` both deleted only when every condition voted to delete, so
+    both become the safe `any` mode: any keep vote keeps the episode. The old `any` mode
+    deleted on one delete vote, so it becomes the aggressive `all` mode: every keep
+    condition must agree. `all` deliberately improves the old mode's handling of missing
+    facts: an unknown can no longer authorize deletion, so migration may retain more but
+    can never delete more than the stored rule did.
+    """
+    def migrate_conditions(entry):
+        moved = dict(entry)
+        old = moved.get('combine', 'earliest')
+        moved['combine'] = 'all' if old == 'any' else 'any'
+        return moved
+
+    return {
+        'profiles': [migrate_conditions(entry) for entry in document.get('profiles') or []],
+        'rules': [migrate_conditions(entry) for entry in document.get('rules') or []],
+    }
 
 
 def _to_v10(document: dict) -> dict:

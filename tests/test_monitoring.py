@@ -19,7 +19,7 @@ def episode(number, days_ago, monitored, has_file=True):
             'monitored': monitored, 'mtime': (NOW - dt.timedelta(days=days_ago)).timestamp(), 'size': 100}
 
 
-RULE = {'keep_days': 180, 'combine': 'earliest'}
+RULE = {'keep_days': 180, 'combine': 'any'}
 
 
 class Classify(unittest.TestCase):
@@ -210,11 +210,11 @@ class OneTimePass(unittest.TestCase):
     def rule(self, days):
         return {'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
                 'keep_days': days, 'keep_episodes': None, 'keep_seasons': None,
-                'combine': 'earliest', 'include_specials': None, 'match_status': 'matched'}
+                'combine': 'any', 'include_specials': None, 'match_status': 'matched'}
 
     def scope(self, days):
         return {'keep_days': days, 'keep_episodes': None, 'keep_seasons': None,
-                'combine': 'earliest'}
+                'combine': 'any'}
 
     def test_widening_offers_only_what_the_widening_added(self):
         """A rule widened to ninety days did not ask for the thirty it always had."""
@@ -293,7 +293,7 @@ class ScopePassApplies(unittest.TestCase):
     def test_monitoring_newly_covered_happens_now(self):
         result = self.main.scope_pass(self.settings, self.rule, monitor_new=True,
                                       previous_scope={'keep_days': 1, 'keep_episodes': None,
-                                                      'keep_seasons': None, 'combine': 'earliest'})
+                                                      'keep_seasons': None, 'combine': 'any'})
         self.assertEqual(result['monitored'], 1)
         self.assertEqual(self.calls, [('set', [1], True)])
 
@@ -344,6 +344,11 @@ class ScopeCounts(unittest.TestCase):
         self.assertEqual(narrow['in_scope'], 1)
         self.assertEqual(wide['in_scope'], 3)
         self.assertGreater(wide['out_scope'], 0 - 1)
+
+    def test_a_duration_suffix_is_normalised_before_previewing_the_draft(self):
+        counts = self.actions.action_scope_counts(
+            self.settings, {'rule_id': 'r1', 'draft': {'keep_days': '6w'}})
+        self.assertEqual(counts['in_scope'], 2)
 
     def test_an_absent_draft_value_keeps_the_rule_s_own(self):
         """Overriding with nothing counted against no window at all — everything in scope."""

@@ -26,13 +26,13 @@ class UnairedSeasons(unittest.TestCase):
         # Season 4 announced but unaired: it has no files, so it must not consume a
         # "keep 2 seasons" slot and push season 2 out.
         episodes = [ep(1, 1, 900), ep(2, 1, 600), ep(3, 1, 300)]
-        result = evaluate(episodes, {'keep_seasons': 2, 'combine': 'earliest'}, S, now=NOW)
+        result = evaluate(episodes, {'keep_seasons': 2, 'combine': 'any'}, S, now=NOW)
         kept = sorted({e['season'] for e in result['keep']})
         self.assertEqual(kept, [2, 3])
 
     def test_monitoring_ignores_a_season_with_nothing_aired(self):
         episodes = [ep(1, 1, 900), ep(2, 1, 600), ep(3, 1, 300), future(4, 1, 30), future(4, 2, 37)]
-        state = classify_monitoring(episodes, {'keep_seasons': 2, 'combine': 'earliest'}, S, now=NOW)
+        state = classify_monitoring(episodes, {'keep_seasons': 2, 'combine': 'any'}, S, now=NOW)
         # Season 4 is unaired: inside the frame, and never counted as one of the newest two.
         self.assertEqual(state['unaired'], 2)
         out = sorted({row['season'] for row in state['out_frame_monitored']})
@@ -40,13 +40,13 @@ class UnairedSeasons(unittest.TestCase):
 
     def test_a_part_aired_season_still_counts(self):
         episodes = [ep(1, 1, 900), ep(2, 1, 600), ep(3, 1, 5), future(3, 2, 9)]
-        state = classify_monitoring(episodes, {'keep_seasons': 2, 'combine': 'earliest'}, S, now=NOW)
+        state = classify_monitoring(episodes, {'keep_seasons': 2, 'combine': 'any'}, S, now=NOW)
         out = sorted({row['season'] for row in state['out_frame_monitored']})
         self.assertEqual(out, [1])
 
     def test_keep_days_never_selects_an_unaired_episode(self):
         episodes = [future(9, 1, 60)]
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, S, now=NOW)
+        result = evaluate(episodes, {'keep_days': 30, 'combine': 'any'}, S, now=NOW)
         self.assertEqual(result['delete'], [], 'a future air date is inside any keep window')
 
 if __name__ == '__main__':

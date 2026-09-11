@@ -84,8 +84,6 @@ export function createLibrary({
 
   let library = null;          // every series Sonarr holds, from the stored reading
   let libraryLoading = false;
-  const LIBRARY_LIMIT = 150;
-
   // Loaded from the store, and reloaded whenever something makes the copy in hand wrong —
   // a sync, or a rule that has just been added. Opening a view is never a reason to ask
   // Sonarr anything: the sync already did, and its age is stated at the top of the page.
@@ -294,7 +292,7 @@ export function createLibrary({
       remember(`band.${name}`, open ? 'shut' : 'open');
       renderLibrary();
     });
-    return { head: el('div', { className: 'tvr-band' }, [toggleButton]), box };
+    return { head: el('div', { className: 'tvr-band' }, [toggleButton]), box, open };
   }
 
   function renderLibrary() {
@@ -329,13 +327,13 @@ export function createLibrary({
       const shown = applyBandFilters(held, ATTENTION_FILTERS);
       const band = sectionBand('attention', 'Needs attention', shown.length,
                                visibleLibrary('alerts', false).length);
-      if (sleeping.length) {
+      if (band.open && sleeping.length) {
         const show = toggle(`Show ${plural(sleeping.length, 'disabled series')}`, showSleeping,
                             (on) => { showSleeping = on; remember('sleeping', on ? '1' : ''); renderLibrary(); },
                             { className: 'tvr-band-switch' });
         band.head.append(show.node);
       }
-      bandFilterSwitches(band, held, ATTENTION_FILTERS);
+      if (band.open) bandFilterSwitches(band, held, ATTENTION_FILTERS);
       cardsInto(band.box, shown, 'attention');
       container.append(band.head, band.box);
     }
@@ -346,7 +344,7 @@ export function createLibrary({
       const shown = applyBandFilters(scheduled, SCHEDULED_FILTERS);
       const band = sectionBand('scheduled', 'Scheduled actions', shown.length,
                                visibleLibrary('scheduled', false).length);
-      bandFilterSwitches(band, scheduled, SCHEDULED_FILTERS);
+      if (band.open) bandFilterSwitches(band, scheduled, SCHEDULED_FILTERS);
       cardsInto(band.box, shown, 'scheduled');
       container.append(band.head, band.box);
     }
@@ -355,14 +353,11 @@ export function createLibrary({
     // answer to why a show you expected is not on screen, and that question is asked far
     // more often than it is worth saving a line to avoid.
     const band = sectionBand('all', 'All', rows.length, library.length);
-    // Three thousand cards is not a list anyone reads, and it is not a page any browser
-    // enjoys laying out. Search and the filters are how you get to the rest.
-    cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT), 'all');
+    // Every matching series remains reachable by scrolling. Native lazy images and
+    // content-visibility keep the off-screen cost bounded without turning the result into
+    // an arbitrary first page.
+    cardsInto(band.box, rows, 'all');
     container.append(band.head, band.box);
-    if (rows.length > LIBRARY_LIMIT) {
-      container.append(el('p', { className: 'tvr-empty',
-                                 textContent: `${rows.length - LIBRARY_LIMIT} more — search, or narrow the filters.` }));
-    }
   }
   // One card for a series, whether or not it has a rule. The check is the difference, and
   // it is the only difference the eye needs: everything else follows from it.
@@ -378,7 +373,7 @@ export function createLibrary({
   // that it is merely known about. Severity orders itself within the second.
   function cardTone(row) {
     const { series, rule } = row;
-    if (isOpen(rule)) return 'selected';
+    if (isOpen(rule, series)) return 'selected';
     const worst = rule ? worstSeverity(seriesAlerts(rule.id)) : '';
     if (worst) return `alert-${worst}`;
     if (rule) return 'watched';
@@ -399,7 +394,7 @@ export function createLibrary({
     const card = el('div', { className: marks.join(' ') });
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
-      if (isOpen(rule)) { closeEditor(); renderLibrary(); renderDetails(); return; }
+      if (isOpen(rule, series)) { closeEditor(); renderLibrary(); renderDetails(); return; }
       openEditor(rule, rule ? undefined : series);
       renderLibrary();
     });

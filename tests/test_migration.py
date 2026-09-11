@@ -210,14 +210,14 @@ class ToV9(unittest.TestCase):
     def test_a_host_path_does_not_survive_the_move(self):
         moved = migrate({'settings_version': 8, 'state_dir': '/mnt/user/appdata/tv-retention'})
         self.assertNotIn('state_dir', moved)
-        self.assertEqual(moved['settings_version'], 9)
+        self.assertEqual(moved['settings_version'], SETTINGS_VERSION)
 
     def test_everything_else_is_left_alone(self):
         before = {'settings_version': 8, 'state_dir': '/mnt/user/appdata/tv-retention',
                   'rules': [{'id': 'r1', 'keep_days': 30}],
                   'notifications': {'errors': False, 'webhook_url': 'https://example.invalid/hook'}}
         after = migrate(before)
-        self.assertEqual(after['rules'], before['rules'])
+        self.assertEqual(after['rules'], [dict(before['rules'][0], combine='any')])
         self.assertEqual(after['notifications'], before['notifications'])
 
     def test_nothing_asks_the_filesystem_anything_any_more(self):
@@ -232,3 +232,30 @@ class ToV9(unittest.TestCase):
         for path in sorted((root / 'assets').glob('*.js')):
             self.assertNotIn('browseFolder', path.read_text(encoding='utf-8'), path.name)
         self.assertNotIn('action_browse', (root / 'worker' / 'actions.py').read_text())
+
+
+class ToV11(unittest.TestCase):
+    """Condition names describe the keep decision rather than timeline arithmetic."""
+
+    def test_both_old_safe_modes_become_any(self):
+        for old in ('earliest', 'latest'):
+            document = migrate({
+                'settings_version': 10,
+                'rules': [{'id': 'r1', 'combine': old}],
+                'profiles': [{'id': 'p1', 'combine': old}],
+            })
+            self.assertEqual(document['rules'][0]['combine'], 'any')
+            self.assertEqual(document['profiles'][0]['combine'], 'any')
+
+    def test_the_old_aggressive_any_mode_becomes_all(self):
+        document = migrate({
+            'settings_version': 10,
+            'rules': [{'id': 'r1', 'combine': 'any'}],
+            'profiles': [{'id': 'p1', 'combine': 'any'}],
+        })
+        self.assertEqual(document['rules'][0]['combine'], 'all')
+        self.assertEqual(document['profiles'][0]['combine'], 'all')
+
+    def test_the_migration_is_idempotent(self):
+        once = migrate({'settings_version': 10, 'rules': [{'combine': 'earliest'}]})
+        self.assertEqual(migrate(once), once)

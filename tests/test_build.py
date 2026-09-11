@@ -922,7 +922,8 @@ class Interface(unittest.TestCase):
         self.assertIn('if (hideEnded && series.ended && !rule) return;', self.js)
 
     def test_neither_the_list_nor_its_payload_carries_three_thousand_of_anything(self):
-        self.assertIn('LIBRARY_LIMIT', self.js)
+        self.assertNotIn('LIBRARY_LIMIT', self.js)
+        self.assertIn('content-visibility: auto', self.css)
         self.assertIn('LIST_FIELDS', (ROOT / 'src' / 'worker' / 'actions.py').read_text())
         worker = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
         for heavy in ("'overview'", "'seasons'"):
@@ -1063,6 +1064,32 @@ class Interface(unittest.TestCase):
         block = self.js.split('function cardTone(row)')[1].split('\n  }')[0]
         self.assertLess(block.index('isOpen'), block.index('worstSeverity'))
         self.assertLess(block.index('worstSeverity'), block.index("return 'loose'"))
+        self.assertIn('isOpen(rule, series)', block)
+
+    def test_an_unmanaged_series_can_be_selected_by_its_sonarr_identity(self):
+        editor = module_js('series-editor.js')
+        block = editor.split('const isOpen =')[1].split('// Half-typed edits')[0]
+        self.assertIn('editing.series.instance_id === series.instance_id', block)
+        self.assertIn('editing.series.series_id === series.series_id', block)
+        library = module_js('library.js')
+        self.assertGreaterEqual(library.count('isOpen(rule, series)'), 2,
+                                'both the selected tone and second-click close need the series identity')
+        self.assertIn('isOpen: (rule, series) => isOpen(rule, series)', self.js)
+
+    def test_every_matching_series_is_rendered_without_an_arbitrary_cap(self):
+        library = module_js('library.js')
+        self.assertNotIn('LIBRARY_LIMIT', library)
+        self.assertIn("cardsInto(band.box, rows, 'all');", library)
+        self.assertIn('content-visibility: auto', self.css)
+
+    def test_collapsed_band_does_not_show_its_filter_switches(self):
+        library = module_js('library.js')
+        self.assertIn('if (band.open && sleeping.length)', library)
+        self.assertIn('if (band.open) bandFilterSwitches', library)
+
+    def test_native_select_menus_use_the_application_palette(self):
+        self.assertIn('#tv-retention select option, #tv-retention select optgroup', self.css)
+        self.assertIn('background-color: var(--tvr-bg)', self.css)
 
     def test_a_card_says_what_is_happening_to_the_series_itself(self):
         """Ended, queued and switched off are states of the series, not of its border.
@@ -1161,7 +1188,7 @@ class Interface(unittest.TestCase):
         self.assertNotIn('renderOneDetail', self.js)
         # The card is outside the editor now, so closing the pane goes through the broker
         # the entry hands it rather than assigning the editor's own state.
-        self.assertIn('if (isOpen(rule)) { closeEditor();', self.js)
+        self.assertIn('if (isOpen(rule, series)) { closeEditor();', self.js)
 
     def test_each_column_scrolls_within_something(self):
         """overflow:auto with nothing to overflow moves the whole page instead.
@@ -1343,7 +1370,7 @@ class Interface(unittest.TestCase):
         self.assertNotIn('tvr-select-shown', self.html)
         self.assertNotIn('tvr-select-none', self.html)
         self.assertNotIn('tvr-pick', self.js.split('function libraryCard')[1].split('function ')[0])
-        self.assertIn('const isOpen = (rule) =>', self.js)
+        self.assertIn('const isOpen = (rule, series) =>', self.js)
 
     def test_the_list_offers_a_layout(self):
         for identifier in ('tvr-layout-list', 'tvr-layout-grid'):
@@ -1395,6 +1422,37 @@ class Interface(unittest.TestCase):
         top = self.js.split('top.append(identity);')[1].split('body.append(\n')[0]
         self.assertIn('tvr-form-banner', top)
         self.assertIn("existing ? 'Edit series' : 'Add series'", top)
+
+    def test_an_unmanaged_series_opens_as_details_before_offering_the_form(self):
+        editor = module_js('series-editor.js')
+        self.assertIn("textContent: 'Add to Retention'", editor)
+        block = editor.split("if (!editing.existing && !editing.expanded)")[1] \
+                      .split("const actions =")[0]
+        self.assertIn('context.formBanner.hidden = true', block)
+        self.assertIn('body.hidden = true', block)
+        self.assertIn('editing.expanded = true', block)
+
+    def test_retention_conditions_are_any_or_all_in_one_row(self):
+        presets = module_js('presets.js')
+        self.assertIn("className: 'tvr-condition-grid'", presets)
+        for label in ("field('Keep', combine)", "field('Episodes', episodes)",
+                      "field('Seasons', seasons)", "field('Age', days)"):
+            self.assertIn(label, presets)
+        self.assertIn("['any', 'Any']", presets)
+        self.assertIn("['all', 'All']", presets)
+        self.assertNotIn("['earliest'", presets)
+        self.assertNotIn("['latest'", presets)
+        self.assertIn('24w or 1y', presets)
+        self.assertIn("unitDays = { '': 1, d: 1, w: 7, m: 30, y: 365 }", presets)
+        self.assertIn('<= 36500', presets)
+        self.assertIn("$('tvr-dialog-ok').disabled = !valid", presets)
+        self.assertIn('if (!context.conditions.valid())', presets)
+
+    def test_an_ended_disabled_series_can_arm_one_shot_reenable(self):
+        editor = module_js('series-editor.js')
+        self.assertIn('rule.auto_reenable', editor)
+        self.assertIn('existing && series.ended && !rule.enabled', editor)
+        self.assertIn('auto_reenable: context.autoReenable.input.checked', editor)
 
     def test_re_reading_a_series_is_an_icon_with_the_other_things_it_can_be_told(self):
         """Beside the switch, not on a line of prose under the facts.
@@ -1601,7 +1659,7 @@ class Bands(unittest.TestCase):
         self.assertIn("if (series.ended && (row.section !== 'all' || rule)) marks.push('ended');",
                       self.js)
         self.assertIn("cardsInto(band.box, shown, 'attention')", self.js)
-        self.assertIn("cardsInto(band.box, rows.slice(0, LIBRARY_LIMIT), 'all')", self.js)
+        self.assertIn("cardsInto(band.box, rows, 'all')", self.js)
 
     def test_the_details_pane_is_always_there(self):
         """Selecting a series used to open it, which narrowed the list and reflowed the

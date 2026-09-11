@@ -62,13 +62,13 @@ class Dates(unittest.TestCase):
 class KeepDays(unittest.TestCase):
     def test_only_older_episodes_are_selected(self):
         episodes = [episode(1, 1, days_ago=400), episode(1, 2, days_ago=100)]
-        result = evaluate(episodes, {'keep_days': 180, 'combine': 'earliest'}, settings(), now=NOW)
+        result = evaluate(episodes, {'keep_days': 180, 'combine': 'any'}, settings(), now=NOW)
         self.assertEqual(paths(result['delete']), [episodes[0]['path']])
 
     def test_undated_episode_survives_without_the_mtime_fallback(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False)]
         document = settings(retention={'allow_estimated_dates': False})
-        result = evaluate(episodes, {'keep_days': 180, 'combine': 'earliest'}, document, now=NOW)
+        result = evaluate(episodes, {'keep_days': 180, 'combine': 'any'}, document, now=NOW)
         self.assertEqual(result['delete'], [])
         self.assertIn('No air date', result['keep'][0]['reason'])
 
@@ -76,7 +76,7 @@ class KeepDays(unittest.TestCase):
 class KeepEpisodes(unittest.TestCase):
     def test_newest_are_kept(self):
         episodes = [episode(1, index, days_ago=100 - index) for index in range(1, 6)]
-        result = evaluate(episodes, {'keep_episodes': 2, 'combine': 'earliest'}, settings(), now=NOW)
+        result = evaluate(episodes, {'keep_episodes': 2, 'combine': 'any'}, settings(), now=NOW)
         self.assertEqual(len(result['delete']), 3)
         self.assertEqual(paths(result['keep']), paths(episodes[-2:]))
 
@@ -84,7 +84,7 @@ class KeepEpisodes(unittest.TestCase):
 class KeepSeasons(unittest.TestCase):
     def test_older_seasons_are_selected(self):
         episodes = [episode(season, 1, days_ago=1000 - season) for season in (1, 2, 3)]
-        result = evaluate(episodes, {'keep_seasons': 1, 'combine': 'earliest'}, settings(), now=NOW)
+        result = evaluate(episodes, {'keep_seasons': 1, 'combine': 'any'}, settings(), now=NOW)
         self.assertEqual(len(result['delete']), 2)
         self.assertEqual(result['keep'][0]['season'], 3)
 
@@ -95,49 +95,45 @@ class Combine(unittest.TestCase):
         self.episodes = [episode(1, 1, days_ago=400), episode(1, 2, days_ago=10)]
         self.rule = {'keep_days': 180, 'keep_episodes': 2}
 
-    def test_earliest_keeps_the_most(self):
-        result = evaluate(self.episodes, dict(self.rule, combine='earliest'), settings(), now=NOW)
+    def test_any_keeps_when_one_condition_matches(self):
+        result = evaluate(self.episodes, dict(self.rule, combine='any'), settings(), now=NOW)
         self.assertEqual(result['delete'], [])
 
-    def test_any_deletes_on_a_single_vote(self):
-        result = evaluate(self.episodes, dict(self.rule, combine='any'), settings(), now=NOW)
+    def test_all_deletes_on_a_single_delete_vote(self):
+        result = evaluate(self.episodes, dict(self.rule, combine='all'), settings(), now=NOW)
         self.assertEqual(paths(result['delete']), [self.episodes[0]['path']])
 
-    def test_latest_needs_every_condition_to_agree(self):
-        result = evaluate(self.episodes, dict(self.rule, combine='latest'), settings(), now=NOW)
-        self.assertEqual(result['delete'], [])
-
-    def test_latest_deletes_when_all_conditions_agree(self):
+    def test_any_deletes_when_all_conditions_agree(self):
         episodes = [episode(1, 1, days_ago=400), episode(1, 2, days_ago=300), episode(1, 3, days_ago=5)]
-        rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'latest'}
+        rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'any'}
         result = evaluate(episodes, rule, settings(), now=NOW)
         self.assertEqual(len(result['delete']), 2)
 
-    def test_latest_never_acts_on_an_unknown(self):
+    def test_all_never_acts_on_an_unknown(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False), episode(1, 2, days_ago=10)]
         document = settings(retention={'allow_estimated_dates': False})
-        rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'latest'}
+        rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'all'}
         self.assertEqual(evaluate(episodes, rule, document, now=NOW)['delete'], [])
 
-    def test_any_ignores_an_unknown_and_uses_the_rest(self):
+    def test_any_also_protects_an_unknown(self):
         episodes = [episode(1, 1, days_ago=400, air_date=False), episode(1, 2, days_ago=10)]
         document = settings(retention={'allow_estimated_dates': False})
         rule = {'keep_days': 180, 'keep_episodes': 1, 'combine': 'any'}
         result = evaluate(episodes, rule, document, now=NOW)
-        self.assertEqual(paths(result['delete']), [episodes[0]['path']])
+        self.assertEqual(result['delete'], [])
 
 
 class Protection(unittest.TestCase):
     def test_specials_are_excluded_by_default(self):
         episodes = [episode(0, 1, days_ago=4000), episode(1, 1, days_ago=4000)]
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, settings(), now=NOW)
+        result = evaluate(episodes, {'keep_days': 30, 'combine': 'any'}, settings(), now=NOW)
         self.assertEqual(len(result['protected']), 1)
         self.assertEqual(paths(result['delete']), [episodes[1]['path']])
 
     def test_specials_can_be_included(self):
         episodes = [episode(0, 1, days_ago=4000)]
         document = settings(automation={'exclude_specials': False})
-        result = evaluate(episodes, {'keep_days': 30, 'combine': 'earliest'}, document, now=NOW)
+        result = evaluate(episodes, {'keep_days': 30, 'combine': 'any'}, document, now=NOW)
         self.assertEqual(len(result['delete']), 1)
 
 
@@ -145,7 +141,7 @@ class Protection(unittest.TestCase):
 class Reasons(unittest.TestCase):
     def test_every_decision_carries_a_reason(self):
         episodes = [episode(1, 1, days_ago=4000)]
-        result = evaluate(episodes, {"keep_days": 30, "combine": "earliest"}, settings(), now=NOW)
+        result = evaluate(episodes, {"keep_days": 30, "combine": "any"}, settings(), now=NOW)
         self.assertIn("older than 30 days", result["delete"][0]["reason"])
 
 
@@ -233,7 +229,7 @@ class Exclusions(unittest.TestCase):
 
     def deleted(self, rule=None, automation=None):
         conf = settings(automation=automation or {"exclude_seasons": [], "exclude_episodes": []})
-        rule = dict({'keep_episodes': 1, 'combine': 'earliest'}, **(rule or {}))
+        rule = dict({'keep_episodes': 1, 'combine': 'any'}, **(rule or {}))
         result = evaluate(self.episodes(), rule, conf, now=NOW)
         return sorted(item['episode_id'] for item in result['delete'])
 
@@ -268,7 +264,7 @@ class Exclusions(unittest.TestCase):
         # So the preview and the journal can say why something was skipped, without anyone
         # going to read the settings to find out.
         conf = settings(automation={"exclude_seasons": [2], "exclude_episodes": []})
-        rule = {'keep_episodes': 1, 'combine': 'earliest',
+        rule = {'keep_episodes': 1, 'combine': 'any',
                 'exclusions': [{'season': 1, 'episode': 1}]}
         result = evaluate(self.episodes(), rule, conf, now=NOW)
         reasons = {item['episode_id']: item['reason'] for item in result['protected']}
@@ -283,7 +279,7 @@ class Exclusions(unittest.TestCase):
         """
         from core import classify_monitoring
         conf = settings(automation={"exclude_seasons": [], "exclude_episodes": []})
-        rule = {'keep_episodes': 1, 'combine': 'earliest',
+        rule = {'keep_episodes': 1, 'combine': 'any',
                 'exclusions': [{'season': 1, 'episode': 1}]}
         state = classify_monitoring(self.episodes(), rule, conf, now=NOW)
         touched = {row['episode_id'] for row in state['out_frame_monitored']}
@@ -391,7 +387,7 @@ class SpecialsAreAnExclusion(unittest.TestCase):
 
     def deleted(self, rule=None, **automation):
         conf = settings(automation=dict({'exclude_specials': True}, **automation))
-        rule = dict({'keep_days': 1, 'combine': 'earliest'}, **(rule or {}))
+        rule = dict({'keep_days': 1, 'combine': 'any'}, **(rule or {}))
         return sorted(item['episode_id']
                       for item in evaluate(self.episodes(), rule, conf, now=NOW)['delete'])
 
@@ -418,7 +414,7 @@ class SpecialsAreAnExclusion(unittest.TestCase):
 
     def test_the_reason_reaches_the_preview(self):
         conf = settings(automation={'exclude_specials': True})
-        result = evaluate(self.episodes(), {'keep_days': 1, 'combine': 'earliest'}, conf, now=NOW)
+        result = evaluate(self.episodes(), {'keep_days': 1, 'combine': 'any'}, conf, now=NOW)
         reasons = {row['episode_id']: row['reason'] for row in result['protected']}
         self.assertEqual(reasons[1], 'Specials are excluded automatically')
         self.assertEqual(reasons[2], 'Specials are excluded automatically')
@@ -428,5 +424,5 @@ class SpecialsAreAnExclusion(unittest.TestCase):
         # catch a library root that happens to say Extras.
         episodes = [dict(self.episodes()[2], path='/tv/Extras Archive/Show/Season 01/s01e01.mkv')]
         conf = settings(automation={'exclude_specials': True})
-        result = evaluate(episodes, {'keep_days': 1, 'combine': 'earliest'}, conf, now=NOW)
+        result = evaluate(episodes, {'keep_days': 1, 'combine': 'any'}, conf, now=NOW)
         self.assertEqual(len(result['delete']), 1)

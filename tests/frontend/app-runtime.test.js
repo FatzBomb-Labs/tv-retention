@@ -199,9 +199,9 @@ function snapshotFixture(overrides = {}) {
         series_title: 'Show One', path: '/tv/show-one' }]
     : [
       { id: 'rule-1', enabled: true, instance_id: 'inst-1', series_id: 1,
-        series_title: 'Show One', path: '/tv/show-one', keep_days: 30, combine: 'earliest' },
+        series_title: 'Show One', path: '/tv/show-one', keep_days: 30, combine: 'any' },
       { id: 'rule-2', enabled: true, instance_id: 'inst-1', series_id: 2,
-        series_title: 'Show Two', path: '/tv/show-two', keep_days: 90, combine: 'earliest' },
+        series_title: 'Show Two', path: '/tv/show-two', keep_days: 90, combine: 'any' },
     ];
   return {
     version: '0.0.0-test',

@@ -287,6 +287,7 @@ class Sync(unittest.TestCase):
         self.settings['state_dir'] = str(Path(self.temp.name) / 'state')
         for rule in self.settings['rules']:
             rule['match_status'] = 'matched'
+        self.rule = self.settings['rules'][0]
         self.library = [{'series_id': 1, 'title': 'A', 'added': '2020-01-01T00:00:00Z',
                          'ended': False, 'status': 'continuing', 'path': '/tv/A',
                          'episode_file_count': 5, 'sort_title': 'a'}]
@@ -307,15 +308,18 @@ class Sync(unittest.TestCase):
             def episodes(self, series_id, files_only=True):
                 return [dict(item) for item in holder.episodes]
 
-        self.originals = (main.client_for, main.Sonarr, main.notify, main.check_one_rule)
+        self.originals = (main.client_for, main.Sonarr, main.notify, main.check_one_rule,
+                          main.save_settings)
         main.client_for = lambda *a, **k: Stub()
         main.Sonarr = lambda instance: Stub()
         main.notify = lambda settings, subject, description, importance='normal', event='errors': \
             self.notified.append((subject, event))
         main.check_one_rule = lambda *a, **k: None
+        main.save_settings = lambda settings: None
 
     def tearDown(self):
-        main.client_for, main.Sonarr, main.notify, main.check_one_rule = self.originals
+        main.client_for, main.Sonarr, main.notify, main.check_one_rule, \
+            main.save_settings = self.originals
         self.temp.cleanup()
 
     def test_the_first_sync_stores_everything_and_announces_nothing(self):
@@ -347,6 +351,16 @@ class Sync(unittest.TestCase):
         self.assertEqual(main.sync_from_sonarr(self.settings)['episodes_changed'], [])
         self.episodes[0]['monitored'] = not self.episodes[0]['monitored']
         self.assertEqual(main.sync_from_sonarr(self.settings)['episodes_changed'], ['A'])
+
+    def test_a_sync_reenables_an_armed_ended_series_when_an_episode_appears(self):
+        self.library[0].update(ended=True, status='ended')
+        self.rule.update(enabled=False, auto_reenable=True)
+        main.sync_from_sonarr(self.settings)
+        self.library[0]['total_episode_count'] = 6
+        report = main.sync_from_sonarr(self.settings)
+        self.assertEqual(report['series_reenabled'], ['A'])
+        self.assertTrue(self.rule['enabled'])
+        self.assertFalse(self.rule['auto_reenable'])
 
     def test_the_interval_decides_when_it_is_due(self):
         self.assertTrue(main.sync_is_due(self.settings), 'nothing stored means overdue')
@@ -433,3 +447,52 @@ class Sync(unittest.TestCase):
             with self.assertRaises(Rejected):
                 with main.run_lock():
                     pass
+
+
+class AutoReenable(unittest.TestCase):
+    def setUp(self):
+        self.rule = {'id': 'r1', 'instance_id': 'i1', 'series_id': 1,
+                     'series_title': 'Returning', 'path': '/tv/Returning',
+                     'enabled': False, 'auto_reenable': True, 'match_status': 'matched'}
+        self.settings = {'rules': [self.rule]}
+        self.before = {('i1', 1): {'ended': True, 'total_episode_count': 20}}
+
+    def test_a_resumed_series_is_reenabled_once(self):
+        changed = main.reenable_returning_rules(
+            self.settings, self.before,
+            {('i1', 1): {'title': 'Returning', 'ended': False, 'total_episode_count': 20}})
+        self.assertEqual(changed, [('Returning', 'resumed')])
+        self.assertTrue(self.rule['enabled'])
+        self.assertFalse(self.rule['auto_reenable'])
+
+    def test_a_new_episode_reenables_even_before_sonarr_changes_the_status(self):
+        changed = main.reenable_returning_rules(
+            self.settings, self.before,
+            {('i1', 1): {'title': 'Returning', 'ended': True, 'total_episode_count': 21}})
+        self.assertEqual(changed, [('Returning', 'a new episode appeared')])
+        self.assertTrue(self.rule['enabled'])
+
+    def test_an_unarmed_or_unmatched_rule_stays_disabled(self):
+        for field, value in (('auto_reenable', False), ('match_status', 'unmatched')):
+            self.rule[field] = value
+            changed = main.reenable_returning_rules(
+                self.settings, self.before,
+                {('i1', 1): {'title': 'Returning', 'ended': False, 'total_episode_count': 21}})
+            self.assertEqual(changed, [])
+            self.assertFalse(self.rule['enabled'])
+            self.rule.update(auto_reenable=True, match_status='matched')
+
+    def test_no_baseline_means_no_automatic_change(self):
+        changed = main.reenable_returning_rules(
+            self.settings, {},
+            {('i1', 1): {'title': 'Returning', 'ended': False, 'total_episode_count': 21}})
+        self.assertEqual(changed, [])
+        self.assertFalse(self.rule['enabled'])
+
+    def test_an_active_series_cannot_use_a_stale_arm(self):
+        changed = main.reenable_returning_rules(
+            self.settings,
+            {('i1', 1): {'ended': False, 'total_episode_count': 20}},
+            {('i1', 1): {'title': 'Returning', 'ended': False, 'total_episode_count': 21}})
+        self.assertEqual(changed, [])
+        self.assertFalse(self.rule['enabled'])

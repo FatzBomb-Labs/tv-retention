@@ -20,7 +20,7 @@ import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   describe_selectability, effective_rule, exclusion_summary, excluded_causes,
-                  new_id, next_episode, normalise, redact, validate_settings)
+                  new_id, next_episode, normalise, redact, validate_conditions, validate_settings)
 from sonarr import Sonarr, SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
@@ -213,6 +213,16 @@ def action_acknowledge(settings, request):
             'summary': alerts.summarise(visible_alerts(settings, health))}
 
 
+def rule_with_draft(rule, draft):
+    """Apply and validate the editor's unsaved keep window before calculating with it."""
+    candidate = dict(rule)
+    candidate.update({key: draft[key] for key in ('profile_id', 'keep_days', 'keep_episodes',
+                                                   'keep_seasons', 'combine', 'include_specials')
+                      if key in draft})
+    candidate.update(validate_conditions(candidate))
+    return candidate
+
+
 def series_episodes(settings, request):
     """The episodes behind a panel, with whatever the reading says Sonarr monitors.
 
@@ -231,10 +241,7 @@ def series_episodes(settings, request):
         rule = {'id': '', 'instance_id': instance_id, 'series_id': series_id}
         episodes = main.client_for(settings, instance_id).episodes(series_id, files_only=False)
         main.interpolate_air_dates(episodes)
-    overrides = {key: draft[key] for key in ('profile_id', 'keep_days', 'keep_episodes',
-                                             'keep_seasons', 'combine', 'include_specials')
-                 if key in draft}
-    active = effective_rule(dict(rule, **overrides), settings.get('profiles'))
+    active = effective_rule(rule_with_draft(rule, draft), settings.get('profiles'))
     return rule, episodes, main.keep_frame(episodes, active, settings)
 
 
@@ -385,10 +392,7 @@ def action_scope_counts(settings, request):
 
     # Only what the draft actually carries: a key it leaves out keeps the rule's own value
     # rather than being overridden with nothing, which would count against no window at all.
-    overrides = {key: draft[key] for key in ('profile_id', 'keep_days', 'keep_episodes',
-                                             'keep_seasons', 'combine', 'include_specials')
-                 if key in draft}
-    active = effective_rule(dict(rule, **overrides), settings.get('profiles'))
+    active = effective_rule(rule_with_draft(rule, draft), settings.get('profiles'))
     frame = main.keep_frame(episodes, active, settings)
     inside, outside = frame['in_frame'], frame['out_frame']
     unmonitored_inside = [episode for episode in inside if not episode.get('monitored')]
@@ -413,18 +417,18 @@ def action_scope_counts(settings, request):
         # the keep window is typed rather than describing the rule as it was last saved.
         # The same decision the run makes, from the same stored episodes: nothing here
         # touches Sonarr, and nothing is written.
-        'plan': draft_plan(settings, saved, overrides),
+        'plan': draft_plan(settings, saved, draft),
     }
 
 
-def draft_plan(settings: dict, rule, overrides: dict):
+def draft_plan(settings: dict, rule, draft: dict):
     """The saved rule's plan, re-decided with the editor's values in place.
 
     None for a series being added: it has no rule yet, so there is no next run to describe.
     """
     if not rule:
         return None
-    state = main.monitoring_for(settings, dict(rule, **overrides), offline=True)
+    state = main.monitoring_for(settings, rule_with_draft(rule, draft), offline=True)
     return state.get('plan') if state.get('ok') else None
 
 

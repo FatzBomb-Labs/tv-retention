@@ -295,7 +295,7 @@ function start(root) {
     queuedRemoval: (rule) => queuedRemoval(rule),
     getLibraryFilter: () => getLibraryFilter(),
     isLibraryView: () => isLibraryView(),
-    isOpen: (rule) => isOpen(rule),
+    isOpen: (rule, series) => isOpen(rule, series),
     closeEditor: () => closeEditor(),
     renderDetails: () => renderDetails(),
     openEditor: (rule, series) => openEditor(rule, series),

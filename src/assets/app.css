@@ -28,7 +28,7 @@
   --tvr-good: #256d43;
   --tvr-warn: #9c6212;
   --tvr-bad: #b02b1e;
-  --tvr-notice: #86690a;
+  --tvr-notice: #6750a4;
   --tvr-info: #55697f;
   /* What sits on a filled badge of the colour above. */
   --tvr-on-fill: #fff;
@@ -47,7 +47,7 @@
     --tvr-good: #3fae69;
     --tvr-warn: #e0952f;
     --tvr-bad: #e0574a;
-    --tvr-notice: #d3b03a;
+    --tvr-notice: #b69cff;
     --tvr-info: #8298ad;
     --tvr-on-fill: #16171a;
   }
@@ -121,6 +121,8 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention input, #tv-retention select, #tv-retention textarea { font: inherit; padding: 4px 7px;
   line-height: 1.35; min-height: 0; width: auto;
   border: 1px solid var(--tvr-line); border-radius: 4px; background: transparent; color: inherit; max-width: 100%; }
+#tv-retention select, #tv-retention select option, #tv-retention select optgroup {
+  background-color: var(--tvr-bg); color: var(--tvr-fg); }
 #tv-retention input[disabled] { opacity: .45; }
 
 /* Switches. One implementation, so a toggle reads the same on a card, in a dialog and in
@@ -180,6 +182,11 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
 .tvr-row .tvr-field { flex: 0 1 180px; }
 .tvr-inline { align-items: flex-end; }
+.tvr-condition-grid { display: grid; grid-template-columns: minmax(80px, .75fr) repeat(3, minmax(0, 1fr));
+  gap: 8px; align-items: end; }
+@media (max-width: 560px) {
+  .tvr-condition-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .tvr-rules, .tvr-instances { display: grid; gap: 4px; }
 /* The border is the state, and one border can say one thing, so they are ranked: what you
@@ -741,6 +748,8 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-library { --poster-w: 50px; --poster-h: 72px; --card-font: 1; display: grid; gap: 8px; }
 .tvr-rule { display: grid; grid-template-columns: var(--poster-w) minmax(0, 1fr); gap: 10px;
   align-items: start; }
+.tvr-library .tvr-rule { content-visibility: auto;
+  contain-intrinsic-block-size: auto calc(var(--poster-h) + 12px); }
 .tvr-rule-main { min-width: 0; display: grid; gap: 2px; }
 .tvr-poster-row { width: var(--poster-w); height: var(--poster-h); }
 .tvr-poster-row img { background: var(--tvr-soft); object-fit: cover; }
@@ -871,6 +880,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
    changes the width of the list it was chosen from. */
 .tvr-details-idle { display: grid; place-items: center; padding: 24px 16px; text-align: center;
   font-size: 12px; opacity: .5; }
+.tvr-details-add { padding: 12px 10px; border-top: 1px solid var(--tvr-line); }
 .tvr-series-shell.open .tvr-details-body { overflow-y: auto; overscroll-behavior: contain;
   min-height: 0; }
 @media (max-width: 1250px) {

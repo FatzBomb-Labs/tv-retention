@@ -33,7 +33,7 @@ class Fingerprint(unittest.TestCase):
 
     def test_changing_the_combine_mode_invalidates(self):
         other = base()
-        other['profiles'][0]['combine'] = 'any'
+        other['profiles'][0]['combine'] = 'all'
         self.assertNotEqual(fingerprint(base()), fingerprint(other))
 
     def test_the_global_specials_setting_invalidates(self):
@@ -76,7 +76,7 @@ class Specials(unittest.TestCase):
         # The global half moved to `automation`, inverted: excluding is the setting now,
         # so "include specials globally" is "do not exclude them".
         settings = dict(self.settings, automation={'exclude_specials': not include_globally})
-        return evaluate(self.episodes, dict(rule, keep_days=30, combine='earliest'), settings, now=NOW)
+        return evaluate(self.episodes, dict(rule, keep_days=30, combine='any'), settings, now=NOW)
 
     def test_inherits_the_global_exclusion(self):
         self.assertEqual(self.evaluate({'include_specials': None})['delete'], [])

@@ -19,8 +19,8 @@ from pathlib import Path
 
 import schedules
 
-VERSION = '0.2.0'
-SETTINGS_VERSION = 10
+VERSION = '0.3.0'
+SETTINGS_VERSION = 11
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -28,7 +28,7 @@ CACHE_SCHEMA = 8
 
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
-COMBINE_MODES = ['earliest', 'latest', 'any']
+COMBINE_MODES = ['any', 'all']
 
 # How the plugin treats Sonarr's monitored flags. Two values, not three: "leave Sonarr
 # alone" would let it re-fetch what a run has just deleted, and unmonitoring on delete is
@@ -216,6 +216,22 @@ def _whole(value, field, low, high, allow_none=True):
     return number
 
 
+def _retention_days(value, field):
+    """Normalise a retention age written as days or as a d/w/m/y duration."""
+    if value in (None, '', 'null'):
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise Rejected(f'{field} must be a whole number of days, or use d, w, m, or y')
+    match = re.fullmatch(r'([1-9]\d*)\s*([dwmy]?)', str(value).strip(), re.IGNORECASE)
+    if not match:
+        raise Rejected(f'{field} must be a whole number of days, or use d, w, m, or y')
+    amount = int(match.group(1))
+    days = amount * {'': 1, 'd': 1, 'w': 7, 'm': 30, 'y': 365}[match.group(2).lower()]
+    if days > 36500:
+        raise Rejected(f'{field} must not exceed 36500 days')
+    return days
+
+
 def _flag(value) -> bool:
     return value in (True, 'true', 'True', 1, '1', 'on', 'yes')
 
@@ -369,12 +385,12 @@ def validate_instance(raw, existing_keys=None) -> dict:
 
 def validate_conditions(raw, field_prefix='') -> dict:
     """The three retention numbers plus the combine mode, shared by rules and profiles."""
-    keep_days = _whole(raw.get('keep_days'), f'{field_prefix}Keep days'.strip(), 1, 36500)
+    keep_days = _retention_days(raw.get('keep_days'), f'{field_prefix}Age'.strip())
     keep_episodes = _whole(raw.get('keep_episodes'), f'{field_prefix}Keep episodes'.strip(), 1, 100000)
     keep_seasons = _whole(raw.get('keep_seasons'), f'{field_prefix}Keep seasons'.strip(), 1, 1000)
-    combine = _text(raw.get('combine'), 'Combine mode', 16) or 'earliest'
+    combine = _text(raw.get('combine'), 'Keep mode', 16) or 'any'
     if combine not in COMBINE_MODES:
-        raise Rejected('Combine mode must be earliest, latest, or any')
+        raise Rejected('Keep mode must be Any or All')
     return {'keep_days': keep_days, 'keep_episodes': keep_episodes,
             'keep_seasons': keep_seasons, 'combine': combine}
 
@@ -746,6 +762,7 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         conditions,
         id=_text(raw.get('id'), 'Rule id', 32) or new_id(),
         enabled=_flag(raw.get('enabled', True)),
+        auto_reenable=_flag(raw.get('auto_reenable', False)),
         instance_id=instance_id,
         profile_id=profile_id,
         series_id=series_id,
@@ -771,7 +788,7 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
     )
     if profile_id:
         # Preset-driven rules store no numbers of their own, so there is one source of truth.
-        rule.update({'keep_days': None, 'keep_episodes': None, 'keep_seasons': None, 'combine': 'earliest'})
+        rule.update({'keep_days': None, 'keep_episodes': None, 'keep_seasons': None, 'combine': 'any'})
     if not rule['series_id']:
         rule['match_status'] = 'unmatched'
         rule['match_error'] = rule['match_error'] or 'Not linked to a Sonarr series yet'
@@ -1110,7 +1127,7 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
             else:
                 votes[episode['path']].append(('seasons', 'delete', f'Season {season} is older than the newest {rule["keep_seasons"]} seasons'))
 
-    combine = rule.get('combine', 'earliest')
+    combine = rule.get('combine', 'any')
     delete, keep = [], []
     for episode in candidates:
         cast = votes[episode['path']]
@@ -1118,14 +1135,14 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
         if not cast:
             keep.append(dict(episode, reason='No retention condition applied'))
             continue
-        if combine == 'earliest':
-            # Keep the most: any condition that would keep the file, or cannot judge it, wins.
+        if combine == 'any':
+            # Keep when any condition says keep. An unknown also protects the file: no
+            # retention mode may turn missing information into permission to delete.
             remove = all(v == 'delete' for v in verdicts)
-        elif combine == 'latest':
-            # Keep the least, but never act on a condition that could not be evaluated.
-            remove = all(v == 'delete' for v in verdicts) and 'unknown' not in verdicts
-        else:  # 'any'
-            remove = 'delete' in verdicts
+        else:  # 'all'
+            # Keep only when every enabled condition says keep. This is more aggressive,
+            # but an unknown still prevents deletion rather than being treated as a vote.
+            remove = 'delete' in verdicts and 'unknown' not in verdicts
         detail = '; '.join(f'{name}: {reason}' for name, _, reason in cast)
         (delete if remove else keep).append(dict(episode, reason=detail))
 

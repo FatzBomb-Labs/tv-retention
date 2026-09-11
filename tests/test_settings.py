@@ -94,6 +94,25 @@ class Settings(unittest.TestCase):
         with self.assertRaises(Rejected):
             validate_settings(document)
 
+    def test_keep_age_accepts_days_weeks_months_and_years(self):
+        expected = {'30': 30, '30d': 30, '24w': 168, '6m': 180, '1y': 365}
+        for entered, days in expected.items():
+            document = base()
+            document['rules'][0]['keep_days'] = entered
+            self.assertEqual(validate_settings(document)['rules'][0]['keep_days'], days)
+
+    def test_keep_age_rejects_fractions_unknown_units_and_excessive_values(self):
+        for entered in ('1.5w', '2q', '101y'):
+            document = base()
+            document['rules'][0]['keep_days'] = entered
+            with self.assertRaises(Rejected):
+                validate_settings(document)
+
+    def test_auto_reenable_is_a_validated_rule_setting(self):
+        document = base()
+        document['rules'][0]['auto_reenable'] = 'yes'
+        self.assertTrue(validate_settings(document)['rules'][0]['auto_reenable'])
+
     def test_url_must_be_http(self):
         document = base()
         document['instances'][0]['url'] = 'ftp://sonarr'

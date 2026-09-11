@@ -118,16 +118,17 @@ retention defaults. **System** holds storage, job history, logs, notifications, 
 alert settings. **Help** holds the about page and the help text.
 
 There is no separate "add" screen: a series with a rule and a series without are the same
-row in the same list, and clicking either opens the same editor in the pane beside it.
+row in the same list. Clicking either opens its details in the pane beside it; an
+unconnected series shows **Add to Retention** before exposing the rule editor.
 
 ## First run
 
 1. **Media management → Connections** → add each Sonarr with its URL and API key. Press
    **Test & save**: it reports the Sonarr version, how many series it holds, and whether
    Sonarr has a recycle bin configured.
-2. **Series → Not connected**, and click the show you want. Set its retention, then
-   **Save and enable** — or **Save**, which adds the rule switched off until you say
-   otherwise.
+2. **Series → Not connected**, click the show you want, then choose **Add to Retention**.
+   Set its retention, then **Save and enable** — or **Save**, which adds the rule switched
+   off until you say otherwise.
 3. Open **Show scheduled changes** in the header. Read what the next run would delete, and
    why, before anything is scheduled.
 4. When that looks right, set a schedule under **Media management → Schedule**. **Test
@@ -155,28 +156,30 @@ A rule holds any combination of three conditions:
 
 | Condition | Meaning |
 |---|---|
-| Keep days | Keep episodes that aired within this many days |
-| Keep episodes | Keep this many newest episodes |
-| Keep seasons | Keep this many newest seasons |
+| Age | Keep episodes that aired within this age. A bare number means days; `d`, `w`, `m`, and `y` suffixes are accepted. |
+| Episodes | Keep this many newest episodes |
+| Seasons | Keep this many newest seasons |
 
 Each rule also carries its own **Season 0 / specials** choice: inherit the global setting,
 include, or exclude. One show's specials are worth keeping and another's are not, so the
 global setting is only a default.
 
-Each condition votes to keep or delete each episode. The **combine mode** decides:
+Each condition votes to keep or delete each episode. **Keep** decides how those conditions
+combine:
 
 | Mode | An episode is deleted when | Effect |
 |---|---|---|
-| **Earliest** | every condition says delete | Keeps the most. The safe default. |
-| **Latest** | every condition says delete, and none was undecidable | Keeps the least, without ever acting on an unknown. |
-| **Any** | any condition says delete | Most aggressive. Ignores conditions it cannot judge. |
+| **Any** | every condition says delete | Keep it when any condition matches. The safe default. |
+| **All** | any condition says delete | Keep it only when every condition matches. More aggressive. |
 
-*Earliest* and *latest* differ only when a condition cannot be evaluated — an episode with
-no air date, when estimated dates are switched off. *Latest* keeps such an episode; *any*
-deletes it on the strength of the other conditions.
+An unknown condition never authorizes deletion in either mode. For example, if age cannot
+be determined, another condition cannot use that missing fact as permission to delete.
 
-Example: `keep_days = 180`, `keep_episodes = 20`, combine `earliest` keeps everything from
+Example: `Age = 180`, `Episodes = 20`, Keep `Any` keeps everything from
 the last 180 days **and** the 20 newest episodes, whichever is more generous.
+
+An ended, disabled series can arm **Auto re-enable**. The next catalogue sync re-enables
+it once if Sonarr changes the series back to continuing or reports a newly added episode.
 
 ### Choosing a show
 

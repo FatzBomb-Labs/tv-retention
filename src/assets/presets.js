@@ -40,7 +40,8 @@ export function createPresets({ getSettings, saveSettings }) {
       ]));
       const body = el('div', { className: 'tvr-rule-body' });
       presetSummary(preset).forEach((label) => body.append(el('span', { className: 'tvr-chip on', textContent: label })));
-      body.append(el('span', { className: 'tvr-chip', textContent: `combine: ${preset.combine}` }));
+      body.append(el('span', { className: 'tvr-chip',
+                               textContent: `Keep: ${preset.combine === 'all' ? 'All' : 'Any'}` }));
       const actions = el('div', { className: 'tvr-rule-actions' });
       const editButton = el('button', { type: 'button', textContent: 'Edit' });
       editButton.addEventListener('click', () => editPreset(preset));
@@ -52,31 +53,53 @@ export function createPresets({ getSettings, saveSettings }) {
   }
 
   function conditionFields(source) {
-    const days = el('input', { type: 'number', min: '1', max: '36500', value: source.keep_days || '' });
+    const days = el('input', { type: 'text', inputMode: 'text', maxLength: 8,
+                               value: source.keep_days || '', placeholder: '30d',
+                               title: 'Days by default, or add d, w, m, or y (for example 24w or 1y).' });
     const episodes = el('input', { type: 'number', min: '1', max: '100000', value: source.keep_episodes || '' });
     const seasons = el('input', { type: 'number', min: '1', max: '1000', value: source.keep_seasons || '' });
     const combine = options(el('select'), [
-      ['earliest', 'Earliest — keep if any condition keeps it (safest)'],
-      ['latest', 'Latest — delete only if every condition agrees'],
-      ['any', 'Any — delete if any condition says so (most aggressive)'],
-    ], source.combine || 'earliest');
+      ['any', 'Any'],
+      ['all', 'All'],
+    ], source.combine || 'any');
+    combine.title = 'Any keeps an episode when any condition matches. All requires every condition to match.';
     const node = el('div', {}, [
-      el('div', { className: 'tvr-row' }, [field('Keep days', days), field('Keep episodes', episodes),
-                                           field('Keep seasons', seasons)]),
-      el('small', { textContent: 'Leave a box empty to switch that condition off. At least one is required.' }),
-      field('Combine conditions', combine),
+      el('div', { className: 'tvr-condition-grid' }, [
+        field('Keep', combine),
+        field('Episodes', episodes),
+        field('Seasons', seasons),
+        field('Age', days),
+      ]),
+      el('small', { textContent:
+        'Any keeps an episode when any condition matches (safer). All keeps it only when every condition matches. '
+        + 'Leave a condition empty to switch it off.' }),
     ]);
-    return { days, episodes, seasons, combine, node };
+    const valid = () => {
+      const value = days.value.trim();
+      if (!value) return true;
+      const match = /^([1-9]\d*)\s*([dwmy]?)$/i.exec(value);
+      if (!match) return false;
+      const unitDays = { '': 1, d: 1, w: 7, m: 30, y: 365 };
+      return Number(match[1]) * unitDays[match[2].toLowerCase()] <= 36500;
+    };
+    return { days, episodes, seasons, combine, node, valid };
   }
 
   function editPreset(existing) {
     const preset = Object.assign({ id: '', name: '', keep_days: '', keep_episodes: '',
-                                   keep_seasons: '', combine: 'earliest' }, existing || {});
+                                   keep_seasons: '', combine: 'any' }, existing || {});
     dialog(existing ? 'Edit preset' : 'Add preset', (body) => {
       const name = el('input', { type: 'text', value: preset.name, placeholder: 'Keep 30 days' });
       const conditions = conditionFields(preset);
       const users = (getSettings().rules || []).filter((rule) => rule.profile_id === preset.id);
       body.append(field('Preset name', name), conditions.node);
+      const validate = () => {
+        const valid = conditions.valid();
+        $('tvr-dialog-ok').disabled = !valid;
+        $('tvr-dialog-ok').title = valid ? '' : 'Enter age as days, or add d, w, m, or y.';
+      };
+      conditions.days.addEventListener('input', validate);
+      validate();
       if (existing) {
         const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small', textContent: 'Remove preset' });
         remove.addEventListener('click', (event) => {
@@ -102,6 +125,9 @@ export function createPresets({ getSettings, saveSettings }) {
       }
       return { name, conditions };
     }, async (context) => {
+      if (!context.conditions.valid()) {
+        throw new Error('Enter age as days, or add d, w, m, or y.');
+      }
       getSettings().profiles = (getSettings().profiles || []).filter((other) => other.id !== preset.id).concat([{
         id: preset.id || undefined,
         name: context.name.value,

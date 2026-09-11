@@ -718,6 +718,31 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     return episodes, series, store_episodes(settings, rule, episodes, series), False
 
 
+def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
+    """Re-enable armed, disabled rules when an ended series becomes active again."""
+    changed = []
+    for rule in settings.get('rules', []):
+        if rule.get('enabled') or not rule.get('auto_reenable') \
+                or rule.get('match_status') != 'matched':
+            continue
+        key = (rule.get('instance_id'), rule.get('series_id'))
+        was, series = before.get(key), after.get(key)
+        if not was or not series:
+            continue
+        resumed = bool(was.get('ended')) and not bool(series.get('ended'))
+        new_episode = bool(was.get('ended')) and int(series.get('total_episode_count') or 0) > \
+            int(was.get('total_episode_count') or 0)
+        if not resumed and not new_episode:
+            continue
+        rule['enabled'] = True
+        # One-shot: a later manual disable must stay disabled unless this is explicitly
+        # armed again.
+        rule['auto_reenable'] = False
+        changed.append((series.get('title') or rule.get('series_title') or rule['path'],
+                        'resumed' if resumed else 'a new episode appeared'))
+    return changed
+
+
 def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
     """Read Sonarr once, store what it says, and report what moved.
 
@@ -737,8 +762,9 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
     """
     started = now_iso()
     report = {'started': started, 'reason': reason, 'series_added': [], 'series_removed': 0,
-              'series_changed': 0, 'episodes_changed': [], 'errors': []}
+              'series_changed': 0, 'series_reenabled': [], 'episodes_changed': [], 'errors': []}
     catalogue = read_cache(settings, 'catalogue.json')
+    before, after = {}, {}
 
     for instance in settings.get('instances', []):
         if not instance.get('enabled', True):
@@ -751,7 +777,9 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
         entry = catalogue.get(instance['id']) or {}
         previous = {series['series_id']: series for series in (entry.get('series') or [])
                     if entry.get('schema') == SCHEMA}
+        before.update({(instance['id'], series_id): series for series_id, series in previous.items()})
         for series in fresh:
+            after[(instance['id'], series['series_id'])] = series
             was = previous.get(series['series_id'])
             if was is None:
                 # Only news on a library we have seen before; the first sync is the
@@ -764,6 +792,12 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
         catalogue[instance['id']] = {'schema': SCHEMA, 'fetched_at': now_iso(), 'series': fresh}
 
     write_cache(settings, 'catalogue.json', catalogue)
+    reenabled = reenable_returning_rules(settings, before, after)
+    if reenabled:
+        report['series_reenabled'] = [title for title, _ in reenabled]
+        save_settings(settings)
+        for title, reason_text in reenabled:
+            log_line(settings, 'info', f'{title}: automatically re-enabled because {reason_text}')
 
     for rule in settings.get('rules', []):
         if not rule.get('enabled') or rule.get('match_status') != 'matched':
@@ -792,6 +826,7 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
     log_line(settings, 'info',
              f'sync ({reason}): {report["series_changed"]} series changed, '
              f'{len(report["series_added"])} added, {report["series_removed"]} removed, '
+             f'{len(report["series_reenabled"])} re-enabled, '
              f'{len(report["episodes_changed"])} of the managed series moved')
     return report
 

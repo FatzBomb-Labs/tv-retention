@@ -11,7 +11,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 483 tests, all pass |
+| `python3 -m unittest discover -s tests` | 502 tests, all pass |
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — nineteen files now: the entry plus `format`, `dom`, `storage`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`, `connections`, `library` |
 | `node --test tests/frontend/*.test.js` | 13 tests, all pass — 8 runtime flows, 4 settings-contract tests, plus module-import purity |
@@ -22,17 +22,17 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | File | Tests | What it holds |
 |---|---|---|
-| `test_build.py` | 104 | The interface, checked statically |
-| `test_monitoring.py` | 33 | The two modes, the keep frame, and what each one asks Sonarr to do |
-| `test_freshness.py` | 31 | Reading ages, staleness, what may be shown as current |
-| `test_migration.py` | 30 | Settings v1 → v7, each step and the whole chain |
+| `test_build.py` | 150 | The interface, checked statically |
+| `test_monitoring.py` | 34 | The two modes, the keep frame, and what each one asks Sonarr to do |
+| `test_freshness.py` | 37 | Reading ages, staleness, what may be shown as current |
+| `test_migration.py` | 36 | Settings v1 → v11, each step and the whole chain |
 | `test_schedules.py` | 26 | When a job is due, including what cron cannot express |
-| `test_retention.py` | 23 | Every condition, every combine mode, air-date precedence, the guards |
+| `test_retention.py` | 45 | Every condition, every keep mode, air-date precedence, the guards |
 | `test_mapping.py` | 19 | The Sonarr payload as it actually arrives, through the real client |
 | `test_cache.py` | 16 | Cache keys derived from the mapping's shape |
 | `test_queue.py` | 15 | Queued removals and the check queue |
-| `test_settings.py` | 19 | Validation, redaction, injection and traversal rejection, one rule per series |
-| `test_names.py` | 16 | Names each module can reach, names nothing uses, alert display rules |
+| `test_settings.py` | 38 | Validation, redaction, injection and traversal rejection, one rule per series |
+| `test_names.py` | 20 | Names each module can reach, names nothing uses, alert display rules |
 | `test_presets.py` | 10 | Shared values, and what a preset may not do |
 | `test_progress.py` | 12 | The progress marker, the banner over it, and what the header totals |
 | `test_sonarr.py` | 9 | Rule-to-series matching, and ambiguity refused rather than guessed |

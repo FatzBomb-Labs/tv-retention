@@ -7,7 +7,7 @@ from core import Rejected, effective_rule, validate_settings
 def base(**overrides):
     document = {
         'instances': [{'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32}],
-        'profiles': [{'id': 'p1', 'name': 'Keep 30 days', 'keep_days': 30, 'combine': 'earliest'}],
+        'profiles': [{'id': 'p1', 'name': 'Keep 30 days', 'keep_days': 30, 'combine': 'any'}],
         'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 5, 'series_title': 'Show',
                    'path': '/mnt/user/media/TV/Show', 'profile_id': 'p1'}],
     }
