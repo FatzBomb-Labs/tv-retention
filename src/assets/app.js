@@ -32,6 +32,7 @@ import { createAlerts } from './alerts.js';
 import { createNavigation } from './navigation.js';
 import { createTopBar } from './topbar.js';
 import { remember, remembered } from './storage.js';
+import { createPresets } from './presets.js';
 
 function start(root) {
   const api = createApi(root.dataset.api, root.dataset.csrf);
@@ -261,6 +262,12 @@ function start(root) {
   });
   const { renderTopBar, renderCounts, renderRunButton, syncedAgo,
           showEverythingNeedingAttention } = topbar;
+
+  // -- presets -----------------------------------------------------------
+  // Built here rather than beside the other panels because the editor above already
+  // brokers two of its exports, and a preset knows nothing about a series.
+  const presets = createPresets({ getSettings: () => settings, saveSettings });
+  const { renderPresets, presetSummary, conditionFields } = presets;
 
   function render() {
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
@@ -841,105 +848,6 @@ function start(root) {
     $(id).addEventListener('change', renderLibrary);
   });
 
-  // -- presets -----------------------------------------------------------
-  function presetSummary(preset) {
-    const parts = [];
-    if (preset.keep_days) parts.push(`keep ${plural(preset.keep_days, 'day')}`);
-    if (preset.keep_episodes) parts.push(`keep ${plural(preset.keep_episodes, 'episode')}`);
-    if (preset.keep_seasons) parts.push(`keep ${plural(preset.keep_seasons, 'season')}`);
-    return parts;
-  }
-
-  function renderPresets() {
-    const container = $('tvr-presets');
-    const presets = settings.profiles || [];
-    container.replaceChildren();
-    $('tvr-presets-empty').hidden = presets.length > 0;
-    presets.forEach((preset) => {
-      const users = (settings.rules || []).filter((rule) => rule.profile_id === preset.id);
-      const card = el('div', { className: 'tvr-rule ok' });
-      card.append(el('div', { className: 'tvr-rule-head' }, [
-        el('span', { className: 'tvr-rule-title', textContent: preset.name }),
-        el('span', { className: 'tvr-chip', textContent: `used by ${plural(users.length, 'series')}` }),
-      ]));
-      const body = el('div', { className: 'tvr-rule-body' });
-      presetSummary(preset).forEach((label) => body.append(el('span', { className: 'tvr-chip on', textContent: label })));
-      body.append(el('span', { className: 'tvr-chip', textContent: `combine: ${preset.combine}` }));
-      const actions = el('div', { className: 'tvr-rule-actions' });
-      const editButton = el('button', { type: 'button', textContent: 'Edit' });
-      editButton.addEventListener('click', () => editPreset(preset));
-      actions.append(editButton);
-      body.append(actions);
-      card.append(body);
-      container.append(card);
-    });
-  }
-
-  function conditionFields(source) {
-    const days = el('input', { type: 'number', min: '1', max: '36500', value: source.keep_days || '' });
-    const episodes = el('input', { type: 'number', min: '1', max: '100000', value: source.keep_episodes || '' });
-    const seasons = el('input', { type: 'number', min: '1', max: '1000', value: source.keep_seasons || '' });
-    const combine = options(el('select'), [
-      ['earliest', 'Earliest — keep if any condition keeps it (safest)'],
-      ['latest', 'Latest — delete only if every condition agrees'],
-      ['any', 'Any — delete if any condition says so (most aggressive)'],
-    ], source.combine || 'earliest');
-    const node = el('div', {}, [
-      el('div', { className: 'tvr-row' }, [field('Keep days', days), field('Keep episodes', episodes),
-                                           field('Keep seasons', seasons)]),
-      el('small', { textContent: 'Leave a box empty to switch that condition off. At least one is required.' }),
-      field('Combine conditions', combine),
-    ]);
-    return { days, episodes, seasons, combine, node };
-  }
-
-  function editPreset(existing) {
-    const preset = Object.assign({ id: '', name: '', keep_days: '', keep_episodes: '',
-                                   keep_seasons: '', combine: 'earliest' }, existing || {});
-    dialog(existing ? 'Edit preset' : 'Add preset', (body) => {
-      const name = el('input', { type: 'text', value: preset.name, placeholder: 'Keep 30 days' });
-      const conditions = conditionFields(preset);
-      const users = (settings.rules || []).filter((rule) => rule.profile_id === preset.id);
-      body.append(field('Preset name', name), conditions.node);
-      if (existing) {
-        const remove = el('button', { type: 'button', className: 'tvr-danger tvr-small', textContent: 'Remove preset' });
-        remove.addEventListener('click', (event) => {
-          event.preventDefault();
-          guarded('', async () => {
-            if (users.length) throw new Error(`${plural(users.length, 'series')} still use "${preset.name}".`);
-            if (!window.confirm(`Remove the preset "${preset.name}"?`)) return;
-            $('tvr-dialog').close('cancel');
-            settings.profiles = settings.profiles.filter((other) => other.id !== preset.id);
-            await saveSettings('Preset removed.');
-          });
-        });
-        $('tvr-dialog-extra').replaceChildren(remove);
-      }
-      if (users.length) {
-        body.append(el('p', { textContent: `${plural(users.length, 'series')} use this preset and will change with it:` }));
-        users.forEach((rule) => body.append(el('div', { className: 'tvr-mono', textContent: rule.series_title || rule.path })));
-        if ((settings.retention || {}).auto_monitor) {
-          body.append(el('div', { className: 'tvr-banner', textContent:
-            'Auto monitor is on: widening this preset will put previously removed episodes back on '
-            + 'Sonarr’s wanted list at the next run.' }));
-        }
-      }
-      return { name, conditions };
-    }, async (context) => {
-      settings.profiles = (settings.profiles || []).filter((other) => other.id !== preset.id).concat([{
-        id: preset.id || undefined,
-        name: context.name.value,
-        keep_days: context.conditions.days.value || null,
-        keep_episodes: context.conditions.episodes.value || null,
-        keep_seasons: context.conditions.seasons.value || null,
-        combine: context.conditions.combine.value,
-      }]);
-      await saveSettings('Preset saved.');
-    });
-  }
-
-  $('tvr-add-preset').addEventListener('click', () => editPreset(null));
-
   // -- adding and editing a series ---------------------------------------
   async function seriesFor(instanceId, exceptRule, force) {
     const key = instanceId + ':' + (exceptRule || '');
@@ -1083,6 +991,7 @@ function start(root) {
   alerts.wire();
   navigation.wire();
   topbar.wire();
+  presets.wire();
 
   // Whatever happens, the page must end up interactive with a readable message.
   refresh().catch((error) => {

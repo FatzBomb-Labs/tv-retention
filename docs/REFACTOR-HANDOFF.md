@@ -15,12 +15,12 @@ are landed. **Phase 6 is complete**: `changeList` moved into `changes.js` long a
 phase 8 took the editor state that stood in its way, and the alerts cluster,
 navigation and the top bar have now been cut into `alerts.js`, `navigation.js` and
 `topbar.js`. See "Phase plan and gates", and read the phase-6 entry for how the three
-cuts were sequenced. Since then `storage.js` has been taken out too — the first cut
-belonging to no numbered phase.
+cuts were sequenced. Since then `storage.js` and `presets.js` have been taken out
+too — the first cuts belonging to no numbered phase.
 
 ```text
 src/assets/
-  app.js            1,100 lines — entry, fifteen imports, everything not yet extracted
+  app.js            1,002 lines — entry, sixteen imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   storage.js        remember, remembered — the per-browser preferences, wrapped
@@ -53,6 +53,10 @@ src/assets/
                     sidebar counts, the Run button's three states and the one
                     overview of everything wrong; imports $/el, ago/plural,
                     changeSummary/changeList, dialog/guarded/notice
+  presets.js        createPresets — the preset list and its editor, plus the two
+                    keep-window helpers the series editor borrows
+                    (conditionFields, presetSummary); imports $/el/field/options,
+                    plural, dialog/guarded
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -60,7 +64,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, sixteen assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, seventeen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -359,8 +363,9 @@ Cross-feature interaction is wired at the composition root, not by importing
    graph cut it to two. `saveSettings` is a hub — `deleteSeries`, `editInstance`,
    `editPreset`, `queuedBanner`, `renderInstances` and `ruleForm` all call it, and
    it calls `render` — so three of the four sketched modules would have imported it,
-   two of them (presets, connections) for no other reason. Those two stay in the
-   entry this phase. `activity.js` went first because it is the only cluster with no
+   two of them (presets, connections) for no other reason. Those two stayed in the
+   entry that phase; presets has since been cut, taking `saveSettings` as a single
+   passed-in capability, which is cheap enough that the objection no longer holds. `activity.js` went first because it is the only cluster with no
    `saveSettings` edge; `settings.js` follows.
 
    **`activity.js` — landed.** `renderStatsView`, `showResult`, `renderHistory`,
@@ -449,7 +454,8 @@ Cross-feature interaction is wired at the composition root, not by importing
    names arrive, `settings` as an accessor; three leave. `remember`/`remembered`
    stayed in the entry and are passed in, because series, presets and instances
    use them too — promoting them to a `storage.js` is a separate question and one
-   this cut did not have to answer.
+   this cut did not have to answer. It was answered afterwards, in the affirmative:
+   `storage.js` exists and `navigation.js` imports it directly.
 
    Three names became two accessors on the way out. `LIBRARY[currentView]` had two
    readers outside the span and `libraryFilter` had two more; exporting the tables
@@ -641,7 +647,7 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 3. Ask for approval of the outstanding module tree and callback boundaries.
 4. Begin only the approved phase. **Every numbered phase is landed** — S, 2, 3, 4,
    5, 6, 7 and 8. What remains of the entry has no numbered phase; the agreed
-   order for it is presets, then connections, then the library.
+   order for it is connections, then the library.
 
 `storage.js` came out first and is done. `remember`/`remembered` had eleven call
 sites across navigation, theme, library, bands, scale and layout, and
@@ -651,9 +657,17 @@ plain module like `format.js`, not a factory, and `navigation.js` now imports th
 directly rather than being handed them. That second half was the point of the cut:
 a module that needs a preference imports one.
 
-Presets (~99 lines) and connections (~124) are cuttable independently of the
-library — neither touches library state, and each has one or two external callers
-that already exist as working edges. The library is the last hard cut, and phase 6
+Presets came out next, and was the easiest cut so far: one external caller
+(`renderPresets`, from `render`), one listener, and `settings` the only entry state
+it touches. `conditionFields` and `presetSummary` were already brokered into the
+series editor as callbacks, so the entry now passes the module's own exports
+straight through instead. `editPreset` is not exported — nothing outside the
+module calls it.
+
+Connections (~124 lines) is next and is cuttable independently of the library:
+it touches no library state, and its two external callers — `renderInstances`
+from `render`, and `editInstance` from the alerts' `openInstance` intent — are
+existing working edges. The library is the last hard cut, and phase 6
 left two notes for whoever takes it: `renderCounts` sits in `topbar.js` but reads
 `library`, `ruleFor` and `seriesAlertList`, and `syncedAgo` is exported from
 `topbar.js` for exactly one caller, `alertBadge`. Both edges are honest today and
