@@ -49,6 +49,48 @@ def function_body(source: str, name: str) -> str:
     return tail[:end.start()]
 
 
+def strip_comments_and_strings(source: str) -> str:
+    """Blank out comments and string literals, so a scan sees only code.
+
+    One left-to-right pass rather than a comment sweep followed by a string sweep. Taking
+    comments first lets the `//` inside `'http://…'` open a comment that runs to the end of
+    the line, eating the closing quote; every literal after it is then read inside-out, and
+    with the modules joined into one string that phase error crosses file boundaries. A
+    single pass cannot start a comment inside a string or a string inside a comment,
+    because whichever opens first consumes the other.
+    """
+    out = []
+    i, n = 0, len(source)
+    while i < n:
+        ch = source[i]
+        if source.startswith('/*', i):
+            end = source.find('*/', i + 2)
+            end = n if end < 0 else end + 2
+            out.append(' ' * (end - i))
+            i = end
+        elif source.startswith('//', i):
+            end = source.find('\n', i)
+            end = n if end < 0 else end
+            out.append(' ' * (end - i))
+            i = end
+        elif ch in '`"\'':
+            j = i + 1
+            while j < n:
+                if source[j] == '\\':
+                    j += 2
+                    continue
+                if source[j] == ch:
+                    j += 1
+                    break
+                j += 1
+            out.append(' ' * (j - i))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return ''.join(out)
+
+
 def module_js(name: str) -> str:
     # Explicit encoding: the source carries characters outside the Windows default
     # codepage, and read_text() would decode with it and fail off the container.
@@ -180,13 +222,7 @@ class Interface(unittest.TestCase):
         checked for real by the runtime test, which links the graph and would fail on a
         binding no module exports.
         """
-        import re
-        code = re.sub(r'/\*.*?\*/', ' ', self.js, flags=re.S)
-        code = re.sub(r'//[^\n]*', ' ', code)
-        # Template literals first: they nest the other quote styles inside ${...}, so
-        # stripping the plain quotes first would eat across their boundaries.
-        for quote in ('`', '"', "'"):
-            code = re.sub(quote + r'(?:\\.|[^' + quote + r'\\])*' + quote, ' ', code, flags=re.S)
+        code = strip_comments_and_strings(self.js)
         # Not preceded by a dot: Number.MAX_SAFE_INTEGER is a property, not a module constant.
         shape = r'(?<![.\w])([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b'
         declared = set(re.findall(r'\b(?:const|let|var)\s+' + shape, code))

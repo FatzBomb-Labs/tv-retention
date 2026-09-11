@@ -21,10 +21,11 @@ import { $, el, text, toggle, field, options } from './dom.js';
 import { bytes, when, plural, ago, range } from './format.js';
 import { exclusionTree, monitorTree } from './episode-trees.js';
 import { changeSummary, changeLines, changeRows } from './changes.js';
+import { createApi, resetBusy } from './transport.js';
+import { notice, guarded, dialog } from './feedback.js';
 
 function start(root) {
-  const API = root.dataset.api;
-  const CSRF = root.dataset.csrf;
+  const api = createApi(root.dataset.api, root.dataset.csrf);
 
   let snapshot = null;      // last payload from the worker
   let settings = null;      // working copy, saved as a whole document
@@ -32,92 +33,6 @@ function start(root) {
   let alertsByRule = {};    // rule id -> that series' alerts
   let systemAlerts = [];
   let seriesCache = {};
-
-  // -- transport ---------------------------------------------------------
-  let busyDepth = 0;
-  function busy(on, label) {
-    busyDepth = Math.max(0, busyDepth + (on ? 1 : -1));
-    $('tvr-busy').hidden = busyDepth === 0;
-    if (on && label) $('tvr-busy-text').textContent = label;
-  }
-
-  // A request must always settle. Without this, one stalled call leaves the busy overlay
-  // covering the page with nothing on screen explaining why. Background work passes
-  // quiet: it updates one card and must never block the page.
-  const TIMEOUTS = { run: 3600000, preview: 900000, 'remove-series': 900000, series: 120000,
-                     'test-instance': 90000, match: 300000, 'test-tmdb': 60000,
-                     'check-rule': 300000, progress: 30000, log: 30000, alerts: 60000 };
-  const DEFAULT_TIMEOUT = 60000;
-
-  async function api(action, payload, label, quiet) {
-    if (!quiet) busy(true, label);
-    const controller = new AbortController();
-    const limit = TIMEOUTS[action] || DEFAULT_TIMEOUT;
-    const timer = setTimeout(() => controller.abort(), limit);
-    try {
-      const body = new URLSearchParams();
-      body.set('csrf_token', CSRF);
-      body.set('payload', JSON.stringify(Object.assign({ action }, payload || {})));
-      let response;
-      try {
-        response = await fetch(API, { method: 'POST', body, credentials: 'same-origin', signal: controller.signal });
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          throw new Error(`The server did not answer "${action}" within ${Math.round(limit / 1000)}s. `
-                          + 'Check the plugin worker in the system log.');
-        }
-        throw new Error(`Could not reach the TV Retention backend (${error.message}). Reload the page.`);
-      }
-      let data;
-      try {
-        data = await response.json();
-      } catch (error) {
-        data = { ok: false, error: `The backend replied with HTTP ${response.status} and no usable JSON. `
-                                   + 'If this says 403, reload the Unraid page to refresh the session token.' };
-      }
-      // A session that has gone — the container restarted, or it simply aged out — is not
-      // an error the reader can do anything with. Sessions live in memory on purpose, so
-      // this is the ordinary consequence of a restart and the page should just go and log
-      // in again.
-      if (data.expired) { window.location.href = '/login'; throw new Error('Signing in again…'); }
-      if (!data.ok) throw new Error(data.error || 'Request failed');
-      return data;
-    } finally {
-      clearTimeout(timer);
-      if (!quiet) busy(false);
-    }
-  }
-
-  function notice(message, kind) {
-    const box = $('tvr-notice');
-    box.textContent = message;
-    box.className = kind || '';
-    box.hidden = !message;
-    if (message) box.scrollIntoView({ block: 'nearest' });
-  }
-
-  async function guarded(label, work) {
-    try { notice(''); await work(); } catch (error) { notice(error.message, 'bad'); }
-  }
-
-  // -- dialog ------------------------------------------------------------
-  function dialog(title, buildBody, onOk, okLabel) {
-    const box = $('tvr-dialog');
-    const body = $('tvr-dialog-body');
-    body.replaceChildren(el('h3', { textContent: title }));
-    $('tvr-dialog-extra').replaceChildren();
-    $('tvr-dialog-ok').disabled = false;
-    const context = buildBody(body);
-    $('tvr-dialog-ok').textContent = okLabel || 'Save';
-    $('tvr-dialog-ok').hidden = !onOk;
-    const handler = async () => {
-      box.removeEventListener('close', handler);
-      if (box.returnValue !== 'ok' || !onOk) return;
-      await guarded('', () => onOk(context));
-    };
-    box.addEventListener('close', handler);
-    box.showModal();
-  }
 
   // -- snapshot and background checking ----------------------------------
   const checking = new Set();
@@ -3107,12 +3022,11 @@ function start(root) {
   // -- start -------------------------------------------------------------
   // Whatever happens, the page must end up interactive with a readable message.
   refresh().catch((error) => {
-    busyDepth = 0;
-    $('tvr-busy').hidden = true;
+    resetBusy();
     notice(`TV Retention could not load: ${error.message}`, 'bad');
   });
-  window.addEventListener('error', () => { busyDepth = 0; $('tvr-busy').hidden = true; });
-  window.addEventListener('unhandledrejection', () => { busyDepth = 0; $('tvr-busy').hidden = true; });
+  window.addEventListener('error', resetBusy);
+  window.addEventListener('unhandledrejection', resetBusy);
 }
 
 // The entry point: find the page this module belongs to, and only then run it. On any

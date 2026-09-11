@@ -10,24 +10,26 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-Branch `master`, working tree clean as of 2026-09-11. Phases S, 2 and 3 are landed;
-**Phase 4 (transport/data boundaries) is next.** See "Phase plan and gates".
+Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3 and 4 are
+landed; **Phase 5 (peripheral features) is next.** See "Phase plan and gates".
 
 ```text
 src/assets/
-  app.js            3,121 lines — entry, four imports, everything not yet extracted
+  app.js            3,035 lines — entry, six imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
   changes.js        REMOVAL_SUMMARY, changeSummary, changeLines, changeRows
+  transport.js      busy, resetBusy, createApi, TIMEOUTS, DEFAULT_TIMEOUT — imports $
+  feedback.js       notice, guarded, dialog — imports $, el
 ```
 
-The entry began at 3,496 lines. Phase 3 moved four modules out of it without
+The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
 changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, five assets parsing as ES modules, 9 frontend runtime tests.
+worker imports, seven assets parsing as ES modules, 9 frontend runtime tests.
 
 Nothing has been deployed or pushed during this work. No browser session against a
 built image has been run for the module split.
@@ -218,20 +220,25 @@ import-purity rule are stated as constraints in `AGENTS.md` and enforced by
 why `app.js?v=KEY` cannot version a transitive static import, and why a per-file
 digest joined and truncated follows only the first file — are recorded there too.
 
-## Revised target tree — four of these exist; the rest are candidates
+## Revised target tree — six of these exist; the rest are candidates
 
-`dom.js`, `format.js`, `episode-trees.js` and `changes.js` shipped in phase 3. The
-one deviation from the sketch below: the dialog, notice and feedback factories did
-*not* go into `dom.js`. They call the RPC surface and raise the busy overlay, which
-makes them transport concerns rather than construction, so they are phase 4's.
-`dom.js` holds element construction and controls only, and imports nothing.
+`dom.js`, `format.js`, `episode-trees.js` and `changes.js` shipped in phase 3;
+`transport.js` and `feedback.js` in phase 4. Two deviations from the sketch below.
+The dialog, notice and feedback factories did *not* go into `dom.js` — `dom.js`
+holds element construction and controls only, and imports nothing. And what the
+sketch draws as one `transport.js` with "injected busy feedback" shipped as two
+modules, because the code holds two clusters with no call edge between them:
+`api` → `busy`, which needs the page's endpoint and CSRF token, and
+`dialog` → `guarded` → `notice`, which needs nothing but `dom.js`. Neither imports
+the other, and no feedback injection was required.
 
 ```text
 src/assets/
   app.js              composition root, explicit full/targeted render orchestration
   dom.js              DOM construction and controls
   format.js           formatting helpers (bytes, dates, plurals)
-  transport.js        RPC, timeouts, session handling; injected busy feedback
+  transport.js        RPC, timeouts and the busy overlay
+  feedback.js         notice, guarded, dialog
   state.js            shared application data and derived queries; no UI callbacks
   changes.js          plan descriptions, change rows, preview/result presentation
   checks.js           check queue, polling, heartbeat and lifecycle callbacks
@@ -289,8 +296,25 @@ Cross-feature interaction is wired at the composition root, not by importing
    and prose belonging to moved code was left behind in the entry — once above the
    wrong function, where it read as an explanation of something it had nothing to do
    with. Read the seam in *both* files after every extraction.
-4. **Transport/data boundaries:** extract RPC and genuinely shared state with
-   explicit update notifications wired locally in `app.js`, not a registry.
+4. **Transport/feedback — landed.** `transport.js` (`busy`, `resetBusy`,
+   `createApi`, `TIMEOUTS`, `DEFAULT_TIMEOUT`) and `feedback.js` (`notice`,
+   `guarded`, `dialog`). `app.js` went 3,121 → 3,035 lines. Two closures had to be
+   broken: `api` read `API`/`CSRF` off `root.dataset`, so the module exports
+   `createApi(endpoint, csrf)`, called once at start-up and returning a function
+   still named `api` — all 34 call sites unchanged. And `busyDepth` was reset
+   directly by three sites outside `busy()`, so `resetBusy()` is exported for them.
+
+   Shared state was *not* extracted, though the phase as planned bundled it with
+   RPC: the transport half is cohesive on its own, and shipping it alone kept the
+   diff mechanical. `state.js` is still a candidate, now unscheduled — no phase
+   below depends on it, so it can be taken whenever the shared data is clear.
+
+   Two things this phase learned. A mechanical rewrite must **assert the old symbol
+   is absent** afterwards — `str.replace()` fails silently, and the `busyDepth` miss
+   (two of the sites are indented, the pattern assumed column zero) was caught only
+   by that assertion. And exported constants use a trailing `export { … }` list like
+   every other module, not `export const`: the constant-declaration test scans for
+   `const NAME`, and `export const NAME` reads as undeclared.
 5. **Peripheral features:** activity, presets, connections and settings; preserve
    whole-document collection and masked-key semantics.
 6. **Alerts/navigation/topbar:** explicit view transitions, action callbacks and
@@ -331,13 +355,15 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phases S, 2 and 3 are landed; the next is
-   Transport/data boundaries (Phase 4).
+4. Begin only the approved phase. Phases S, 2, 3 and 4 are landed; the next is
+   Peripheral features (Phase 5).
 
-Phase 4 moves, in `app.js` order: `busy`, `TIMEOUTS`, `DEFAULT_TIMEOUT` and `api`
-under the `// -- transport` banner, then `notice`, `guarded` and `dialog`.
-`showResult` and `changeList` sit next to them but call `dialog`, so they travel
-with it or stay; decide that from the seam rather than in advance. Unlike phase 3
-this is not pure leaf code — `busy` touches the DOM and `api` touches the network —
-so the purity test is the thing to watch: neither may run at import, only when
-called.
+Phase 5 takes activity, presets, connections and settings. These are not leaf code
+and not a mechanical move: each is a render/collect/save cluster reached from the
+settings view, so the boundary to find is what the entry must still call and what
+can become private to the module. Preserve whole-document collection and
+masked-key semantics — a settings save reads the whole document rather than one
+panel, and a masked key left unedited must not be written back as its mask.
+
+Read the cluster before deciding its module count. Phase 4's plan said one module
+and the code said two; the call graph is the authority, not the sketch.
