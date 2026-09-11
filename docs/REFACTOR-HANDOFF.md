@@ -15,12 +15,13 @@ are landed. **Phase 6 is complete**: `changeList` moved into `changes.js` long a
 phase 8 took the editor state that stood in its way, and the alerts cluster,
 navigation and the top bar have now been cut into `alerts.js`, `navigation.js` and
 `topbar.js`. See "Phase plan and gates", and read the phase-6 entry for how the three
-cuts were sequenced. Since then `storage.js` and `presets.js` have been taken out
-too — the first cuts belonging to no numbered phase.
+cuts were sequenced. Since then `storage.js`, `presets.js` and `connections.js`
+have been taken out too — the first cuts belonging to no numbered phase. **The
+library is all that is left.**
 
 ```text
 src/assets/
-  app.js            1,002 lines — entry, sixteen imports, everything not yet extracted
+  app.js            898 lines — entry, seventeen imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   storage.js        remember, remembered — the per-browser preferences, wrapped
@@ -57,6 +58,9 @@ src/assets/
                     keep-window helpers the series editor borrows
                     (conditionFields, presetSummary); imports $/el/field/options,
                     plural, dialog/guarded
+  connections.js    createConnections — the Sonarr instance cards and the
+                    test-before-save dialog; imports $/el/field/toggle, plural,
+                    dialog/guarded
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -64,7 +68,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, seventeen assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, eighteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -647,7 +651,7 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 3. Ask for approval of the outstanding module tree and callback boundaries.
 4. Begin only the approved phase. **Every numbered phase is landed** — S, 2, 3, 4,
    5, 6, 7 and 8. What remains of the entry has no numbered phase; the agreed
-   order for it is connections, then the library.
+   remaining work is the library, and nothing else.
 
 `storage.js` came out first and is done. `remember`/`remembered` had eleven call
 sites across navigation, theme, library, bands, scale and layout, and
@@ -664,10 +668,16 @@ series editor as callbacks, so the entry now passes the module's own exports
 straight through instead. `editPreset` is not exported — nothing outside the
 module calls it.
 
-Connections (~124 lines) is next and is cuttable independently of the library:
-it touches no library state, and its two external callers — `renderInstances`
-from `render`, and `editInstance` from the alerts' `openInstance` intent — are
-existing working edges. The library is the last hard cut, and phase 6
+Connections followed, and verified 122 of 122. Its two external callers were both
+existing working edges — `renderInstances` from `render`, `editInstance` from the
+alerts' `openInstance` intent — and the second is reached only from inside a
+callback, so ordering in the entry never came into it. The one thing worth noting
+is `seriesCache`: the instance editor clears it on save, because moving a Sonarr
+invalidates every series list read from the old one. It leaves as
+`forgetSeriesCache()`, a named intent, rather than as a binding the module could
+reassign. That is the `applySaved` pattern applied to a cache.
+
+The library is the last hard cut, and phase 6
 left two notes for whoever takes it: `renderCounts` sits in `topbar.js` but reads
 `library`, `ruleFor` and `seriesAlertList`, and `syncedAgo` is exported from
 `topbar.js` for exactly one caller, `alertBadge`. Both edges are honest today and
