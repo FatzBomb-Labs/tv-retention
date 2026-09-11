@@ -288,7 +288,7 @@ class Interface(unittest.TestCase):
         self.assertIn("test: ['Run Test'", block)
         self.assertIn("blocked: ['Disabled'", block)
         state = self.js.split('function runState()')[1].split('\n  }')[0]
-        self.assertIn('systemAlerts.some((alert) => alert.blocking)', state)
+        self.assertIn('getSystemAlerts().some((alert) => alert.blocking)', state)
         self.assertNotIn('isBlocked', state, 'one broken series must not disable the button')
         # Blocked stays pressable: it is the shortest route to the reason.
         self.assertIn("if (runState() === 'blocked') return void showEverythingNeedingAttention();",

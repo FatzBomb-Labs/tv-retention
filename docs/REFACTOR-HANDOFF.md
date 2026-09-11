@@ -10,16 +10,16 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5, 7 and 8
-are landed. Phase 6 is **in progress**: `changeList` moved into `changes.js` long ago,
-phase 8 took the editor state that stood in its way, and the alerts cluster and
-navigation have now been cut into `alerts.js` and `navigation.js`. What is left of
-phase 6 is the topbar. See
-"Phase plan and gates", and read the phase-6 entry before cutting anything there.
+Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5, 6, 7 and 8
+are landed. **Phase 6 is complete**: `changeList` moved into `changes.js` long ago,
+phase 8 took the editor state that stood in its way, and the alerts cluster,
+navigation and the top bar have now been cut into `alerts.js`, `navigation.js` and
+`topbar.js`. See "Phase plan and gates", and read the phase-6 entry for how the three
+cuts were sequenced.
 
 ```text
 src/assets/
-  app.js            1,278 lines — entry, thirteen imports, everything not yet extracted
+  app.js            1,109 lines — entry, fourteen imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -46,6 +46,10 @@ src/assets/
   navigation.js     createNavigation — which view is on screen, which sidebar
                     section is open, and the library's three-views-one-panel
                     filter; imports $, guarded
+  topbar.js         createTopBar — the age of the reading, the changes menu, the
+                    sidebar counts, the Run button's three states and the one
+                    overview of everything wrong; imports $/el, ago/plural,
+                    changeSummary/changeList, dialog/guarded/notice
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -53,7 +57,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, fourteen assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, fifteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -394,7 +398,7 @@ Cross-feature interaction is wired at the composition root, not by importing
    `alerts`.
 6. **Alerts/navigation/topbar:** explicit view transitions, action callbacks and
    confirmation flows; maintain draft-discard and log-start/stop rules.
-   **Partly landed.** `changeList` is out — 69 lines into `changes.js`, verbatim
+   **Landed, in four cuts.** `changeList` is out — 69 lines into `changes.js`, verbatim
    but for the dedent, verified line-for-line against the previous commit. It was
    the one cut here with *no* entry state at all: it reads only the result it is
    handed and calls `dialog`, `el`, `changeLines` and `changeRows`, all already
@@ -448,15 +452,38 @@ Cross-feature interaction is wired at the composition root, not by importing
    editor's `openLibraryView` was the right shape: it needed no change at all, only
    `isLibraryView()` in place of the table lookup.
 
-   **What is left: the topbar** (now L255–457). The one tie that remains is
-   `showEverythingNeedingAttention`, which calls `seriesAlertCard` and
-   `systemAlertCard`. Since sibling modules cannot import each other here, the
-   entry must broker those two, and **that fixes the order the factories are
-   constructed in** — `createAlerts` before whatever takes the topbar. Nothing in
-   the code states that constraint, and a later edit would silently break it, so
-   say so in a comment where the factories are built. Note also that
-   `$('tvr-refresh-all')` writes `settings` and `snapshot` directly; that becomes
-   `applySaved(data)` plus accessors, exactly as the alerts cut did.
+   **The topbar is out** — 234 lines into `topbar.js`, verified 201/201 against
+   the previous commit; `app.js` 1,278 → 1,109, which closes phase 6. Eighteen
+   names arrive, four of them accessors — `settings`, `snapshot`, `systemAlerts`
+   and `library` are all reassigned wholesale in the entry — and five leave:
+   `renderTopBar`, `renderCounts`, `renderRunButton`, `syncedAgo` and
+   `showEverythingNeedingAttention`. `RUN_STATES`, `runState` and `setBadge` had
+   no caller outside the span and stayed private.
+
+   The one tie was `showEverythingNeedingAttention`, which calls `seriesAlertCard`
+   and `systemAlertCard`. Sibling modules cannot import each other here, so the
+   entry brokers those two, and **that fixes the order the factories are
+   constructed in** — `createAlerts` before `createTopBar`. Nothing in the code
+   stated that constraint and a later edit would have silently broken it, so both
+   factory blocks now say so in a comment.
+
+   `$('tvr-refresh-all')` wrote `settings` and `snapshot.settings` directly; it is
+   now `applySaved(data)`. That is behaviour-neutral rather than merely tidier, and
+   checking is what established it: `applySaved` also writes
+   `snapshot.schedule_text = data.schedule_text || snapshot.schedule_text`, and
+   `action_sync` in [worker/actions.py](../src/worker/actions.py) returns no
+   `schedule_text`, so the `||` falls through to the held value every time.
+
+   Three renders left as three rather than one, because two of them answer to
+   things that do not go through the bar: `renderRunButton` works out its own
+   "nothing to do" so `applyAlerts` can call it on the alert schedule, and
+   `renderCounts` answers to the check queue, which finishes per series. Folding
+   them would make every one of those a full redraw.
+
+   `renderCounts` reads `library`, `ruleFor` and `seriesAlertList`, which are
+   library concerns, and it went here anyway: it is the sidebar's counts and the
+   sidebar is the bar's sibling. Worth revisiting when `library.js` is cut — the
+   same is true of `syncedAgo`, whose one outbound caller is `alertBadge`.
 
    **Phase 7 was taken ahead of the rest of this one**, because it was the only
    remaining cluster with no stake in that argument.
@@ -606,26 +633,20 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phases S, 2, 3, 4, 5, 7 and 8 are landed.
-   **Phase 6 is the one to resume** — `changeList`, alerts and navigation are out,
-   the topbar is what is left.
+4. Begin only the approved phase. **Every numbered phase is landed** — S, 2, 3, 4,
+   5, 6, 7 and 8. What remains of the entry is the library, the series list, the
+   presets, the connections and `remember`/`remembered`, none of which has an
+   agreed cut yet.
 
-The topbar is L255–457 of the entry: the counts band, the changes menu, the theme
-control, the run button and its state machine, `syncedAgo`, and
-`showEverythingNeedingAttention`. Re-derive its surface before cutting; the last
-measurement said 33 unresolved names, but that predates navigation leaving.
+The library is the obvious next cluster, and phase 6 left two notes for whoever
+takes it. `renderCounts` sits in `topbar.js` but reads `library`, `ruleFor` and
+`seriesAlertList`; `syncedAgo` is exported from `topbar.js` for exactly one caller,
+`alertBadge`. Both edges are honest today and both may want to move when the
+library goes. `remember`/`remembered` are still in the entry, passed into
+`navigation.js` as wrapped callbacks, because series, presets and instances use
+them too; whether they deserve a `storage.js` is still open.
 
-Two things are known about it already. `showEverythingNeedingAttention` calls
-`seriesAlertCard` and `systemAlertCard`, which the entry must broker because
-sibling modules cannot import each other — and that fixes `createAlerts` ahead of
-it in construction order, a constraint now written into the comment above the
-alerts factory. And `$('tvr-refresh-all')` assigns `settings` and `snapshot`
-directly; it becomes `applySaved(data)` plus accessors, the same move the alerts
-cut made. Its listeners are at `tvr-changes-button`, a `document` click for menu
-dismissal, `tvr-alert-total`, `tvr-refresh-all` and `tvr-run` — all on markup the
-page already holds, so all of them belong in `wire()`.
-
-Take it the way phases 4, 5 and 7 went: a factory
+Take the next cut the way phases 4, 5, 6, 7 and 8 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,
 and every top-level listener in the cluster moved into an exported `wire()` the
 entry calls at start-up. Grep the cut range for `addEventListener` *before*

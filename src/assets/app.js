@@ -30,6 +30,7 @@ import { createRemoval } from './series-removal.js';
 import { createSeriesEditor } from './series-editor.js';
 import { createAlerts } from './alerts.js';
 import { createNavigation } from './navigation.js';
+import { createTopBar } from './topbar.js';
 
 function start(root) {
   const api = createApi(root.dataset.api, root.dataset.csrf);
@@ -129,9 +130,9 @@ function start(root) {
   // the library, or this instance's settings open. Naming them that way keeps the alerts
   // module off `showView` entirely, so the navigation module has nothing here to honour.
   //
-  // This has to be built before whatever takes the topbar: `showEverythingNeedingAttention`
-  // calls both alert cards, and sibling modules cannot import each other, so the entry
-  // brokers them — which only works if the cards exist by then.
+  // This has to be built before `createTopBar`: `showEverythingNeedingAttention` calls both
+  // alert cards, and sibling modules cannot import each other, so the entry brokers them —
+  // which only works if the cards exist by then.
   const alerts = createAlerts({
     api,
     getSettings: () => settings,
@@ -237,6 +238,33 @@ function start(root) {
     : list.some((a) => a.severity === 'warning') ? 'warning'
     : list.length ? 'notice' : '');
 
+  // -- top bar -----------------------------------------------------------
+  // Built after the alerts, which own the two cards `showEverythingNeedingAttention`
+  // stacks, and after the severity helpers just above, which it reads for the counts.
+  const topbar = createTopBar({
+    api,
+    getSettings: () => settings,
+    getSnapshot: () => snapshot,
+    getSystemAlerts: () => systemAlerts,
+    getLibrary: () => library,
+    applySaved,
+    applyHealth,
+    applyAlerts,
+    forgetLibrary: () => forgetLibrary(),
+    refresh: () => refresh(),
+    render: () => render(),
+    showResult: (result, title) => showResult(result, title),
+    testMode: () => testMode(),
+    ruleFor: (id) => ruleFor(id),
+    isBlocked: (id) => isBlocked(id),
+    worstSeverity: (list) => worstSeverity(list),
+    seriesAlertList: () => seriesAlertList(),
+    seriesAlertCard: (rule, list, options) => seriesAlertCard(rule, list, options),
+    systemAlertCard: (title, list) => systemAlertCard(title, list),
+  });
+  const { renderTopBar, renderCounts, renderRunButton, syncedAgo,
+          showEverythingNeedingAttention } = topbar;
+
   function render() {
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
     $('tvr-about-version').textContent = snapshot.version || '';
@@ -255,208 +283,6 @@ function start(root) {
     renderHistory();
     renderAbout();
   }
-
-  // Everything on screen is answered from one reading, so its age is said once, here,
-  // rather than repeated against every series.
-  function syncedAgo() {
-    const stamp = (snapshot.sync || {}).synced_at;
-    return stamp ? `synced with Sonarr ${ago(stamp)}` : '';
-  }
-
-  // Three states, and the colour is the sentence. Green: this will change things. Orange:
-  // this will report and change nothing, because Test Mode is on — and Test Mode now means
-  // nothing writes at all, so the button can say so without lying. Red: something is
-  // stopping every run, and pressing it shows you what rather than doing nothing.
-  //
-  // Red is reserved for a fault that stops the *whole* run — no instance answering, or no
-  // instance at all. One broken series among thirty-five healthy ones is skipped, not a
-  // reason to call the button disabled.
-  function runState() {
-    if (!(settings.instances || []).length) return 'blocked';
-    if (systemAlerts.some((alert) => alert.blocking)) return 'blocked';
-    return testMode() ? 'test' : 'live';
-  }
-
-  const RUN_STATES = {
-    live: ['Run', 'Run now. This deletes episode files through Sonarr.'],
-    test: ['Run Test', 'Test mode is on: this reports exactly what it would do and writes nothing.'],
-    blocked: ['Disabled', 'Something is stopping every run. Click to see what.'],
-  };
-
-  function renderRunButton() {
-    // It works out its own "nothing to do", so anything that changes what the button
-    // should say can simply call it.
-    const plan = snapshot.plan || { actionable: 0, trustworthy: false };
-    const nothing = plan.trustworthy && !plan.actionable;
-    const state = runState();
-    const [text, why] = RUN_STATES[state];
-    const button = $('tvr-run');
-    button.className = `tvr-run ${state}`;
-    $('tvr-run-label').textContent = text;
-    // Blocked stays pressable on purpose: it is the shortest route to the reason.
-    button.disabled = state !== 'blocked' && nothing;
-    button.title = button.disabled ? 'Nothing is scheduled to change' : why;
-  }
-
-  // The top bar carries one number and opens what it counts. Nothing drops when there is
-  // nothing scheduled: an empty menu is a promise the plugin cannot keep.
-  function renderTopBar() {
-    const plan = snapshot.plan || { actionable: 0, trustworthy: false, unknown: 0 };
-    const rows = changeSummary(plan);
-    const button = $('tvr-changes-button');
-    const label = $('tvr-changes-label');
-    const menu = $('tvr-changes-menu');
-    const nothing = plan.trustworthy && !plan.actionable;
-
-    label.textContent = nothing ? 'No scheduled changes'
-      : (plan.trustworthy ? plural(plan.actionable, 'scheduled change')
-         : `${plural(plan.actionable, 'scheduled change')} so far`);
-    button.classList.toggle('quiet', nothing);
-    $('tvr-changes-caret').hidden = nothing;
-    button.disabled = nothing;
-    $('tvr-synced').textContent = syncedAgo();
-    renderRunButton();
-
-    menu.hidden = true;
-    menu.replaceChildren();
-    if (nothing) return;
-    const open = (kind) => guarded('', async () => {
-      menu.hidden = true;
-      const data = await api('preview', {}, 'Working out what would change…');
-      changeList(data.result, 'Scheduled changes', kind);
-    });
-    const all = el('button', { type: 'button', className: 'tvr-changes-row all',
-                               textContent: `All ${plural(plan.actionable, 'change')}` });
-    all.addEventListener('click', () => open('all'));
-    menu.append(all);
-    rows.forEach((row) => {
-      const line = el('button', { type: 'button', className: `tvr-changes-row ${row.tone}`,
-                                  textContent: row.text });
-      line.addEventListener('click', () => open(row.kind));
-      menu.append(line);
-    });
-    if (syncedAgo()) menu.append(el('div', { className: 'tvr-changes-foot', textContent: syncedAgo() }));
-  }
-
-  $('tvr-changes-button').addEventListener('click', (event) => {
-    event.stopPropagation();
-    const menu = $('tvr-changes-menu');
-    menu.hidden = !menu.hidden;
-    $('tvr-changes-button').setAttribute('aria-expanded', String(!menu.hidden));
-  });
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('#tvr-changes')) $('tvr-changes-menu').hidden = true;
-  });
-
-  function setBadge(badge, list) {
-    const live = (list || []).filter((alert) => !alert.acknowledged);
-    badge.hidden = live.length === 0;
-    badge.textContent = live.length || '';
-    badge.className = `tvr-tab-badge ${worstSeverity(live) || 'notice'}`;
-  }
-
-  // The sidebar carries the counts. Two badges for two audiences: a series problem belongs
-  // to Series, where it is fixed; an installation problem belongs to Alerts. Neither
-  // counts the other's.
-  // A badge next to the thing it is about, rather than one list of everything wrong. The
-  // total in the top bar is the one place that still answers "is anything wrong at all?".
-  function renderCounts() {
-    const rules = settings.rules || [];
-    const connectedAlerts = seriesAlertList();
-    const instances = systemAlerts.filter((alert) => alert.kind !== 'run-aborted');
-
-    $('tvr-count-connected').textContent = rules.length;
-    $('tvr-count-all-series').textContent = library ? library.length : rules.length;
-    $('tvr-count-unconnected').textContent = library
-      ? library.filter((series) => !ruleFor(series)).length : 0;
-    $('tvr-count-presets').textContent = (settings.profiles || []).length;
-
-    setBadge($('tvr-badge-series-all'), connectedAlerts);
-    setBadge($('tvr-badge-series-connected'), connectedAlerts);
-    setBadge($('tvr-badge-series-unconnected'), []);
-    setBadge($('tvr-badge-media-connections'), instances);   // now under Settings
-    setBadge($('tvr-badge-media-schedule'), []);
-    setBadge($('tvr-badge-media-presets'), []);
-    const failed = (snapshot.runs || []).slice(0, 1).filter((run) => (run.errors || []).length);
-    setBadge($('tvr-badge-system-history'), failed.map(() => ({ severity: 'warning' })));
-
-    // What the header counts is a setting; what the badges count is not. An acknowledged
-    // alert stops being counted anywhere, but is still there to be found.
-    const everything = connectedAlerts.concat(systemAlerts);
-    const wanted = ((settings || {}).alerts || {}).header || 'all';
-    const ranked = { errors: ['error'], warnings: ['error', 'warning'] }[wanted]
-                   || ['error', 'warning', 'notice'];
-    const counted = everything.filter((alert) => ranked.includes(alert.severity) && !alert.acknowledged);
-    const total = $('tvr-alert-total');
-    total.hidden = counted.length === 0;
-    total.textContent = `${counted.length} ${counted.length === 1 ? 'alert' : 'alerts'}`;
-    total.className = `tvr-alert-total ${worstSeverity(counted) || 'notice'}`;
-  }
-
-  // The one overview left: what is wrong, and where to go and fix it. Two things open it —
-  // the count, and the Run button when something is stopping every run — because "why can
-  // I not run?" and "what is wrong?" are the same question.
-  function showEverythingNeedingAttention() {
-    const everything = seriesAlertList().concat(systemAlerts);
-    dialog('Everything needing attention', (body) => {
-      if (!everything.length) { body.append(el('p', { textContent: 'Nothing.' })); return {}; }
-      const byRule = new Map();
-      everything.forEach((alert) => {
-        const key = alert.rule_id || 'system';
-        byRule.set(key, (byRule.get(key) || []).concat([alert]));
-      });
-      byRule.forEach((list, key) => {
-        const rule = (settings.rules || []).find((candidate) => candidate.id === key);
-        body.append(rule ? seriesAlertCard(rule, list, { hideOpen: false })
-                         : systemAlertCard('TV Retention', list));
-      });
-      return {};
-    }, null, 'Close');
-  }
-  $('tvr-alert-total').addEventListener('click', showEverythingNeedingAttention);
-
-  // The one control that waits on Sonarr, and it says so. Everything else on this page is
-  // answered from the stored reading, which is why nothing else makes you wait.
-  $('tvr-refresh-all').addEventListener('click', () => guarded('Reading Sonarr…', async () => {
-    const data = await api('sync', {}, 'Reading Sonarr…');
-    settings = data.settings;
-    snapshot.settings = settings;
-    applyHealth(data.health);
-    applyAlerts(data.alerts);
-    snapshot.plan = data.plan;
-    snapshot.sync = data.sync;
-    // Sonarr has just been read: what the page is holding is the reading before it.
-    forgetLibrary();
-    render();
-    const report = data.report || {};
-    const moved = [];
-    if (report.series_added && report.series_added.length) moved.push(`${plural(report.series_added.length, 'series')} added`);
-    if (report.series_changed) moved.push(`${plural(report.series_changed, 'series')} changed`);
-    if (report.series_removed) moved.push(`${plural(report.series_removed, 'series')} gone`);
-    if ((report.episodes_changed || []).length) moved.push(`${plural(report.episodes_changed.length, 'managed series')} moved`);
-    notice(moved.length ? `Synced with Sonarr — ${moved.join(', ')}.` : 'Synced with Sonarr. Nothing had changed.', 'ok');
-  }));
-
-  $('tvr-run').addEventListener('click', () => guarded('', async () => {
-    if (runState() === 'blocked') return void showEverythingNeedingAttention();
-    const runnable = (settings.rules || []).filter((rule) => rule.enabled && !isBlocked(rule.id));
-    if (!runnable.length) throw new Error('There are no enabled series ready to run.');
-    const plan = snapshot.plan || {};
-    // The confirmation states the actual plan rather than describing runs in general.
-    let warning = `Run ${plural(runnable.length, 'series')} now?\n\n`;
-    const changes = changeSummary(plan).map((row) => `• ${row.text}`).join('\n');
-    warning += plan.actionable ? `Scheduled changes:\n${changes}\n\n` : 'No changes are currently expected.\n\n';
-    if (testMode()) {
-      warning += 'Test mode is on, so this changes nothing: it reports exactly what it would '
-        + 'have done and writes neither to your files nor to Sonarr.';
-    } else {
-      warning += 'This deletes episode files through Sonarr and cannot be undone from here.';
-    }
-    if (!window.confirm(warning)) return;
-    const data = await api('run', {}, 'Running…');
-    await refresh();
-    showResult(data.result, 'Run');
-  }));
 
   // -- series ------------------------------------------------------------
 
@@ -1265,6 +1091,7 @@ function start(root) {
   checks.wire();
   alerts.wire();
   navigation.wire();
+  topbar.wire();
 
   // Whatever happens, the page must end up interactive with a readable message.
   refresh().catch((error) => {
