@@ -10,18 +10,19 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5, 6, 7 and 8
+Branch `master` as of 2026-09-11. Phases S, 2, 3, 4, 5, 6, 7 and 8
 are landed. **Phase 6 is complete**: `changeList` moved into `changes.js` long ago,
 phase 8 took the editor state that stood in its way, and the alerts cluster,
 navigation and the top bar have now been cut into `alerts.js`, `navigation.js` and
 `topbar.js`. See "Phase plan and gates", and read the phase-6 entry for how the three
 cuts were sequenced. Since then `storage.js`, `presets.js` and `connections.js`
-have been taken out too — the first cuts belonging to no numbered phase. **The
-library is all that is left.**
+have been taken out too — the first cuts belonging to no numbered phase. The
+independent theme control has since moved into `topbar.js`; **the library is all
+that is left.**
 
 ```text
 src/assets/
-  app.js            898 lines — entry, seventeen imports, everything not yet extracted
+  app.js            875 lines — entry, seventeen imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   storage.js        remember, remembered — the per-browser preferences, wrapped
@@ -50,10 +51,11 @@ src/assets/
   navigation.js     createNavigation — which view is on screen, which sidebar
                     section is open, and the library's three-views-one-panel
                     filter; imports $, guarded, remember/remembered
-  topbar.js         createTopBar — the age of the reading, the changes menu, the
+  topbar.js         createTopBar — the age of the reading, the changes menu, theme,
                     sidebar counts, the Run button's three states and the one
                     overview of everything wrong; imports $/el, ago/plural,
-                    changeSummary/changeList, dialog/guarded/notice
+                    changeSummary/changeList, dialog/guarded/notice,
+                    remember/remembered
   presets.js        createPresets — the preset list and its editor, plus the two
                     keep-window helpers the series editor borrows
                     (conditionFields, presetSummary); imports $/el/field/options,
@@ -677,16 +679,26 @@ invalidates every series list read from the old one. It leaves as
 `forgetSeriesCache()`, a named intent, rather than as a binding the module could
 reassign. That is the `applySaved` pattern applied to a cache.
 
-The library is the last hard cut, and phase 6
-left two notes for whoever takes it: `renderCounts` sits in `topbar.js` but reads
+Theme was measured separately before the library cut. It has no call edge to the
+catalogue, cards or layout, and its control lives in the top bar, so its 23 lines
+moved into `topbar.js`; exact reconstruction was 23/23. Initialization and the
+listener moved into `wire()` to retain import purity, and the host gate stayed
+green. Keeping it in `library.js` would have made a global control depend on the
+catalogue for no reason; making a separate module would have created a factory
+for one control and no independent lifecycle.
+
+The library is the last hard cut, and phase 6 left two notes for whoever takes it:
+`renderCounts` sits in `topbar.js` but reads
 `library`, `ruleFor` and `seriesAlertList`, and `syncedAgo` is exported from
 `topbar.js` for exactly one caller, `alertBadge`. Both edges are honest today and
-both may want to move when the library goes.
+will stay brokered by the entry when the library moves.
 
-The "series" section is four groups, not one, and the module count should follow
-the call graph rather than the name: the library proper, the cards, the display
-preferences (`layout`/`theme`/`scale`, scattered rather than contiguous) and a
-handful of small shared helpers.
+The remaining "series" section was measured as the library proper, cards,
+layout/scale preferences and a handful of small helpers. They form one closure:
+splitting cards or display preferences would pass library redraws, editor actions,
+alert actions and layout state across sibling boundaries without creating an
+independent responsibility. They therefore leave as one `library.js`, even though
+the resulting module will remain comparatively large.
 
 Take the next cut the way phases 4, 5, 6, 7 and 8 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,

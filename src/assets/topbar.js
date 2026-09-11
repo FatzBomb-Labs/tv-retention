@@ -2,6 +2,7 @@ import { $, el } from './dom.js';
 import { ago, plural } from './format.js';
 import { changeSummary, changeList } from './changes.js';
 import { dialog, guarded, notice } from './feedback.js';
+import { remember, remembered } from './storage.js';
 
 // The top bar and the sidebar counts: one number that opens what it counts, the age of
 // the reading everything else is answered from, the Run button and its three states, and
@@ -21,6 +22,25 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
                                refresh, render, showResult, testMode, ruleFor, isBlocked,
                                worstSeverity, seriesAlertList, seriesAlertCard,
                                systemAlertCard }) {
+  // Three states, because "follow the system" is a real answer rather than the absence of
+  // one — and the two explicit ones have to win in both directions, or somebody on a dark
+  // desktop can never choose light. The attribute goes on <html>: the body's background is
+  // painted from the same tokens, and it is outside this element.
+  const THEMES = [
+    ['auto', 'fa-adjust', 'Theme: follows your system. Click for light.'],
+    ['light', 'fa-sun-o', 'Theme: light. Click for dark.'],
+    ['dark', 'fa-moon-o', 'Theme: dark. Click to follow your system.'],
+  ];
+  function applyTheme(name) {
+    const [chosen, icon, title] = THEMES.find(([value]) => value === name) || THEMES[0];
+    if (chosen === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = chosen;
+    const button = $('tvr-theme');
+    button.replaceChildren(el('i', { className: `fa ${icon}` }));
+    button.title = title;
+    remember('theme', chosen);
+  }
+
   // Everything on screen is answered from one reading, so its age is said once, here,
   // rather than repeated against every series.
   function syncedAgo() {
@@ -172,6 +192,12 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
   // Every one of these binds to a node `interface.html` already holds, so none of them can
   // run at import and none belong in the factory body. The entry calls this at start-up.
   function wire() {
+    applyTheme(remembered('theme', 'auto'));
+    $('tvr-theme').addEventListener('click', () => {
+      const at = THEMES.findIndex(([value]) => value === remembered('theme', 'auto'));
+      applyTheme(THEMES[(at + 1) % THEMES.length][0]);
+    });
+
     $('tvr-changes-button').addEventListener('click', (event) => {
       event.stopPropagation();
       const menu = $('tvr-changes-menu');
