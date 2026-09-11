@@ -8,11 +8,16 @@
  * results are shown at once and refreshed in the background, per series. And Preview is a
  * mode, not a button: when it is on, every action reports and changes nothing.
  */
-(function () {
-  'use strict';
 
-  const root = document.getElementById('tv-retention');
-  if (!root) return;
+/* The entry module. It is loaded as type="module" from the release namespace, so the
+ * graph behind it is one version of the interface. Module evaluation defines things and
+ * nothing else — no DOM, timers, storage or network until start() runs — because
+ * imports evaluate before this body could guard any of it. The root lookup at the
+ * bottom is the one exception, and it belongs to this file alone.
+ */
+'use strict';
+
+function start(root) {
   const API = root.dataset.api;
   const CSRF = root.dataset.csrf;
 
@@ -3483,4 +3488,9 @@
   });
   window.addEventListener('error', () => { busyDepth = 0; $('tvr-busy').hidden = true; });
   window.addEventListener('unhandledrejection', () => { busyDepth = 0; $('tvr-busy').hidden = true; });
-})();
+}
+
+// The entry point: find the page this module belongs to, and only then run it. On any
+// other page — or under a test harness with no page at all — importing stays silent.
+const root = document.getElementById('tv-retention');
+if (root) start(root);

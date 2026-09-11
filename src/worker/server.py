@@ -18,7 +18,6 @@ import hashlib
 import hmac
 import http.cookies
 import json
-import mimetypes
 import os
 import secrets
 import threading
@@ -130,36 +129,78 @@ def credentials_match(username: str, password: str) -> bool:
 
 # -- the page ---------------------------------------------------------------
 
-def asset_key() -> str:
-    """A cache key over both assets, hashed together.
+# What ships: the interface's own scripts, styles and icons, and nothing else. A file of
+# any other type in this directory is not part of the release — it neither moves the
+# digest nor gets served — so a stray backup or notes file cannot become fetchable just
+# by sitting next to the real assets. The MIME types are pinned rather than guessed from
+# the system's tables, because a module script is only executed for a JavaScript MIME
+# type and `nosniff` never comes off.
+PUBLIC_ASSETS = {
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+}
 
-    Joining two digests and truncating takes every character from the first, which is how
-    four stylesheet-only releases shipped under the key the browser already held.
+
+def build_release(directory: Path = ASSETS) -> tuple[str, dict]:
+    """The one release every page and asset request agrees on, fixed at startup.
+
+    A single digest over the whole shipped set, each name hashed with its bytes, fed in
+    sorted order so the digest is a fact about the directory rather than about the order
+    the OS listed it in. It replaces a key that joined two per-file digests and truncated,
+    which takes every character from the first — four stylesheet-only releases shipped
+    under the key the browser already held — and it now covers the icons too, which never
+    moved the old key at all.
+
+    The graph has to move as one version: the page's script tag carries the digest, and
+    a static import resolves against the URL of the file importing it, so nothing in the
+    graph can reach outside the release it started from. That is also why the snapshot
+    never reads the disk again: a browser holding half of an older graph must be refused
+    the other half, not handed current bytes under a stale name.
     """
+    files = {}
     digest = hashlib.sha256()
-    for name in ('app.js', 'app.css', 'icons.css'):
-        with open(ASSETS / name, 'rb') as handle:
-            digest.update(handle.read())
-    return digest.hexdigest()[:12]
+    for path in sorted(directory.iterdir(), key=lambda item: item.name):
+        kind = PUBLIC_ASSETS.get(path.suffix.lower())
+        if kind is None or not path.is_file():
+            continue
+        data = path.read_bytes()
+        files[path.name] = (data, kind)
+        digest.update(path.name.encode('utf-8'))
+        digest.update(b'\0')
+        digest.update(data)
+        digest.update(b'\0')
+    return digest.hexdigest()[:12], files
+
+
+RELEASE_DIGEST, RELEASE_FILES = build_release()
+RELEASE_BASE = f'/assets/{RELEASE_DIGEST}'
 
 
 def index_page(csrf: str) -> bytes:
-    key = asset_key()
+    """The whole interface, addressed by release.
+
+    The page itself is no-store, so what it references is always the current release;
+    the assets it names are immutable, because their URL is their content. And the
+    script is a module, so its imports resolve inside the same namespace — which is
+    what keeps the graph on one version without rewriting anything.
+    """
+    markup = MARKUP.read_text(encoding='utf-8').replace('__ASSETS__', RELEASE_BASE)
     return (f'''<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TV Retention</title>
-<link rel="icon" href="/assets/icon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="/assets/icon-16.png" sizes="16x16" type="image/png">
-<link rel="apple-touch-icon" href="/assets/icon-180.png">
-<link rel="stylesheet" href="/assets/icons.css?v={key}">
-<link rel="stylesheet" href="/assets/app.css?v={key}">
+<link rel="icon" href="{RELEASE_BASE}/icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="{RELEASE_BASE}/icon-16.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="{RELEASE_BASE}/icon-180.png">
+<link rel="stylesheet" href="{RELEASE_BASE}/icons.css">
+<link rel="stylesheet" href="{RELEASE_BASE}/app.css">
 </head><body>
 <div id="tv-retention" data-csrf="{csrf}" data-api="/api">
-{MARKUP.read_text(encoding='utf-8')}
+{markup}
 </div>
-<script src="/assets/app.js?v={key}"></script>
+<script type="module" src="{RELEASE_BASE}/app.js"></script>
 </body></html>''').encode('utf-8')
 
 
@@ -167,7 +208,7 @@ LOGIN_PAGE = '''<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TV Retention</title>
-<link rel="icon" href="/assets/icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="__ASSETS__/icon-32.png" sizes="32x32" type="image/png">
 <style>
   :root { color-scheme: dark light; }
   body { margin: 0; min-height: 100vh; display: grid; place-items: center;
@@ -190,6 +231,12 @@ LOGIN_PAGE = '''<!doctype html>
   <p>__ERROR__</p>
 </form>
 </body></html>'''
+
+
+def login_page(error: str) -> bytes:
+    return (LOGIN_PAGE
+            .replace('__ERROR__', error)
+            .replace('__ASSETS__', RELEASE_BASE)).encode('utf-8')
 
 
 # -- the poster proxy -------------------------------------------------------
@@ -312,8 +359,8 @@ class Handler(BaseHTTPRequestHandler):
         if route == '/login':
             if session:
                 return self.redirect('/')
-            return self.send(200, LOGIN_PAGE.replace('__ERROR__', '').encode('utf-8'),
-                             'text/html; charset=utf-8', [('Cache-Control', 'no-store')])
+            return self.send(200, login_page(''), 'text/html; charset=utf-8',
+                             [('Cache-Control', 'no-store')])
 
         if not session:
             return self.redirect('/login')
@@ -350,16 +397,34 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(404, b'Not found', 'text/plain; charset=utf-8')
 
     def serve_asset(self, name: str):
-        # No traversal: one flat directory, and the name may not describe a path at all.
-        if '/' in name or '\\' in name or name.startswith('.'):
-            return self.send(404, b'Not found', 'text/plain; charset=utf-8')
-        path = ASSETS / name
-        if not path.is_file():
-            return self.send(404, b'Not found', 'text/plain; charset=utf-8')
-        kind = mimetypes.guess_type(name)[0] or 'application/octet-stream'
-        # Addressed with a content hash, so a change is a different URL.
-        self.send(200, path.read_bytes(), kind,
-                  [('Cache-Control', 'public, max-age=604800')])
+        """The release namespace first, then the flat names that predate it.
+
+        Every lookup goes through the startup snapshot, so membership in it is the
+        traversal guard: no path, backslash or dot-prefixed string can be a key. The
+        digest is compared for equality rather than pattern-matched, which pins its
+        shape along with its value — anything but this exact release is refused.
+        """
+        digest, separator, filename = name.partition('/')
+        if separator:
+            if digest != RELEASE_DIGEST or filename not in RELEASE_FILES:
+                # A digest the server does not hold must fail rather than serve the
+                # current release: the caller is a browser holding part of an older
+                # module graph, and completing it from a newer one would run a mixed
+                # version. Not cacheable either, so the failure is not remembered.
+                return self.send(404, b'Not found', 'text/plain; charset=utf-8',
+                                 [('Cache-Control', 'no-store')])
+            data, kind = RELEASE_FILES[filename]
+            # The URL is the content, so it may be kept as long as the browser likes.
+            return self.send(200, data, kind,
+                             [('Cache-Control', 'public, max-age=31536000, immutable')])
+        if name not in RELEASE_FILES:
+            return self.send(404, b'Not found', 'text/plain; charset=utf-8',
+                             [('Cache-Control', 'no-store')])
+        # Flat names, served for whatever still references them. Nothing the interface
+        # loads does: the module graph lives in the namespace above, and the page and
+        # the login screen name the release explicitly.
+        data, kind = RELEASE_FILES[name]
+        self.send(200, data, kind, [('Cache-Control', 'public, max-age=604800')])
 
     def redirect(self, where: str):
         self.send_response(303)
@@ -376,9 +441,8 @@ class Handler(BaseHTTPRequestHandler):
             # giving anyone a way to lock the operator out of their own tool.
             _failures += 1
             time.sleep(min(2.0, 0.25 * _failures))
-            page = LOGIN_PAGE.replace('__ERROR__', 'Wrong username or password.')
-            return self.send(401, page.encode('utf-8'), 'text/html; charset=utf-8',
-                             [('Cache-Control', 'no-store')])
+            return self.send(401, login_page('Wrong username or password.'),
+                             'text/html; charset=utf-8', [('Cache-Control', 'no-store')])
         _failures = 0
         session = open_session()
         cookie = (f'{COOKIE}={session["token"]}; Path=/; HttpOnly; SameSite=Strict; '

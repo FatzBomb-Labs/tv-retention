@@ -5,6 +5,7 @@ authentication and a CSRF token by emhttp and never had to be right about either
 """
 import os
 import unittest
+from pathlib import Path
 
 import context  # noqa: F401
 
@@ -112,20 +113,40 @@ class Assets(unittest.TestCase):
     def setUp(self):
         self.server = load(TVR_AUTH='none')
 
-    def test_the_cache_key_moves_when_either_asset_does(self):
-        # Joining two digests and truncating takes every character from the first, which is
-        # how four stylesheet-only releases shipped under the key the browser already held.
-        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
-        block = source.split('def asset_key()')[1].split('def ')[0]
-        self.assertIn("for name in ('app.js', 'app.css', 'icons.css')", block)
-        self.assertIn('digest.update', block)
-        self.assertEqual(len(self.server.asset_key()), 12)
-
     def test_the_page_carries_the_session_token_and_the_api_path(self):
         page = self.server.index_page('a-token').decode()
         self.assertIn('data-csrf="a-token"', page)
         self.assertIn('data-api="/api"', page)
         self.assertIn('id="tv-retention"', page)
+
+    def test_the_page_addresses_every_asset_by_release(self):
+        """One digest in every URL, so the module graph cannot straddle versions.
+
+        The script is a module and its imports resolve against its own URL, which is
+        why the entry must carry the digest: an unversioned child would let the
+        browser serve a week-old file inside a current graph.
+        """
+        page = self.server.index_page('a-token').decode()
+        base = self.server.RELEASE_BASE
+        for name in ('app.js', 'app.css', 'icons.css',
+                     'icon-16.png', 'icon-32.png', 'icon-180.png'):
+            self.assertIn(f'{base}/{name}', page, f'{name} is not addressed by release')
+        self.assertIn('<script type="module"', page)
+        self.assertIn(f'src="{base}/icon-64.png"', page, 'the markup icon was not rewritten')
+        self.assertNotIn('__ASSETS__', page, 'a placeholder reached the browser')
+        self.assertNotIn('/assets/app.js?', page, 'a query-stringed URL survived')
+
+    def test_the_login_page_is_addressed_by_release_too(self):
+        page = self.server.login_page('').decode()
+        self.assertIn(f'{self.server.RELEASE_BASE}/icon-32.png', page)
+        self.assertNotIn('__ASSETS__', page)
+        self.assertNotIn('__ERROR__', page)
+
+    def test_the_release_covers_the_assets_the_interface_names(self):
+        for name in ('app.js', 'app.css', 'icons.css',
+                     'icon-16.png', 'icon-32.png', 'icon-64.png', 'icon-180.png'):
+            self.assertIn(name, self.server.RELEASE_FILES, f'{name} is not shipped')
+        self.assertRegex(self.server.RELEASE_DIGEST, r'^[0-9a-f]{12}$')
 
     def test_every_icon_the_interface_uses_is_one_we_ship(self):
         """The plugin borrowed Unraid's Font Awesome, which is not ours and is not there.
@@ -142,10 +163,78 @@ class Assets(unittest.TestCase):
         for name in sorted(wanted):
             self.assertIn(f'.fa-{name} {{', icons, f'fa-{name} has no glyph')
 
-    def test_an_asset_name_cannot_describe_a_path(self):
-        source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
-        block = source.split('def serve_asset')[1].split('def ')[0]
-        self.assertIn("'/' in name or '\\\\' in name or name.startswith('.')", block)
+
+class Release(unittest.TestCase):
+    """The digest itself: what moves it, and what is not part of it.
+
+    One digest over the whole shipped set is what makes a release atomic. The old key
+    hashed three named files and joined them, so a stylesheet-only change could move it
+    while an icon change never could — and either way, versioning only the entry script
+    leaves a module graph free to straddle versions.
+    """
+
+    def setUp(self):
+        self.server = load(TVR_AUTH='none')
+
+    def release(self, base):
+        import tempfile
+        directory = Path(base) / 'assets'
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def test_the_digest_moves_when_any_shipped_file_does(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            directory = self.release(base)
+            (directory / 'app.js').write_text('one')
+            (directory / 'app.css').write_text('one')
+            (directory / 'icon-32.png').write_bytes(b'one')
+            digest, files = self.server.build_release(directory)
+            self.assertEqual(sorted(files), ['app.css', 'app.js', 'icon-32.png'])
+            self.assertEqual(self.server.build_release(directory)[0], digest)
+
+            def moved(**edits):
+                for name, content in edits.items():
+                    (directory / name).write_bytes(content)
+                return self.server.build_release(directory)[0] != digest
+
+            self.assertTrue(moved(**{'app.js': b'two'}), 'a script change must move it')
+            self.assertTrue(moved(**{'app.css': b'two'}), 'a stylesheet change must move it')
+            self.assertTrue(moved(**{'icon-32.png': b'two'}),
+                            'an icon change must move it — PNGs never moved the old key')
+
+    def test_adding_or_removing_a_shipped_file_moves_the_digest(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            directory = self.release(base)
+            (directory / 'app.js').write_text('one')
+            digest = self.server.build_release(directory)[0]
+            (directory / 'dom.js').write_text('new module')
+            self.assertNotEqual(self.server.build_release(directory)[0], digest)
+            (directory / 'dom.js').unlink()
+            self.assertEqual(self.server.build_release(directory)[0], digest)
+
+    def test_a_file_of_an_unsupported_type_is_not_part_of_the_release(self):
+        """A stray backup or notes file must not become fetchable, nor move the digest.
+
+        The release is an allowlist, not a directory listing: the interface ships
+        scripts, styles and icons, and nothing else is public whatever it is named.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            directory = self.release(base)
+            (directory / 'app.js').write_text('one')
+            (directory / 'notes.txt').write_text('stray')
+            (directory / 'app.js~').write_text('backup')
+            (directory / 'icon.svg').write_text('<svg/>')
+            digest, files = self.server.build_release(directory)
+            self.assertEqual(sorted(files), ['app.js'])
+
+            bare = Path(base) / 'bare'
+            bare.mkdir()
+            (bare / 'app.js').write_text('one')
+            self.assertEqual(self.server.build_release(bare)[0], digest,
+                             'an unsupported file changed the digest')
 
 
 class Worker(unittest.TestCase):
@@ -167,18 +256,16 @@ if __name__ == '__main__':
     unittest.main()
 
 
-class KeepAlive(unittest.TestCase):
-    """Two requests down one connection, where the first one is rejected.
+class Serves(unittest.TestCase):
+    """A real socket, because the faults worth proving here live on one.
 
-    A string-matching test would not have found this. It needs a real socket, because the
-    fault is entirely in what is left in it.
+    A string match proves what the source says; a request proves what the server does.
     """
 
-    def setUp(self):
+    def start_http(self, module):
         import threading
         from http.server import ThreadingHTTPServer
-        self.server_module = load(TVR_USERNAME='someone', TVR_PASSWORD='a-long-enough-password')
-        self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), self.server_module.Handler)
+        self.httpd = ThreadingHTTPServer(('127.0.0.1', 0), module.Handler)
         self.httpd.daemon_threads = True
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.port = self.httpd.server_address[1]
@@ -186,6 +273,29 @@ class KeepAlive(unittest.TestCase):
     def tearDown(self):
         self.httpd.shutdown()
         self.httpd.server_close()
+
+    def get(self, path):
+        """One GET, answered whole: status line, headers and body.
+
+        `Connection: close` ends the stream, so nothing depends on reading the exact
+        number of bytes the response promised.
+        """
+        import socket
+        with socket.create_connection(('127.0.0.1', self.port), timeout=5) as sock:
+            sock.sendall(f'GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'.encode())
+            raw = b''
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                raw += chunk
+        head, _, body = raw.partition(b'\r\n\r\n')
+        lines = head.decode('utf-8', 'replace').split('\r\n')
+        headers = {}
+        for line in lines[1:]:
+            name, _, value = line.partition(':')
+            headers[name.strip().lower()] = value.strip()
+        return lines[0], headers, body
 
     def post(self, sock, reader, body):
         """One request, and exactly one response read back off the stream.
@@ -207,6 +317,114 @@ class KeepAlive(unittest.TestCase):
             if name.strip().lower() == 'content-length':
                 length = int(value.strip())
         return status, reader.read(length).decode('utf-8', 'replace')
+
+
+class ReleaseRoutes(Serves):
+    """What the wire says about the release namespace.
+
+    These are behavioural because the guarantee is behavioural: a module graph is
+    served one version or it is refused, and only the response headers can prove
+    which of those a browser would see.
+    """
+
+    def setUp(self):
+        self.server = load(TVR_AUTH='none')
+        self.start_http(self.server)
+
+    def test_a_namespaced_asset_is_served_immutable(self):
+        digest = self.server.RELEASE_DIGEST
+        for name, kind in (('app.js', 'text/javascript'), ('app.css', 'text/css'),
+                           ('icons.css', 'text/css'), ('icon-32.png', 'image/png')):
+            status, headers, body = self.get(f'/assets/{digest}/{name}')
+            self.assertIn('200', status, name)
+            self.assertEqual(body, self.server.RELEASE_FILES[name][0], name)
+            # A module script under nosniff is executed only for a JavaScript MIME
+            # type, so the type is pinned rather than asked of the system's tables.
+            self.assertEqual(headers['content-type'], kind, name)
+            self.assertEqual(headers['cache-control'], 'public, max-age=31536000, immutable', name)
+
+    def test_a_digest_the_server_does_not_hold_is_refused(self):
+        """A browser holding half an old graph must not be handed the current release.
+
+        Serving current bytes under a stale name would complete the graph from a newer
+        version and run the mixture. Refusing fails safe: the page reports the error,
+        and a reload picks up the new release whole — and the refusal is no-store, so
+        it is not what gets remembered.
+        """
+        first = self.server.RELEASE_DIGEST[0]
+        stale = ('0' if first != '0' else '1') + self.server.RELEASE_DIGEST[1:]
+        status, headers, body = self.get(f'/assets/{stale}/app.js')
+        self.assertIn('404', status)
+        self.assertEqual(headers.get('cache-control'), 'no-store')
+        self.assertNotIn('location', headers, 'a stale digest must not redirect')
+        self.assertEqual(body, b'Not found')
+
+    def test_a_name_the_release_does_not_hold_is_refused(self):
+        """Membership in the startup snapshot is the traversal guard.
+
+        Nothing containing a separator, a dot prefix or an unsupported type can be a
+        key in it, so each of these must fall at the same wall.
+        """
+        digest = self.server.RELEASE_DIGEST
+        for path in (f'/assets/{digest}/nope.js',        # unknown file
+                     f'/assets/{digest}/app.js/x',       # a path, not a name
+                     f'/assets/{digest}/../app.js',      # traversal
+                     f'/assets/{digest}/..%5capp.js',    # encoded traversal
+                     '/assets/.hidden',                  # dot-prefixed, flat
+                     '/assets/app.js~',                  # unsupported type, flat
+                     '/assets/'):                        # nothing at all
+            status, headers, _ = self.get(path)
+            self.assertIn('404', status, path)
+            self.assertEqual(headers.get('cache-control'), 'no-store', path)
+
+    def test_flat_asset_names_still_serve_for_compatibility(self):
+        """The names the page used before the namespace, for whatever still holds them.
+
+        Nothing the interface loads references them: the module graph lives in the
+        namespace, and the page and login name the release explicitly.
+        """
+        status, headers, body = self.get('/assets/app.js')
+        self.assertIn('200', status)
+        self.assertEqual(body, self.server.RELEASE_FILES['app.js'][0])
+        self.assertEqual(headers['cache-control'], 'public, max-age=604800')
+        self.assertNotIn('immutable', headers['cache-control'])
+
+    def test_served_bytes_come_from_the_startup_snapshot_not_the_disk(self):
+        """A digest already handed out keeps meaning the bytes it was computed from.
+
+        The files are baked into the image, so disk and snapshot cannot drift in
+        production — this guards the design anyway, because the failure mode is the
+        bad one: a half-old module graph assembled from a disk that moved.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            directory = Path(base) / 'assets'
+            directory.mkdir()
+            (directory / 'app.js').write_bytes(b'console.log(1)\n')
+            digest, files = self.server.build_release(directory)
+            self.server.RELEASE_DIGEST, self.server.RELEASE_FILES = digest, files
+            status, _, body = self.get(f'/assets/{digest}/app.js')
+            self.assertIn('200', status)
+            self.assertEqual(body, b'console.log(1)\n')
+
+            (directory / 'app.js').write_bytes(b'console.log(2)\n')
+            status, _, body = self.get(f'/assets/{digest}/app.js')
+            self.assertIn('200', status)
+            self.assertEqual(body, b'console.log(1)\n', 'the disk moved under a live digest')
+            self.assertNotEqual(self.server.build_release(directory)[0], digest,
+                                'a rebuilt release did not notice the change')
+
+
+class KeepAlive(Serves):
+    """Two requests down one connection, where the first one is rejected.
+
+    A string-matching test would not have found this. It needs a real socket, because the
+    fault is entirely in what is left in it.
+    """
+
+    def setUp(self):
+        self.server_module = load(TVR_USERNAME='someone', TVR_PASSWORD='a-long-enough-password')
+        self.start_http(self.server_module)
 
     def test_a_rejected_request_does_not_poison_the_next_one(self):
         """The body of a 401 stayed in the socket and became the next request line.

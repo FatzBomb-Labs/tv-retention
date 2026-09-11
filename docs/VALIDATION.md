@@ -1,7 +1,7 @@
 # Validation record
 
-Last run: 2026-09-09, from the Webtop development container against FatzServer
-(Unraid 7.3.2, Python 3.11.15, PHP 8).
+Last run: 2026-09-10, from the Webtop development container against FatzServer
+(Unraid 7.3.2, Python 3.11.15, Node 22.18.0).
 
 ## Automated
 
@@ -10,9 +10,10 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 386 tests, all pass |
+| `python3 -m unittest discover -s tests` | 482 tests, all pass |
 | Worker imports | every module loads, server.py included |
-| `node --check src/assets/app.js` | no syntax errors |
+| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules |
+| `node --test tests/frontend/*.test.js` | 9 tests, all pass — the 8 runtime flows plus module-import purity |
 | `docker build` | 122 MB image |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; `snapshot` answers with settings migrated v7 to v8; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
@@ -35,7 +36,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 | `test_progress.py` | 12 | The progress marker, the banner over it, and what the header totals |
 | `test_sonarr.py` | 9 | Rule-to-series matching, and ambiguity refused rather than guessed |
 | `test_unaired.py` | 9 | Unaired seasons, and the next episode due |
-| `test_server.py` | 14 | What the front door refuses, guards and lets through |
+| `test_server.py` | 26 | What the front door refuses, guards and lets through — and the release namespace on the wire |
 
 `test_build.py` is the largest because the interface is checked statically: it is the file
 with no runtime under test, so the guards that would otherwise be a browser sit here.
@@ -82,6 +83,9 @@ Against the running `Sonarr-Series` container, from a `/tmp` staging directory w
 
 ## Not yet exercised
 
+- **The module delivery in a real browser.** The release namespace, the module script
+  tag and import purity are validated over a real socket and real Node imports; no
+  browser session against a built image has been run for this change.
 - **A live deletion.** Test Mode has never been turned off on this server, and no version of this — plugin or container — has ever removed a file. See
   [ACCEPTANCE.md](ACCEPTANCE.md).
 - **A live monitoring write.** The selection has been exercised; Sonarr's `PUT` has not.

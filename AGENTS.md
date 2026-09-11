@@ -11,8 +11,8 @@ throughout would churn the file that records why they exist.
 
 There is no Python in the Webtop development container. Run `./tools/check-on-host.sh`,
 which stages the source under `/tmp` on FatzServer, runs `python3 -m unittest discover -s
-tests`, imports every worker module, and syntax-checks `app.js`. The suite is 450 tests
-with no expected failures.
+tests`, imports every worker module, and syntax-checks every shipped module. The suite is
+482 Python tests plus 9 frontend runtime tests, with no expected failures.
 
 To see it actually running, build the image on the host and point it at a *copy* of the
 settings with the schedule forced off. Never the original, and never a container that could
@@ -126,6 +126,16 @@ fact that there is currently nothing to audit but the interpreter.
   changes. `announce_alerts` decides that by key; the summary it replaced was re-sent by
   every sweep for as long as the problem stayed true, which teaches people to ignore the
   notification that matters.
+- Assets ship under a release namespace: `/assets/<digest>/<file>`, the digest computed
+  at startup over every allowlisted file's name and bytes, and served only from that
+  in-memory snapshot. Only `.js`, `.css` and `.png` are public assets — anything else in
+  the directory is neither digested nor served. A static import resolves within the same
+  digest at every depth, so a module graph cannot straddle versions; a digest the server
+  does not hold is refused non-cacheably rather than served from the current release.
+- Every module but the entry is side-effect-free at import: definitions, no DOM, timers,
+  storage or network. Imports evaluate before the entry body can guard anything, so
+  `app.js` alone may look up `#tv-retention` while importing, and the purity test
+  enforces that exception file by file.
 
 ## The WebGUI's cascade
 
@@ -139,11 +149,15 @@ arrived that way, and is now reset explicitly in `#tv-retention button` and the 
 default not named in this file is in force. Tests guard the resets, because dropping one
 produces no error, only air.
 
-`TVRetention.page` hashes `app.js` and `app.css` **together** for the asset cache key.
-Joining the two digests and truncating takes every character from the first, so the key
-followed the script and ignored the stylesheet: four consecutive CSS-only releases shipped
-under the key the browser already held, and the page came back new styled by the file it
-had replaced.
+Assets are served from a release namespace — `/assets/<digest>/<file>` — one digest
+computed at startup over every shipped file's name and bytes, hashed together. The
+plugin's first cache key joined two per-file digests and truncated, which takes every
+character from the first: the key followed the script and ignored the stylesheet, and
+four consecutive CSS-only releases shipped under the key the browser already held. The
+namespace also keeps a module graph on one version: the page's script tag carries the
+digest, a static import resolves within it at every depth, a digest the server does not
+hold is refused rather than served from the current release, and namespaced responses
+are immutable.
 
 ## Planned work
 

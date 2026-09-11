@@ -16,9 +16,15 @@ python3 -m unittest discover -s tests -v
 python3 -c "import sys; sys.path.insert(0, \"src/worker\"); import main, actions, server" \
   && echo "worker imports OK"
 if command -v node >/dev/null; then
-  node --check src/assets/app.js && echo "app.js syntax OK"
+  # Every shipped module, checked as an ES module: `--input-type` governs stdin, and a
+  # bare `node --check file.js` would parse with script goal, where import/export is a
+  # syntax error and a file without them says nothing about module semantics.
+  for script in src/assets/*.js; do
+    node --input-type=module --check < "$script" || { echo "syntax check failed: $script" >&2; exit 1; }
+  done
+  echo "module syntax OK"
   node --test tests/frontend/*.test.js && echo "frontend runtime tests OK"
 else
-  echo "node not present; app.js not syntax checked, frontend runtime tests not run"
+  echo "node not present; modules not syntax checked, frontend runtime tests not run"
 fi
 '
