@@ -180,6 +180,7 @@ the last 180 days **and** the 20 newest episodes, whichever is more generous.
 
 An ended, disabled series can arm **Auto re-enable**. The next catalogue sync re-enables
 it once if Sonarr changes the series back to continuing or reports a newly added episode.
+A new special counts only when that series' effective **Include specials** setting is on.
 
 ### Choosing a show
 

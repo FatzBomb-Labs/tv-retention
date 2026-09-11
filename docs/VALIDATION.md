@@ -11,11 +11,11 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 502 tests, all pass |
+| `python3 -m unittest discover -s tests` | 507 tests, all pass |
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — nineteen files now: the entry plus `format`, `dom`, `storage`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`, `connections`, `library` |
 | `node --test tests/frontend/*.test.js` | 13 tests, all pass — 8 runtime flows, 4 settings-contract tests, plus module-import purity |
-| `docker build` | 128 MB image — built 2026-09-11 from the v0.3.0 build 2 release |
+| `docker build` | 128 MB image — built 2026-09-11 from the v0.3.0 build 3 release |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; the deployed copy migrated settings v10 to v11; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
 ### Coverage by area
@@ -24,7 +24,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 |---|---|---|
 | `test_build.py` | 150 | The interface, checked statically |
 | `test_monitoring.py` | 34 | The two modes, the keep frame, and what each one asks Sonarr to do |
-| `test_freshness.py` | 37 | Reading ages, staleness, what may be shown as current |
+| `test_freshness.py` | 42 | Reading ages, staleness, what may be shown as current |
 | `test_migration.py` | 36 | Settings v1 → v11, each step and the whole chain |
 | `test_schedules.py` | 26 | When a job is due, including what cron cannot express |
 | `test_retention.py` | 45 | Every condition, every keep mode, air-date precedence, the guards |

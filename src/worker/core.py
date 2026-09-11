@@ -427,6 +427,14 @@ def effective_rule(rule: dict, profiles) -> dict:
 
 
 # What a queued removal asks Sonarr to do on its way out. The plugin never deletes a
+def specials_included(settings: dict, rule: dict) -> bool:
+    """Resolve the per-series specials choice against the global safety default."""
+    override = rule.get('include_specials')
+    automation = settings.get('automation') or DEFAULTS['automation']
+    return bool(override) if override is not None \
+        else not bool(automation.get('exclude_specials'))
+
+
 # series itself: options five and six ask Sonarr to, so its bookkeeping and its recycle
 # bin apply. Everything the plugin removes on its own is still individual episode files.
 REMOVAL_ACTIONS = {
@@ -652,8 +660,7 @@ def excluded_causes(episodes, rule, settings) -> dict:
     whole_seasons = {season for season, episode in manual if episode is None}
     # The series' own answer first, then the global one. A series that says "include
     # specials" is opting out of the safety, which is what that setting has always meant.
-    override = rule.get('include_specials')
-    specials = (not override) if override is not None else bool(automation.get('exclude_specials'))
+    specials = not specials_included(settings, rule)
 
     found = {}
     for episode in episodes:

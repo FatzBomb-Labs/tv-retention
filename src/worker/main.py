@@ -28,7 +28,7 @@ sys.path.insert(0, str(HERE))
 from core import (DEFAULTS, MONITORING_MODES, keep_frame, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
                   canonical_json, classify_monitoring, describe_lifecycle, describe_selectability,
                   effective_rule, evaluate, interpolate_air_dates, new_id, normalise, redact,
-                  rule_fingerprint, validate_settings)
+                  rule_fingerprint, specials_included, validate_settings)
 import alerts
 from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
@@ -718,6 +718,20 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     return episodes, series, store_episodes(settings, rule, episodes, series), False
 
 
+def relevant_episode_count(series: dict, include_specials: bool):
+    """Count episodes that can affect this rule, or decline an ambiguous comparison."""
+    total = int(series.get('total_episode_count') or 0)
+    seasons = series.get('seasons')
+    if not isinstance(seasons, list) or not seasons:
+        return None
+    season_counts = [(int(season.get('season') or 0), int(season.get('episodes') or 0))
+                     for season in seasons]
+    if sum(count for _, count in season_counts) != total:
+        return None
+    return total if include_specials \
+        else sum(count for number, count in season_counts if number != 0)
+
+
 def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
     """Re-enable armed, disabled rules when an ended series becomes active again."""
     changed = []
@@ -730,8 +744,11 @@ def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
         if not was or not series:
             continue
         resumed = bool(was.get('ended')) and not bool(series.get('ended'))
-        new_episode = bool(was.get('ended')) and int(series.get('total_episode_count') or 0) > \
-            int(was.get('total_episode_count') or 0)
+        include_specials = specials_included(settings, rule)
+        old_count = relevant_episode_count(was, include_specials)
+        new_count = relevant_episode_count(series, include_specials)
+        new_episode = bool(was.get('ended')) and old_count is not None \
+            and new_count is not None and new_count > old_count
         if not resumed and not new_episode:
             continue
         rule['enabled'] = True

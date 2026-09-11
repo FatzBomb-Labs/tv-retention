@@ -353,10 +353,13 @@ class Sync(unittest.TestCase):
         self.assertEqual(main.sync_from_sonarr(self.settings)['episodes_changed'], ['A'])
 
     def test_a_sync_reenables_an_armed_ended_series_when_an_episode_appears(self):
-        self.library[0].update(ended=True, status='ended')
+        self.library[0].update(
+            ended=True, status='ended', total_episode_count=5,
+            seasons=[{'season': 1, 'episodes': 5}])
         self.rule.update(enabled=False, auto_reenable=True)
         main.sync_from_sonarr(self.settings)
         self.library[0]['total_episode_count'] = 6
+        self.library[0]['seasons'][0]['episodes'] = 6
         report = main.sync_from_sonarr(self.settings)
         self.assertEqual(report['series_reenabled'], ['A'])
         self.assertTrue(self.rule['enabled'])
@@ -453,9 +456,13 @@ class AutoReenable(unittest.TestCase):
     def setUp(self):
         self.rule = {'id': 'r1', 'instance_id': 'i1', 'series_id': 1,
                      'series_title': 'Returning', 'path': '/tv/Returning',
-                     'enabled': False, 'auto_reenable': True, 'match_status': 'matched'}
-        self.settings = {'rules': [self.rule]}
-        self.before = {('i1', 1): {'ended': True, 'total_episode_count': 20}}
+                     'enabled': False, 'auto_reenable': True, 'match_status': 'matched',
+                     'include_specials': None}
+        self.settings = {'rules': [self.rule], 'automation': {'exclude_specials': True}}
+        self.before = {('i1', 1): {
+            'ended': True, 'total_episode_count': 20,
+            'seasons': [{'season': 0, 'episodes': 2}, {'season': 1, 'episodes': 18}],
+        }}
 
     def test_a_resumed_series_is_reenabled_once(self):
         changed = main.reenable_returning_rules(
@@ -468,9 +475,69 @@ class AutoReenable(unittest.TestCase):
     def test_a_new_episode_reenables_even_before_sonarr_changes_the_status(self):
         changed = main.reenable_returning_rules(
             self.settings, self.before,
-            {('i1', 1): {'title': 'Returning', 'ended': True, 'total_episode_count': 21}})
+            {('i1', 1): {
+                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
+                'seasons': [{'season': 0, 'episodes': 2}, {'season': 1, 'episodes': 19}],
+            }})
         self.assertEqual(changed, [('Returning', 'a new episode appeared')])
         self.assertTrue(self.rule['enabled'])
+
+    def test_a_new_special_does_not_reenable_when_specials_are_excluded(self):
+        changed = main.reenable_returning_rules(
+            self.settings, self.before,
+            {('i1', 1): {
+                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
+                'seasons': [{'season': 0, 'episodes': 3}, {'season': 1, 'episodes': 18}],
+            }})
+        self.assertEqual(changed, [])
+        self.assertFalse(self.rule['enabled'])
+
+    def test_a_new_special_reenables_when_specials_are_included(self):
+        self.rule['include_specials'] = True
+        changed = main.reenable_returning_rules(
+            self.settings, self.before,
+            {('i1', 1): {
+                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
+                'seasons': [{'season': 0, 'episodes': 3}, {'season': 1, 'episodes': 18}],
+            }})
+        self.assertEqual(changed, [('Returning', 'a new episode appeared')])
+        self.assertTrue(self.rule['enabled'])
+
+    def test_a_rule_can_exclude_specials_when_the_global_default_includes_them(self):
+        self.settings['automation']['exclude_specials'] = False
+        self.rule['include_specials'] = False
+        changed = main.reenable_returning_rules(
+            self.settings, self.before,
+            {('i1', 1): {
+                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
+                'seasons': [{'season': 0, 'episodes': 3}, {'season': 1, 'episodes': 18}],
+            }})
+        self.assertEqual(changed, [])
+        self.assertFalse(self.rule['enabled'])
+
+    def test_an_incomplete_season_breakdown_cannot_look_like_a_new_episode(self):
+        before = {('i1', 1): {'ended': True, 'total_episode_count': 20, 'seasons': []}}
+        changed = main.reenable_returning_rules(
+            self.settings, before,
+            {('i1', 1): {
+                'title': 'Returning', 'ended': True, 'total_episode_count': 20,
+                'seasons': [{'season': 0, 'episodes': 2}, {'season': 1, 'episodes': 18}],
+            }})
+        self.assertEqual(changed, [])
+        self.assertFalse(self.rule['enabled'])
+
+    def test_an_empty_unknown_baseline_cannot_look_like_a_first_episode(self):
+        before = {('i1', 1): {'ended': True, 'total_episode_count': 0, 'seasons': []}}
+        after = {('i1', 1): {
+            'title': 'Returning', 'ended': True, 'total_episode_count': 1,
+            'seasons': [{'season': 1, 'episodes': 1}],
+        }}
+        for include_specials in (False, True):
+            with self.subTest(include_specials=include_specials):
+                self.rule.update(enabled=False, include_specials=include_specials)
+                changed = main.reenable_returning_rules(self.settings, before, after)
+                self.assertEqual(changed, [])
+                self.assertFalse(self.rule['enabled'])
 
     def test_an_unarmed_or_unmatched_rule_stays_disabled(self):
         for field, value in (('auto_reenable', False), ('match_status', 'unmatched')):
