@@ -20,7 +20,7 @@
 import { $, el, text, toggle, field, options } from './dom.js';
 import { bytes, when, plural, ago } from './format.js';
 import { exclusionTree, monitorTree } from './episode-trees.js';
-import { changeSummary, changeLines, changeRows } from './changes.js';
+import { changeSummary, changeLines, changeRows, changeList } from './changes.js';
 import { createApi, resetBusy } from './transport.js';
 import { notice, guarded, dialog } from './feedback.js';
 import { createActivity } from './activity.js';
@@ -532,75 +532,6 @@ function start(root) {
     }, null, 'Close');
   }
   $('tvr-alert-total').addEventListener('click', showEverythingNeedingAttention);
-
-  function changeList(result, title, kind) {
-    const wanted = kind && kind !== 'all' ? kind : null;
-    const shows = (key) => !wanted || wanted === key;
-    dialog(title, (body) => {
-      const rows = result.rules.filter((rule) =>
-        (shows('delete') && rule.deleted.length)
-        || (shows('unmonitor') && (rule.unmonitor_list || []).length)
-        || (shows('monitor') && (rule.monitor_list || []).length));
-      const removals = shows('remove') ? (result.removals || []) : [];
-      if (!rows.length && !removals.length) {
-        body.append(el('p', { textContent: 'Nothing would change.' }));
-        return {};
-      }
-      const totals = { delete: 0, delete_bytes: 0, monitor: 0, unmonitor: 0, newly_scoped: 0,
-                       removals_by_action: {}, actionable: 0 };
-      removals.forEach((record) => {
-        totals.removals_by_action[record.action] = (totals.removals_by_action[record.action] || 0) + 1;
-      });
-      rows.forEach((rule) => {
-        totals.delete += rule.deleted.length;
-        totals.delete_bytes += rule.freed_bytes || 0;
-        totals.monitor += (rule.monitor_list || []).length;
-        totals.unmonitor += (rule.unmonitor_list || []).length;
-        totals.newly_scoped += rule.newly_scoped || 0;
-      });
-      totals.actionable = totals.delete + totals.monitor + totals.unmonitor + removals.length;
-      body.append(el('div', { className: 'tvr-plan-summary' }, [changeLines(totals, null)]));
-
-      // A list of the affected series down the side: the quickest read of who is touched,
-      // and a way to reach one without scrolling past the episodes of everything before it.
-      const view = el('div', { className: 'tvr-change-view' });
-      const side = el('div', { className: 'tvr-change-nav' });
-      const main = el('div', { className: 'tvr-change-main' });
-      const jump = (name, card, count, tone) => {
-        const entry = el('button', { type: 'button', className: `tvr-change-jump ${tone}` }, [
-          el('span', { className: 'tvr-change-jump-name', textContent: name }),
-          el('span', { className: 'tvr-change-jump-count', textContent: String(count) }),
-        ]);
-        entry.addEventListener('click', () => {
-          card.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          [...side.children].forEach((other) => other.classList.toggle('active', other === entry));
-        });
-        side.append(entry);
-      };
-      removals.forEach((record) => {
-        const card = el('div', { className: 'tvr-change-series' }, [
-          el('strong', { textContent: record.series_title }),
-          el('div', { className: 'tvr-changes' }, [
-            el('div', { className: 'tvr-plan delete', textContent: record.label })]),
-        ]);
-        main.append(card);
-        jump(record.series_title, card, 1, (record.action || '').startsWith('delete') ? 'delete' : 'unmonitor');
-      });
-      rows.forEach((rule) => {
-        const card = el('div', { className: 'tvr-change-series' });
-        card.append(el('strong', { textContent: rule.series_title }));
-        card.append(changeRows(rule, shows));
-        main.append(card);
-        jump(rule.series_title, card, card.querySelectorAll('.tvr-change').length,
-             (shows('delete') && rule.deleted.length) ? 'delete'
-             : ((shows('unmonitor') && (rule.unmonitor_list || []).length) ? 'unmonitor' : 'monitor'));
-      });
-      if (removals.length + rows.length < 2) view.classList.add('solo');
-      view.append(side, main);
-      body.append(view);
-      return {};
-    }, null, 'Close');
-  }
 
   // The one control that waits on Sonarr, and it says so. Everything else on this page is
   // answered from the stored reading, which is why nothing else makes you wait.

@@ -11,16 +11,18 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 ## Current state
 
 Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4 and 5 are
-landed: **`activity.js` and `settings.js` are both out, and phase 6 is next.**
-See "Phase plan and gates".
+landed, and phase 6 has **begun**: `changeList` has moved into `changes.js`, but
+the alerts/navigation/topbar split it was meant to precede is still open. See
+"Phase plan and gates", and read the phase-6 entry before cutting anything there.
 
 ```text
 src/assets/
-  app.js            2,505 lines — entry, eight imports, everything not yet extracted
+  app.js            2,436 lines — entry, eight imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
-  changes.js        REMOVAL_SUMMARY, changeSummary, changeLines, changeRows
+  changes.js        REMOVAL_SUMMARY, changeSummary, changeLines, changeRows,
+                    changeList — imports el, bytes/plural, dialog
   transport.js      busy, resetBusy, createApi, TIMEOUTS, DEFAULT_TIMEOUT — imports $
   feedback.js       notice, guarded, dialog — imports $, el
   activity.js       createActivity — stats, run reports, history, live log
@@ -374,6 +376,28 @@ Cross-feature interaction is wired at the composition root, not by importing
    `alerts`.
 6. **Alerts/navigation/topbar:** explicit view transitions, action callbacks and
    confirmation flows; maintain draft-discard and log-start/stop rules.
+   **Partly landed.** `changeList` is out — 69 lines into `changes.js`, verbatim
+   but for the dedent, verified line-for-line against the previous commit. It was
+   the one cut here with *no* entry state at all: it reads only the result it is
+   handed and calls `dialog`, `el`, `changeLines` and `changeRows`, all already
+   imports. Four callers, now on the import.
+
+   The rest of the phase did not survive contact with the call graph, and the
+   numbers are worth keeping so the next attempt starts from them rather than
+   from the sketch. Topbar needs **17** names from outside its range, alerts
+   **15**, navigation **8**. Two of the ties run *between* the three: topbar
+   calls `seriesAlertCard` and `systemAlertCard`, alerts calls `showView`. Since
+   sibling modules cannot import each other here, the entry would have to broker
+   both, which also fixes the order the factories are constructed in — a
+   constraint nothing would state and a later edit would silently break.
+
+   The blocker to settle first: navigation reads `editing`, `forgetDrafts` and
+   `renderDetails`, which are editor state that **phase 8 moves**. Cutting
+   navigation before then binds it to three names that are about to relocate.
+   Either take phase 8's editor state first and navigation second, or accept
+   rebinding them later — but decide it deliberately rather than discovering it
+   mid-cut. The clusters are also not contiguous: navigation and topbar are
+   lines ~288–646, alerts ~1217–1414, with the library and cards in between.
 7. **Checks:** move queue/poll/watch as a unit with tested lifecycle callbacks.
 8. **Series features:** removal UI, then editor and library using the established
    callback boundaries. Preserve scope/save ordering, selection and drafts.
