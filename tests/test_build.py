@@ -349,8 +349,12 @@ class Interface(unittest.TestCase):
         self.assertIn('id="tvr-view-help-about"', self.html)
         self.assertIn("if (section === 'help') { showView('help-about'); return; }", self.js)
         self.assertIn("['Version', snapshot().version || 'unknown']", self.js)
+        self.assertIn("['Build', snapshot().build_number || 'not recorded']", self.js)
         self.assertIn("['Build date', buildDate]", self.js)
-        self.assertIn("'build_date': build_date()", (ROOT / 'src' / 'worker' / 'actions.py').read_text())
+        actions = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
+        self.assertIn("'build_number': package_metadata('BUILD', 'TVR_BUILD_NUMBER')", actions)
+        self.assertIn("'build_date': package_metadata('BUILD_DATE', 'TVR_BUILD_DATE')", actions)
+        self.assertRegex((ROOT / 'BUILD').read_text().strip(), r'^[1-9]\d*$')
 
     def test_the_run_button_hides_only_on_a_complete_answer(self):
         # Hiding it on a stale or partial reading would be a promise the cache cannot keep.

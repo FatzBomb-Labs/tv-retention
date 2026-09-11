@@ -5,7 +5,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # The source arrives on stdin, so the remote script travels as an argument, not a heredoc.
-tar -C "$ROOT" -cf - src tests tools VERSION | ssh "${TVR_HOST:-FatzServer}" '
+tar -C "$ROOT" -cf - src tests tools VERSION BUILD | ssh "${TVR_HOST:-FatzServer}" '
 set -eu
 staging=$(mktemp -d /tmp/tv-retention-dev.XXXXXX)
 trap "rm -rf $staging" EXIT

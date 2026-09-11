@@ -29,14 +29,19 @@ from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, fo
 from tmdb import TMDB, TMDBError
 
 
-def build_date():
-    override = os.environ.get('TVR_BUILD_DATE', '').strip()
+def package_metadata(name, environment):
+    override = os.environ.get(environment, '').strip()
     if override:
         return override
-    try:
-        return (Path(__file__).resolve().parents[1] / 'BUILD_DATE').read_text().strip()
-    except OSError:
-        return ''
+    # In the image metadata sits under /app; in a source checkout it sits at the
+    # repository root. Missing metadata means an unpackaged development run, while any
+    # other read failure is real and should surface.
+    for parent in Path(__file__).resolve().parents[1:3]:
+        try:
+            return (parent / name).read_text().strip()
+        except FileNotFoundError:
+            continue
+    return ''
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +110,8 @@ def action_snapshot(settings, request):
         health = load_health(settings)
     return {
         'version': VERSION,
-        'build_date': build_date(),
+        'build_number': package_metadata('BUILD', 'TVR_BUILD_NUMBER'),
+        'build_date': package_metadata('BUILD_DATE', 'TVR_BUILD_DATE'),
         'settings': redact(settings),
         'runs': list(reversed(state.get('runs', []))),
         'last_run': state.get('last_run'),
@@ -736,4 +742,3 @@ def dispatch(request: dict) -> dict:
     except Exception as error:  # noqa: BLE001 - the UI must never see a traceback
         print(f'tv-retention rpc failure: {error!r}', file=sys.stderr)
         return {'ok': False, 'error': f'Unexpected backend error: {error}'}
-

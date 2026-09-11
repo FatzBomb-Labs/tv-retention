@@ -203,6 +203,11 @@ volume rather than asking anybody to run `chown`.
 `docker compose up -d --build`, one `/config` volume, no media mounts. Work through
 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) on the target system before turning Test Mode off.
 
+`VERSION` is the semantic release version and `BUILD` is the monotonically increasing
+shipped-build number. Increment `BUILD` for every deployed code change; change `VERSION`
+when the release meaning changes. The image creates `BUILD_DATE` at build time, and About
+shows all three while the top banner stays on the semantic version alone.
+
 `install/` and its `.plg` are gone. This section described them until after they were
 deleted, three paragraphs below the note saying the plugin was scrapped — which is the
 argument for deleting from a document rather than appending to it.

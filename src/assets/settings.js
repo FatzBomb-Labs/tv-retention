@@ -402,6 +402,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
       : 'not recorded';
     const rows = [
       ['Version', snapshot().version || 'unknown'],
+      ['Build', snapshot().build_number || 'not recorded'],
       ['Build date', buildDate],
       ['Series with a rule', plural((settings().rules || []).length, 'series')],
       ['Sonarr last read', sync.synced_at ? ago(sync.synced_at) : 'not yet'],

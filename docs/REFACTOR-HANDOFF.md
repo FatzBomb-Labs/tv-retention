@@ -23,7 +23,7 @@ module refactor is complete.**
 
 ```text
 src/assets/
-  app.js            349 lines — composition root, fourteen imports
+  app.js            348 lines — composition root, fourteen imports
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   storage.js        remember, remembered — the per-browser preferences, wrapped
@@ -74,7 +74,7 @@ The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it witho
 changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
-both send the same remote script. Last green run 2026-09-11: 482 Python tests,
+both send the same remote script. Last green run 2026-09-11: 483 Python tests,
 worker imports, nineteen assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The

@@ -38,7 +38,7 @@ $archive = Join-Path ([IO.Path]::GetTempPath()) ("tvr-check-{0}.tar" -f [guid]::
 
 Push-Location $root
 try {
-    tar -cf $archive src tests tools VERSION
+    tar -cf $archive src tests tools VERSION BUILD
     if ($LASTEXITCODE -ne 0) { throw 'Could not stage the source archive' }
 
     ssh -n $target ('printf %s ' + $encoded + ' | base64 -d > ' + $remotePath)

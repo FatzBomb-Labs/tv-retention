@@ -14,7 +14,7 @@ WORKDIR /app
 COPY src/worker/ /app/worker/
 COPY src/assets/ /app/assets/
 COPY src/include/ /app/include/
-COPY VERSION LICENSE /app/
+COPY VERSION BUILD LICENSE /app/
 # Build metadata belongs to the image, not the semantic version. A source checkout has no
 # honest build date; an image does, and this file is read only when a snapshot is requested.
 RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD_DATE
