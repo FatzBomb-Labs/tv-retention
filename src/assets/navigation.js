@@ -94,6 +94,9 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
     document.querySelectorAll('.tvr-side [data-section-head]').forEach((head) => {
       head.addEventListener('click', () => {
         const section = head.dataset.sectionHead;
+        // Help is an entry point rather than a workspace: its heading always opens the
+        // overview, while the other sections return to the tool the operator was using.
+        if (section === 'help') { showView('help-about'); return; }
         // Clicking the section you are already in collapses nothing: there would be no open
         // section and no view to show. It just returns you to where you were.
         //

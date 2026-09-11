@@ -347,6 +347,7 @@ class Interface(unittest.TestCase):
                         help_items.index('data-view="help-adding"'))
         self.assertNotIn('About', system_items)
         self.assertIn('id="tvr-view-help-about"', self.html)
+        self.assertIn("if (section === 'help') { showView('help-about'); return; }", self.js)
         self.assertIn("['Version', snapshot().version || 'unknown']", self.js)
         self.assertIn("['Build date', buildDate]", self.js)
         self.assertIn("'build_date': build_date()", (ROOT / 'src' / 'worker' / 'actions.py').read_text())
