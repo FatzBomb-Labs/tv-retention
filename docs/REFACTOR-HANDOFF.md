@@ -33,7 +33,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, seven assets parsing as ES modules, 9 frontend runtime tests.
+worker imports, seven assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -423,11 +423,17 @@ behind produces no error, just a dead control. Where a module must *write* entry
 state, take a setter from the entry rather than reaching for the binding;
 `applySaved` in `settings.js` is the pattern.
 
-Settings still carries two contracts no test can see, so do not let a later
-change quietly drop them: a save posts the whole document rather than the panel
-that was edited, and a masked key left unedited must not be written back as its
-mask. Presets and connections deliberately stayed in the entry; the phase-5
-entry above says why.
+Settings carries two contracts that used to be invisible to the gate: a save
+posts the whole document rather than the panel that was edited, and a masked key
+left unedited goes back as its mask, which the worker reads as "keep the stored
+key". Both are now pinned by tests in
+[tests/frontend/app-runtime.test.js](../tests/frontend/app-runtime.test.js),
+along with the third thing the phase-5 `overrides` change bought — a refused save
+leaves the held document untouched. Each was confirmed to fail against a
+deliberately broken `settings.js` before being trusted, because a contract test
+that cannot fail is worse than none: it reports safety it is not providing.
+Presets and connections deliberately stayed in the entry; the phase-5 entry
+above says why.
 
 Read the cluster before deciding its module count. Phase 4's plan said one module
 and the code said two; phase 5's said four and the code said two. The call graph

@@ -211,6 +211,8 @@ function snapshotFixture(overrides = {}) {
       profiles: [],
       schedule: { enabled: false, test_mode: overrides.testMode === false ? false : true },
       retention: {}, air_dates: {}, automation: {}, alerts: {}, notifications: {}, logging: {},
+      // Arrives masked, exactly as `core.redact` sends it.
+      tmdb: { api_key: overrides.tmdbKey === undefined ? '********' : overrides.tmdbKey },
       state_dir: '/tmp/tvr-test-state',
     },
     health: { rules: {}, instances: { 'inst-1': { reachable: true } } },
@@ -240,12 +242,21 @@ async function loadPage(setup) {
     alerts: () => ({ alerts: (fixtures.alerts && fixtures.alerts()) || [] }),
     run: () => (fixtures.run ? fixtures.run()
       : { result: { dry_run: true, planned: 0, deleted: 0, rules: [], duration_seconds: 0, freed_bytes: 0 } }),
+    // The worker answers a save with the stored document, redacted again.
+    settings: (payload) => (fixtures.failSettings ? { ok: false, error: 'Refused.' } : {
+      settings: Object.assign({}, payload.settings, {
+        tmdb: { api_key: (payload.settings.tmdb || {}).api_key ? '********' : '' },
+      }),
+      schedule_text: 'Daily at 03:30',
+    }),
   };
 
   const fetchImpl = async (url, opts) => {
     const payload = JSON.parse(opts.body.get('payload'));
     fetchLog.push({ action: payload.action, payload });
     const body = routes[payload.action] ? await routes[payload.action](payload) : {};
+    // `ok` defaults to true but a fixture may refuse: the page treats `ok: false` as a
+    // rejection, and what it does with a refused save is worth being able to test.
     return { status: 200, json: async () => Object.assign({ ok: true }, body) };
   };
 
@@ -287,6 +298,11 @@ async function loadPage(setup) {
     $: (id) => document.getElementById(id),
     flush,
     click: (id) => { document.getElementById(id).click(); },
+    change: (id) => {
+      const node = document.getElementById(id);
+      node.dispatch('change', { target: node, stopPropagation() {}, preventDefault() {} });
+    },
+    sent: (name) => fetchLog.filter((entry) => entry.action === name).map((entry) => entry.payload),
     fire: (id) => { const fn = intervals.get(id); return fn ? fn() : undefined; },
     notice: () => {
       const box = document.getElementById('tvr-notice');
@@ -473,4 +489,88 @@ test('a live Run confirmation says what a real run does', async () => {
   assert.ok(page.confirmCalls[0].includes(
     'This deletes episode files through Sonarr and cannot be undone from here.'));
   assert.equal(page.actions('run'), 0);
+});
+
+/* The two contracts `settings.js` carries that no source-string test can see. Both are
+ * silent when broken: a save that posts one panel loses whatever another held, and a
+ * masked key echoed back as its mask overwrites the stored credential with asterisks.
+ * Neither produces an error, and both survive a syntax check and a purity check.
+ */
+
+test('a save posts the whole settings document, not the panel that was edited', async () => {
+  const page = await loadPage(() => ({ snapshot: snapshotFixture() }));
+  await page.flush();
+
+  // Change one control in the schedule panel, which saves itself on change.
+  page.$('tvr-schedule-enabled').checked = true;
+  page.$('tvr-freq').value = 'daily';
+  page.change('tvr-schedule-enabled');
+  await page.flush();
+
+  const saves = page.sent('settings');
+  assert.equal(saves.length, 1, 'the schedule panel saves itself the moment it changes');
+
+  const posted = saves[0].settings;
+  assert.equal(posted.schedule.enabled, true, 'the edited panel is in the payload');
+
+  // Everything the other panels hold has to travel with it. These come from the fixture
+  // and were never touched by the schedule view.
+  assert.equal(posted.state_dir, '/tmp/tvr-test-state', 'a value no panel edits survives');
+  assert.equal(posted.rules.length, 2, 'the rules survive a schedule save');
+  assert.deepEqual(posted.instances.map((i) => i.id), ['inst-1'],
+    'the Sonarr connections survive a schedule save');
+  assert.ok('alerts' in posted && 'automation' in posted && 'notifications' in posted,
+    'every settings panel is represented in a save from any one of them');
+});
+
+test('an unedited masked API key is echoed back as its mask, never as a new key', async () => {
+  const page = await loadPage(() => ({ snapshot: snapshotFixture() }));
+  await page.flush();
+
+  // The key arrives masked and nobody touches the field.
+  assert.equal(page.$('tvr-tmdb-key').value, '********',
+    'the stored key is shown masked, never in clear');
+
+  page.$('tvr-schedule-enabled').checked = true;
+  page.change('tvr-schedule-enabled');
+  await page.flush();
+
+  const posted = page.sent('settings')[0].settings;
+  assert.equal(posted.tmdb.api_key, '********',
+    'the mask goes back unchanged, which the worker reads as "keep the stored key"');
+});
+
+test('an edited API key is posted as typed', async () => {
+  const page = await loadPage(() => ({ snapshot: snapshotFixture() }));
+  await page.flush();
+
+  page.$('tvr-tmdb-key').value = 'a-real-tmdb-key-value';
+  page.$('tvr-schedule-enabled').checked = true;
+  page.change('tvr-schedule-enabled');
+  await page.flush();
+
+  const posted = page.sent('settings')[0].settings;
+  assert.equal(posted.tmdb.api_key, 'a-real-tmdb-key-value',
+    'a key someone actually typed is not mistaken for a mask');
+});
+
+test('a failed schedule save leaves the held document unchanged', async () => {
+  const page = await loadPage(() => ({ snapshot: snapshotFixture(), failSettings: true }));
+  await page.flush();
+
+  page.$('tvr-schedule-enabled').checked = true;
+  page.change('tvr-schedule-enabled');
+  await page.flush();
+
+  // The save was refused, so the next one must not carry the rejected schedule as though
+  // it had been accepted: the schedule is collected at save time, not written into the
+  // held document first.
+  page.$('tvr-schedule-enabled').checked = false;
+  page.change('tvr-schedule-enabled');
+  await page.flush();
+
+  const saves = page.sent('settings');
+  assert.equal(saves.length, 2);
+  assert.equal(saves[1].settings.schedule.enabled, false,
+    'the second save reflects the control, not the refused first attempt');
 });
