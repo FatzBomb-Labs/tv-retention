@@ -25,6 +25,8 @@ gets turned off, and it is the first thing here that can delete anything.
       manual cache clear. The asset URL carries a hash of every asset together — hashing
       them separately and truncating took every character from the first, so CSS-only
       releases shipped under the key the browser already held.
+- [ ] **Help → About** shows the semantic version and the date this image was built. The
+      compact version in the top banner remains the semantic version alone.
 - [ ] With `TVR_AUTH=none`, confirm it starts, serves without a login, and says so in the
       log. Then put the password back.
 

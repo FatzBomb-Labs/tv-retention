@@ -340,6 +340,17 @@ class Interface(unittest.TestCase):
         self.assertIn('`v${snapshot.version}`', self.js)
         self.assertRegex((ROOT / 'VERSION').read_text().strip(), r'^\d+\.\d+\.\d+$')
 
+    def test_about_is_the_help_default_and_carries_build_metadata(self):
+        help_items = self.html.split('data-section="help"')[1].split('</div>')[0]
+        system_items = self.html.split('data-section="system"')[1].split('</div>')[0]
+        self.assertLess(help_items.index('data-view="help-about"'),
+                        help_items.index('data-view="help-adding"'))
+        self.assertNotIn('About', system_items)
+        self.assertIn('id="tvr-view-help-about"', self.html)
+        self.assertIn("['Version', snapshot().version || 'unknown']", self.js)
+        self.assertIn("['Build date', buildDate]", self.js)
+        self.assertIn("'build_date': build_date()", (ROOT / 'src' / 'worker' / 'actions.py').read_text())
+
     def test_the_run_button_hides_only_on_a_complete_answer(self):
         # Hiding it on a stale or partial reading would be a promise the cache cannot keep.
         self.assertRegex(self.js, r'plan\.trustworthy && !plan\.actionable')

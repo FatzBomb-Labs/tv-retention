@@ -11,7 +11,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 482 tests, all pass |
+| `python3 -m unittest discover -s tests` | 483 tests, all pass |
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — nineteen files now: the entry plus `format`, `dom`, `storage`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`, `connections`, `library` |
 | `node --test tests/frontend/*.test.js` | 13 tests, all pass — 8 runtime flows, 4 settings-contract tests, plus module-import purity |

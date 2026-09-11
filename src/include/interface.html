@@ -87,7 +87,6 @@
       <button type="button" class="tvr-side-head" data-section-head="system" aria-expanded="false">
         <i class="fa fa-caret-right" aria-hidden="true"></i><span>System</span></button>
       <div class="tvr-side-items">
-        <button type="button" class="tvr-side-item" data-view="system-about">About</button>
         <button type="button" class="tvr-side-item" data-view="system-backup">Backup</button>
         <button type="button" class="tvr-side-item" data-view="system-logs">Logs
           <span class="tvr-tab-badge" id="tvr-badge-system-history" hidden></span></button>
@@ -98,6 +97,7 @@
       <button type="button" class="tvr-side-head" data-section-head="help" aria-expanded="false">
         <i class="fa fa-caret-right" aria-hidden="true"></i><span>Help</span></button>
       <div class="tvr-side-items">
+        <button type="button" class="tvr-side-item" data-view="help-about">About</button>
         <button type="button" class="tvr-side-item" data-view="help-adding">Adding a series</button>
         <button type="button" class="tvr-side-item" data-view="help-connecting">Connecting apps</button>
         <button type="button" class="tvr-side-item" data-view="help-presets">Managing presets</button>
@@ -309,10 +309,10 @@
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-<section id="tvr-view-system-about" class="tvr-view" hidden>
+<section id="tvr-view-help-about" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>About</h2></div>
     <div class="tvr-card">
-      <p><strong>TV Retention</strong> <span id="tvr-about-version"></span></p>
+      <p><strong>TV Retention</strong></p>
       <p>Keeps a chosen number of days, episodes, or seasons per series and removes the rest through Sonarr, so Sonarr's database and monitoring stay correct.</p>
       <p class="tvr-lede">The plugin touches no filesystem of its own. Sizes, air dates, import dates and monitoring all arrive with the episodes, and deletion is a Sonarr call — so Sonarr's recycle bin, its extra-file handling and its empty-folder cleanup all apply as they are.</p>
       <div id="tvr-about-state"></div>

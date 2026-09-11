@@ -396,7 +396,13 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     const box = $('tvr-about-state');
     if (!box) return;
     const sync = (snapshot().sync || {});
+    const built = snapshot().build_date;
+    const buildDate = built
+      ? new Date(built).toLocaleDateString([], { dateStyle: 'medium' })
+      : 'not recorded';
     const rows = [
+      ['Version', snapshot().version || 'unknown'],
+      ['Build date', buildDate],
       ['Series with a rule', plural((settings().rules || []).length, 'series')],
       ['Sonarr last read', sync.synced_at ? ago(sync.synced_at) : 'not yet'],
       ['Schedule', (settings().schedule || {}).enabled ? (snapshot().schedule_text || 'on') : 'off'],

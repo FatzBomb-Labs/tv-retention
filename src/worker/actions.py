@@ -29,6 +29,16 @@ from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, fo
 from tmdb import TMDB, TMDBError
 
 
+def build_date():
+    override = os.environ.get('TVR_BUILD_DATE', '').strip()
+    if override:
+        return override
+    try:
+        return (Path(__file__).resolve().parents[1] / 'BUILD_DATE').read_text().strip()
+    except OSError:
+        return ''
+
+
 # ---------------------------------------------------------------------------
 # RPC actions
 # ---------------------------------------------------------------------------
@@ -95,6 +105,7 @@ def action_snapshot(settings, request):
         health = load_health(settings)
     return {
         'version': VERSION,
+        'build_date': build_date(),
         'settings': redact(settings),
         'runs': list(reversed(state.get('runs', []))),
         'last_run': state.get('last_run'),
@@ -725,5 +736,4 @@ def dispatch(request: dict) -> dict:
     except Exception as error:  # noqa: BLE001 - the UI must never see a traceback
         print(f'tv-retention rpc failure: {error!r}', file=sys.stderr)
         return {'ok': False, 'error': f'Unexpected backend error: {error}'}
-
 

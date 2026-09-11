@@ -12,7 +12,7 @@ throughout would churn the file that records why they exist.
 There is no usable Python in the development environment. Run `./tools/check-on-host.sh`,
 or `tools\check-on-host.ps1` from Windows, which stages the source under `/tmp` on
 FatzServer, runs `python3 -m unittest discover -s tests`, imports every worker module, and
-syntax-checks every shipped module. The suite is 482 Python tests plus 13 frontend runtime
+syntax-checks every shipped module. The suite is 483 Python tests plus 13 frontend runtime
 tests, with no expected failures. Both entry points send the same remote script — the
 PowerShell one reads it out of the shell script rather than restating it — and both honour
 `TVR_HOST` for the ssh target, defaulting to `FatzServer`.

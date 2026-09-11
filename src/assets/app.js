@@ -306,7 +306,6 @@ function start(root) {
 
   function render() {
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
-    $('tvr-about-version').textContent = snapshot.version || '';
     const banner = ((settings || {}).alerts || {}).test_banner || 'full';
     $('tvr-test-banner').hidden = !testMode() || banner === 'chip';
     $('tvr-test-chip').hidden = !testMode() || banner !== 'chip';
