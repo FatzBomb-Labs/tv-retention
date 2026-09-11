@@ -13,9 +13,9 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 |---|---|
 | `python3 -m unittest discover -s tests` | 482 tests, all pass |
 | Worker imports | every module loads, server.py included |
-| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — five files now: the entry plus `format`, `dom`, `episode-trees`, `changes` |
+| `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — seven files now: the entry plus `format`, `dom`, `episode-trees`, `changes`, `transport`, `feedback` |
 | `node --test tests/frontend/*.test.js` | 9 tests, all pass — the 8 runtime flows plus module-import purity |
-| `docker build` | 122 MB image — last built 2026-09-10; the module split changes no build step, only which files `COPY src/assets/` picks up |
+| `docker build` | 129 MB image — last built 2026-09-11 from the phase-4 tree; the module split changes no build step, only which files `COPY src/assets/` picks up |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; `snapshot` answers with settings migrated v7 to v8; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
 ### Coverage by area
@@ -82,11 +82,34 @@ Against the running `Sonarr-Series` container, from a `/tmp` staging directory w
 | `match` | The folder `News & Talk/Daily Show, The (1996) {tvdb-71256}` matched "The Daily Show" |
 | `preview`, preset-driven | A rule pointing at a "Keep 180 days" preset resolved correctly: 66 episodes considered, 1 selected with a real Sonarr air date (2026-03-06), 65 kept |
 
+## The module graph in a browser
+
+Exercised 2026-09-11, against `tv-retention:phase4` built on the host from the phase-4
+tree and run on port 18788 against a *copy* of the demo settings with `schedule.enabled`
+forced false and Test Mode on. The original `/tmp/tvr-demo` config was not opened for
+writing, and the container was removed afterwards.
+
+This is the first browser session the split module graph has had. Until it, the release
+namespace and the seven-file import graph were validated only statically and over curl.
+
+| Check | Result |
+|---|---|
+| Page loads, all seven modules fetched under one digest | `/assets/ad57b2472405/…`, every file 200, `immutable` |
+| Every static import specifier in the entry resolves within the digest | 6 of 6 — `dom`, `format`, `changes`, `episode-trees`, `transport`, `feedback` |
+| A digest the server does not hold | 404 with `Cache-Control: no-store`, not served from the current release |
+| Non-allowlisted paths under the digest | `interface.html`, `../worker/core.py`, `settings.json` all 404 |
+| Console and page errors across the whole session | none |
+| All five sections render | Series, Media management, Settings, System, Help |
+| Series list | 181 cards, no placeholder left behind |
+| Opening a series card | renders; the busy overlay is **never** raised, which is the constraint on per-show reads |
+| Run confirmation | states the actual plan — 36 series, 191 deletions, 211 GiB — and names Test Mode; cancelling sent nothing |
+| Server log | no error, traceback or 500; healthy throughout |
+
+The two layers extracted in phase 4 are both covered here: `transport.js` by every RPC the
+page makes and by the overlay staying down, `feedback.js` by the Run confirmation.
+
 ## Not yet exercised
 
-- **The module delivery in a real browser.** The release namespace, the module script
-  tag and import purity are validated over a real socket and real Node imports; no
-  browser session against a built image has been run for this change.
 - **A live deletion.** Test Mode has never been turned off on this server, and no version of this — plugin or container — has ever removed a file. See
   [ACCEPTANCE.md](ACCEPTANCE.md).
 - **A live monitoring write.** The selection has been exercised; Sonarr's `PUT` has not.

@@ -31,8 +31,13 @@ The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Window
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
 worker imports, seven assets parsing as ES modules, 9 frontend runtime tests.
 
-Nothing has been deployed or pushed during this work. No browser session against a
-built image has been run for the module split.
+Nothing has been pushed during this work; there is still no remote and no tag. The
+split module graph *has* now been exercised in a browser: 2026-09-11, against an image
+built on the host from the phase-4 tree, pointed at a copy of the settings with the
+schedule forced off. Seven modules under one digest, every import resolving, no console
+error, the busy overlay never raised by a per-show read. See
+[VALIDATION.md](VALIDATION.md). The long-running `tv-retention-demo` container is
+unrelated to this work and still runs `c9df46b`.
 
 ### Commit identity
 
@@ -282,8 +287,9 @@ Cross-feature interaction is wired at the composition root, not by importing
    lookup). `server.py` serves the release namespace, computed over every
    allowlisted file's name and bytes; flat names remain as a one-week compatibility
    path. The purity test enforces import-time invariants file by file, and the gate
-   syntax-checks every shipped module as an ES module. The module graph has not
-   been exercised in a real browser.
+   syntax-checks every shipped module as an ES module. Exercised in a real browser
+   on 2026-09-11, after phase 4: the namespace, the depth-one import graph and the
+   refusal of an unheld digest all behave on the wire.
 3. **Leaf helpers — landed.** Four modules out of the entry, in this order and each
    validated before the next: `format.js` and `dom.js` (no imports at all),
    `episode-trees.js` (imports `el`), `changes.js` (imports `el`, `bytes`,
