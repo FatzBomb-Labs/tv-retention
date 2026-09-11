@@ -11,17 +11,19 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 ## Current state
 
 Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3 and 4 are
-landed; **Phase 5 (peripheral features) is next.** See "Phase plan and gates".
+landed, and **phase 5 is under way: `activity.js` is out, `settings.js` is next.**
+See "Phase plan and gates".
 
 ```text
 src/assets/
-  app.js            3,035 lines — entry, six imports, everything not yet extracted
+  app.js            2,900 lines — entry, seven imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
   changes.js        REMOVAL_SUMMARY, changeSummary, changeLines, changeRows
   transport.js      busy, resetBusy, createApi, TIMEOUTS, DEFAULT_TIMEOUT — imports $
   feedback.js       notice, guarded, dialog — imports $, el
+  activity.js       createActivity — stats, run reports, history, live log
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -321,8 +323,37 @@ Cross-feature interaction is wired at the composition root, not by importing
    by that assertion. And exported constants use a trailing `export { … }` list like
    every other module, not `export const`: the constant-declaration test scans for
    `const NAME`, and `export const NAME` reads as undeclared.
-5. **Peripheral features:** activity, presets, connections and settings; preserve
-   whole-document collection and masked-key semantics.
+5. **Peripheral features — in progress.** The sketch named four modules; the call
+   graph cut it to two. `saveSettings` is a hub — `deleteSeries`, `editInstance`,
+   `editPreset`, `queuedBanner`, `renderInstances` and `ruleForm` all call it, and
+   it calls `render` — so three of the four sketched modules would have imported it,
+   two of them (presets, connections) for no other reason. Those two stay in the
+   entry this phase. `activity.js` went first because it is the only cluster with no
+   `saveSettings` edge; `settings.js` follows.
+
+   **`activity.js` — landed.** `renderStatsView`, `showResult`, `renderHistory`,
+   `startLog`, `stopLog`, plus a `wire()`. `app.js` went 3,035 → 2,900 lines.
+
+   Two things shaped it, and both apply to `settings.js`. First, this is the first
+   module that needed *mutable entry state*: `snapshot` and `settings` are `let`
+   bindings reassigned at six sites, so a plain import would have frozen the panes
+   on whichever document was current at load. It exports a factory —
+   `createActivity({ api, refresh, getSnapshot, getSettings })` — taking accessors,
+   not values. Second, **the wiring is the real hazard, and the plan did not mention
+   it.** Nine top-level `addEventListener` statements sit *between* cluster
+   functions; they are statements, not declarations, so a function-by-function
+   extraction leaves them in the entry bound to functions that have moved, with no
+   error. Two were activity's (`tvr-clear-history`, `tvr-log-clear`) and became
+   `wire()`, which the entry calls at start-up — before the first `refresh()`, which
+   is where module evaluation used to attach them. They cannot run at import: the
+   purity test enforces that for every file but the entry.
+
+   Still owed to `settings.js`, which must preserve whole-document collection and
+   masked-key semantics: the wiring at the old L2365, L2392/L2394, L2809/L2817, and
+   the TMDB listener. It will import `showResult` from `activity.js`, and
+   `renderAirProviders` stays in the entry. Fold in one known cleanup when its code
+   moves — `renderAlertSettings` declares a local `const options` shadowing the
+   `dom.js` import, inert only by luck.
 6. **Alerts/navigation/topbar:** explicit view transitions, action callbacks and
    confirmation flows; maintain draft-discard and log-start/stop rules.
 7. **Checks:** move queue/poll/watch as a unit with tested lifecycle callbacks.
@@ -361,15 +392,24 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phases S, 2, 3 and 4 are landed; the next is
-   Peripheral features (Phase 5).
+4. Begin only the approved phase. Phases S, 2, 3 and 4 are landed, and phase 5 is
+   part-done: `activity.js` is out and `settings.js` is next.
 
-Phase 5 takes activity, presets, connections and settings. These are not leaf code
-and not a mechanical move: each is a render/collect/save cluster reached from the
-settings view, so the boundary to find is what the entry must still call and what
-can become private to the module. Preserve whole-document collection and
-masked-key semantics — a settings save reads the whole document rather than one
-panel, and a masked key left unedited must not be written back as its mask.
+`settings.js` is the rest of phase 5. It is not leaf code and not a mechanical
+move: it is a render/collect/save cluster reached from the settings view, so the
+boundary to find is what the entry must still call and what can become private.
+Preserve whole-document collection and masked-key semantics — a settings save
+reads the whole document rather than one panel, and a masked key left unedited
+must not be written back as its mask. Presets and connections deliberately stay
+in the entry; the phase-5 entry above says why.
+
+Take it the way `activity.js` went: a `createSettings({ … })` factory, accessors
+for `snapshot`/`settings` rather than values, and every top-level listener in the
+cluster moved into an exported `wire()` the entry calls at start-up. Grep the
+cut range for `addEventListener` *before* cutting — the listeners are statements
+between the functions, and leaving one behind produces no error, just a dead
+control.
 
 Read the cluster before deciding its module count. Phase 4's plan said one module
-and the code said two; the call graph is the authority, not the sketch.
+and the code said two; phase 5's said four and the code said two. The call graph
+is the authority, not the sketch.
