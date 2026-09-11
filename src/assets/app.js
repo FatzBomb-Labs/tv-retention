@@ -25,6 +25,7 @@ import { createApi, resetBusy } from './transport.js';
 import { notice, guarded, dialog } from './feedback.js';
 import { createActivity } from './activity.js';
 import { createSettings } from './settings.js';
+import { createChecks } from './checks.js';
 
 function start(root) {
   const api = createApi(root.dataset.api, root.dataset.csrf);
@@ -61,14 +62,21 @@ function start(root) {
           saveSettings } = settingsView;
 
   // -- snapshot and background checking ----------------------------------
-  const checking = new Set();
-  const forced = new Set();
-  let checkQueue = [];
-  let checkRunning = false;
-  let bulkChecking = false;
-  let pollTimer = null;
-
-  const isChecking = (ruleId) => checking.has(ruleId);
+  // The queue, the poll and the heartbeat. `monitoring` is passed as an accessor for the
+  // same reason as `snapshot`: `applyHealth` replaces it outright on every reading, so a
+  // captured value would leave the checks writing into an object nothing else can see.
+  const checks = createChecks({
+    api,
+    getSnapshot: () => snapshot,
+    getMonitoring: () => monitoring,
+    applyHealth,
+    applyAlerts,
+    render: () => render(),
+    renderRules: () => renderRules(),
+    renderAlerts: () => renderAlerts(),
+    renderCounts: () => renderCounts(),
+  });
+  const { isChecking, queueChecks, startPolling } = checks;
 
   // The one way a saved document gets back into the entry's state. `settings.js` posts the
   // whole document and needs to write both bindings; handing it a setter keeps the entry
@@ -128,142 +136,6 @@ function start(root) {
   const worstSeverity = (list) => (list.some((a) => a.severity === 'error') ? 'error'
     : list.some((a) => a.severity === 'warning') ? 'warning'
     : list.length ? 'notice' : '');
-
-  // `force` is what the refresh buttons mean: read this series from Sonarr again. Without
-  // it a check re-decides from the episodes already stored, which needs no call at all.
-  function queueChecks(ruleIds, force) {
-    const wanted = (ruleIds || []).filter((id) => !checkQueue.includes(id) && !checking.has(id));
-    if (!wanted.length) return;
-    if (force) wanted.forEach((id) => forced.add(id));
-    checkQueue = checkQueue.concat(wanted);
-    wanted.forEach((id) => checking.add(id));
-    // A sweep empties the list: a card left standing during a re-read looks like a
-    // result, and it would be a stale one.
-    if (checking.size > 1) bulkChecking = true;
-    renderRules();
-    drainChecks();
-  }
-
-  async function drainChecks() {
-    if (checkRunning) return;
-    checkRunning = true;
-    try {
-      while (checkQueue.length) {
-        const ruleId = checkQueue.shift();
-        try {
-          const data = await api('check-rule', { rule_id: ruleId, force: forced.has(ruleId) }, '', true);
-          if (data.busy) {
-            checkQueue.forEach((id) => checking.delete(id));
-            checkQueue = [];
-            checking.delete(ruleId);
-            forced.clear();
-            startPolling();
-            break;
-          }
-          monitoring[data.rule_id] = data.state;
-          // The alerts arrive with the check that produced them; asking separately cost a
-          // second request and a second worker process for every series.
-          applyAlerts(data.alerts);
-        } catch (error) {
-          monitoring[ruleId] = Object.assign({}, monitoring[ruleId], {
-            ok: false, label: 'Check failed', error: error.message, checked_at: new Date().toISOString(),
-          });
-        } finally {
-          checking.delete(ruleId);
-          forced.delete(ruleId);
-          renderRules();
-          renderAlerts();
-          renderCounts();
-        }
-      }
-    } finally {
-      checkRunning = false;
-      bulkChecking = false;
-      renderRules();
-    }
-  }
-
-  function startPolling() {
-    if (pollTimer) return;
-    const tick = async () => {
-      try {
-        const data = await api('progress', {}, '', true);
-        applyHealth(data.health);
-        const progress = data.progress || {};
-        checking.clear();
-        if (progress.running && progress.current) checking.add(progress.current);
-        bulkChecking = !!progress.running;
-        const fresh = await api('alerts', {}, '', true);
-        applyAlerts(fresh.alerts);
-        renderRules();
-        renderAlerts();
-        renderCounts();
-        renderCheckBanner(progress);
-        if (!progress.running) { clearInterval(pollTimer); pollTimer = null; renderCheckBanner({}); }
-      } catch (error) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        renderCheckBanner({});
-      }
-    };
-    pollTimer = setInterval(tick, 2500);
-    tick();
-  }
-
-  // -- heartbeat ---------------------------------------------------------
-  // One small question to Sonarr — what changed? — and the series it names are re-read
-  // through the same queue a manual refresh uses, so each card is seen being read. The
-  // cron tick asks the same question every minute whether or not anyone is here, which is
-  // why a notification never waits for someone to open this page.
-  const WATCH_SECONDS = 15;
-  // The heartbeat costs no network at all now — it re-decides every plan from the stored
-  // reading, which is what makes a page left open all day still correct about time.
-  let watchStamp = '';
-
-  async function watchTick() {
-    if (document.hidden || checkRunning || checkQueue.length || pollTimer) return;
-    if (!snapshot) return;
-    let data;
-    try {
-      data = await api('watch', {}, '', true);
-    } catch (error) {
-      return;  // a heartbeat that misses a beat is not worth interrupting anyone for
-    }
-    if ((data.progress || {}).running) { startPolling(); return; }
-    snapshot.sync = data.sync || snapshot.sync;
-    // Re-rendering on a timer would fight with whatever is being read on screen, so it
-    // only happens when the reply actually differs from the last one.
-    const stamp = JSON.stringify([data.alerts, data.plan, data.stale_rules,
-                                  Object.values((data.health || {}).rules || {}).map((r) => r.checked_at)]);
-    if (stamp === watchStamp) return;
-    watchStamp = stamp;
-    applyHealth(data.health);
-    applyAlerts(data.alerts);
-    snapshot.plan = data.plan;
-    render();
-    if ((data.stale_rules || []).length) queueChecks(data.stale_rules);
-  }
-
-  setInterval(watchTick, WATCH_SECONDS * 1000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) watchTick(); });
-
-  const CHECK_PHASE = { instances: 'verifying the Sonarr instances',
-                        matching: 'matching series to Sonarr', rules: 'reading series' };
-
-  function renderCheckBanner(progress) {
-    const box = $('tvr-checking');
-    box.replaceChildren();
-    const active = progress && progress.running;
-    box.hidden = !active;
-    if (!active) return;
-    const phase = CHECK_PHASE[progress.phase] || 'checking';
-    let detail = `${progress.scheduled ? 'Scheduled check' : 'Check'} in progress — ${phase}`;
-    if (progress.phase === 'rules') {
-      detail += `, ${progress.done || 0} of ${progress.total || 0} read`;
-      if (progress.current_title) detail += `, now reading ${progress.current_title}`;
-    }
-    box.append(el('span', { className: 'tvr-spinner' }), text(`${detail}. Series update as they finish.`));
-  }
 
   function render() {
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
@@ -890,7 +762,7 @@ function start(root) {
       if (!libraryLoading) loadLibrary().catch(() => { libraryLoading = false; });
       return;
     }
-    if (bulkChecking) {
+    if (checks.bulkChecking()) {
       $('tvr-rules-empty').hidden = true;
       container.append(el('div', { className: 'tvr-empty' },
                           [el('span', { className: 'tvr-spinner' }), text(' Reading from Sonarr…')]));
@@ -2419,6 +2291,7 @@ function start(root) {
   // -- start -------------------------------------------------------------
   activity.wire();
   settingsView.wire();
+  checks.wire();
 
   // Whatever happens, the page must end up interactive with a readable message.
   refresh().catch((error) => {

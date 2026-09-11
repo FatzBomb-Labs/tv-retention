@@ -10,14 +10,15 @@ been removed; the decisions they reached are stated as decisions in AGENTS.md.
 
 ## Current state
 
-Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4 and 5 are
-landed, and phase 6 has **begun**: `changeList` has moved into `changes.js`, but
-the alerts/navigation/topbar split it was meant to precede is still open. See
-"Phase plan and gates", and read the phase-6 entry before cutting anything there.
+Branch `master`, working tree clean as of 2026-09-11. Phases S, 2, 3, 4, 5 and 7
+are landed. Phase 6 is **partly done and deliberately paused**: `changeList` has
+moved into `changes.js`, but the alerts/navigation/topbar split is blocked on
+phase 8 and phase 7 was taken ahead of it. See "Phase plan and gates", and read
+the phase-6 entry before cutting anything there.
 
 ```text
 src/assets/
-  app.js            2,436 lines — entry, eight imports, everything not yet extracted
+  app.js            2,308 lines — entry, nine imports, everything not yet extracted
   format.js         bytes, when, plural, ago, range — imports nothing
   dom.js            $, el, text, toggle, field, options — imports nothing
   episode-trees.js  EXCLUDED_WHY, exclusionTree, monitorTree — imports el
@@ -28,6 +29,8 @@ src/assets/
   activity.js       createActivity — stats, run reports, history, live log
   settings.js       createSettings — schedule, notifications, automation, air
                     dates, alert preferences, About
+  checks.js         createChecks — the background check queue, sweep polling and
+                    the heartbeat; imports $, el, text
 ```
 
 The entry began at 3,496 lines. Phases 3 and 4 moved six modules out of it without
@@ -35,7 +38,7 @@ changing behavior: definitions dedented two spaces and carried across verbatim.
 
 The gate is `./tools/check-on-host.sh`, or `tools\check-on-host.ps1` from Windows;
 both send the same remote script. Last green run 2026-09-11: 482 Python tests,
-worker imports, seven assets parsing as ES modules, 13 frontend runtime tests.
+worker imports, ten assets parsing as ES modules, 13 frontend runtime tests.
 
 Nothing has been pushed during this work; there is still no remote and no tag. The
 split module graph *has* now been exercised in a browser: 2026-09-11, against an image
@@ -398,7 +401,41 @@ Cross-feature interaction is wired at the composition root, not by importing
    rebinding them later — but decide it deliberately rather than discovering it
    mid-cut. The clusters are also not contiguous: navigation and topbar are
    lines ~288–646, alerts ~1217–1414, with the library and cards in between.
-7. **Checks:** move queue/poll/watch as a unit with tested lifecycle callbacks.
+
+   **Phase 7 was taken ahead of the rest of this one**, because it is the only
+   remaining cluster with no stake in that argument. Resume here after phase 8.
+7. **Checks — landed.** `checks.js`, 164 lines; `app.js` 2,436 → 2,308. Moved as
+   a unit, as planned: `queueChecks`, `drainChecks`, `startPolling`, `watchTick`,
+   `renderCheckBanner` and `isChecking`, plus `CHECK_PHASE` and `WATCH_SECONDS`.
+
+   This is the cleanest cluster in the file and the reason is worth stating: all
+   seven of its mutable bindings — `checking`, `forced`, `checkQueue`,
+   `checkRunning`, `bulkChecking`, `pollTimer`, `watchStamp` — are read and
+   written *only* here. Nothing outside touched one. So unlike phases 5 and 6,
+   the state did not have to be brokered; it simply went with the code, which is
+   what makes the factory worth having. Nine callbacks in, four names out
+   (`isChecking`, `queueChecks`, `startPolling`, `bulkChecking`).
+
+   `bulkChecking` is the one shape change. It was a bare `let` read by
+   `renderLibrary`; it is now a `bulkChecking()` accessor, because a value
+   exported at construction would have frozen at `false` forever. The other
+   direction needed the same care in reverse: `monitoring` is *reassigned* by
+   `applyHealth` on every reading, so it is passed as `getMonitoring()` rather
+   than as the object — the module only ever writes into it, never replaces it.
+
+   `renderCheckBanner` turned out to be entirely private — three callers, all
+   inside the cluster — so it is not exported at all. The two wiring statements
+   (`setInterval(watchTick, …)` and the `visibilitychange` listener) became
+   `wire()`, called from the entry's start block beside `activity.wire()` and
+   `settingsView.wire()`; they cannot run at import, and the purity test says so.
+   Timing is unchanged: both registered inside `start(root)` before the first
+   `refresh()` in the old code too, and `watchTick` still returns early until a
+   snapshot exists.
+
+   Every executable line was diffed against the previous commit and is identical
+   modulo the dedent and those two accessor rewrites. The gate's first two
+   frontend tests cover this code directly — the queue draining and the sweep
+   poll — so the move has behavioural coverage, not just a syntax check.
 8. **Series features:** removal UI, then editor and library using the established
    callback boundaries. Preserve scope/save ordering, selection and drafts.
 9. **Finish composition root:** remove transitional wiring/aliases only after
@@ -435,10 +472,27 @@ reorganization. Preserve observed timing first; treat improvements as separate w
 1. Verify current directory, Git status/log and applicable guidance.
 2. Read this handoff, then inspect implementation for any decision being acted on.
 3. Ask for approval of the outstanding module tree and callback boundaries.
-4. Begin only the approved phase. Phases S, 2, 3, 4 and 5 are landed; phase 6
-   (alerts, navigation, topbar) is next.
+4. Begin only the approved phase. Phases S, 2, 3, 4, 5 and 7 are landed; phase 6
+   is half done and paused. **Phase 8 (series features) is next**, and the order
+   is the decision to confirm first.
 
-Phase 6 is navigation and alerts. Take it the way phases 4 and 5 went: a factory
+Phase 6 was paused on purpose, and resuming it before phase 8 would undo the
+reason. Navigation reads `editing`, `forgetDrafts` and `renderDetails` — editor
+state phase 8 moves — so cutting navigation first binds it to three names about
+to relocate, then unbinds them again. Take the editor first and navigation
+after, and the callbacks navigation needs will already exist in their final
+shape. Phase 7 was pulled forward for the same reason in reverse: it shared none
+of that entanglement, so it was free to go early.
+
+Phase 8 is the biggest cluster left by a wide margin. `ruleForm` alone runs from
+roughly line 1337 to 1914 — call it 578 lines, a quarter of what remains — and
+`renderDetails`, `openEditor`, `scopeOf`, the drafts map and the removal UI sit
+around it. Expect it to be several cuts, not one, and expect the removal UI
+(`deleteSeries`, `queuedBanner`, `queuedRemoval`) to come out first, as the plan
+says: it is the smaller, better-bounded half. Re-derive the boundaries from the
+call graph before cutting; the line numbers here will have moved.
+
+Take it the way phases 4, 5 and 7 went: a factory
 if it needs entry state, accessors for `snapshot`/`settings` rather than values,
 and every top-level listener in the cluster moved into an exported `wire()` the
 entry calls at start-up. Grep the cut range for `addEventListener` *before*
