@@ -1455,7 +1455,10 @@ class Interface(unittest.TestCase):
     def test_an_ended_disabled_series_can_arm_one_shot_reenable(self):
         editor = module_js('series-editor.js')
         self.assertIn('rule.auto_reenable', editor)
-        self.assertIn('existing && series.ended && !rule.enabled', editor)
+        self.assertIn('existing && series.ended && !enabled.input.checked', editor)
+        self.assertGreaterEqual(editor.count('showAutoReenable();'), 3)
+        self.assertIn('target.auto_reenable = previousAutoReenable.target', editor)
+        self.assertIn('autoReenable.input.checked = previousAutoReenable.checked', editor)
         self.assertIn('auto_reenable: context.autoReenable.input.checked', editor)
 
     def test_re_reading_a_series_is_an_icon_with_the_other_things_it_can_be_told(self):

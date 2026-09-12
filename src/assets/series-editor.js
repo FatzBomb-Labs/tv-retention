@@ -153,6 +153,11 @@ export function createSeriesEditor({
         // caption either — the tooltip says which way it is, and one word beside the name
         // was a word that never changed.
         const enabled = toggle('', rule.enabled, null, { className: 'tvr-identity-switch' });
+        let autoReenable = null;
+        const showAutoReenable = () => {
+          if (!autoReenable) return;
+          autoReenable.node.hidden = !(existing && series.ended && !enabled.input.checked);
+        };
         const sayState = () => {
           const on = enabled.input.checked;
           enabled.node.title = existing
@@ -169,6 +174,11 @@ export function createSeriesEditor({
             const on = enabled.input.checked;
             const target = (getSettings().rules || []).find((other) => other.id === rule.id);
             if (!target) return;
+            const previousAutoReenable = {
+              target: target.auto_reenable,
+              rule: rule.auto_reenable,
+              checked: autoReenable.input.checked,
+            };
             enabled.input.disabled = true;
             guarded('', async () => {
               try {
@@ -179,11 +189,16 @@ export function createSeriesEditor({
                 }
                 await saveSettings(null, true);
                 sayState();
+                showAutoReenable();
               } catch (error) {
                 // Nothing was written, so nothing should look as though it was.
                 target.enabled = rule.enabled = !on;
+                target.auto_reenable = previousAutoReenable.target;
+                rule.auto_reenable = previousAutoReenable.rule;
                 enabled.input.checked = !on;
+                autoReenable.input.checked = previousAutoReenable.checked;
                 sayState();
+                showAutoReenable();
                 throw error;
               } finally {
                 enabled.input.disabled = false;
@@ -309,10 +324,10 @@ export function createSeriesEditor({
                                                   ['unmonitor-only', 'Unmonitor only'],
                                                   ['full-sync', 'Full sync']],
                                    rule.monitoring || '');
-        const autoReenable = toggle(
+        autoReenable = toggle(
           'Re-enable when Sonarr reports a new episode or the series resumes',
           rule.auto_reenable, null, { className: 'tvr-row-switch' });
-        autoReenable.node.hidden = !(existing && series.ended && !rule.enabled);
+        showAutoReenable();
 
         // Two one-time actions, not getSettings(). They happen when you save and never again,
         // which is why each says so and says what it will ask Sonarr to do.
