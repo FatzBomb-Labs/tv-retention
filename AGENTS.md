@@ -200,8 +200,15 @@ volume rather than asking anybody to run `chown`.
 
 ## Deployment
 
-`docker compose up -d --build`, one `/config` volume, no media mounts. Work through
+`docker compose up -d --build --remove-orphans`, one `/config` volume, no media mounts. Work through
 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) on the target system before turning Test Mode off.
+
+A replacement leaves exactly one running application container and no stopped predecessors.
+Use `--rm` for preflight containers and remove them on both success and failure. Keep rollback
+as one `tv-retention:rollback` image tag plus one matching config archive, never as a renamed
+or stopped container. After the replacement is healthy, remove the predecessor container and
+superseded TV Retention image tags and backups. Cleanup must be scoped to TV Retention; never
+use a global Docker prune.
 
 `VERSION` is the semantic release version and `BUILD` is the monotonically increasing
 shipped-build number. Increment `BUILD` for every deployed code change; change `VERSION`

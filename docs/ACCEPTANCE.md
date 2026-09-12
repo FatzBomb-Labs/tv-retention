@@ -8,7 +8,7 @@ gets turned off, and it is the first thing here that can delete anything.
 
 ## 1. Start it
 
-- [ ] `docker compose up -d` with no `TVR_USERNAME`/`TVR_PASSWORD` and no `TVR_AUTH`.
+- [ ] `docker compose up -d --remove-orphans` with no `TVR_USERNAME`/`TVR_PASSWORD` and no `TVR_AUTH`.
       Confirm it **exits**, and that the message names both ways forward.
 - [ ] Add the two variables and start again. `http://<host>:8787` shows a login.
 - [ ] A wrong password is refused; the right one lands on the page with the **TEST MODE**
@@ -166,5 +166,6 @@ gets turned off, and it is the first thing here that can delete anything.
 
 ## 13. Remove it
 
-- [ ] `docker compose down`. Confirm `./config` still holds the settings and the journal.
+- [ ] `docker compose down --remove-orphans`. Confirm `./config` still holds the settings
+      and the journal.
 - [ ] Bring it back up and confirm everything is where it was.

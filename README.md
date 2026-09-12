@@ -85,7 +85,9 @@ its extra-file handling and its empty-folder cleanup all apply as they are.
 
 ## Installing
 
-`docker compose up -d`, with the file above, then open `http://<host>:8787`.
+`docker compose up -d --remove-orphans`, with the file above, then open
+`http://<host>:8787`. The orphan cleanup is intentionally scoped to this Compose project;
+do not use a global Docker prune.
 
 Requirements: Docker, and at least one reachable Sonarr v3 or v4 instance. Nothing else —
 no media server, no Tautulli, no library mount.
