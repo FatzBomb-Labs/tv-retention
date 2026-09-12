@@ -182,8 +182,11 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
 .tvr-row .tvr-field { flex: 0 1 180px; }
 .tvr-inline { align-items: flex-end; }
-.tvr-condition-grid { display: grid; grid-template-columns: minmax(80px, .75fr) repeat(3, minmax(0, 1fr));
+.tvr-condition-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px; align-items: end; }
+.tvr-condition-grid .tvr-field,
+.tvr-condition-grid input,
+.tvr-condition-grid select { min-width: 0; }
 @media (max-width: 560px) {
   .tvr-condition-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

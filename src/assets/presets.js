@@ -54,7 +54,7 @@ export function createPresets({ getSettings, saveSettings }) {
 
   function conditionFields(source) {
     const days = el('input', { type: 'text', inputMode: 'text', maxLength: 8,
-                               value: source.keep_days || '', placeholder: '30d',
+                               value: source.keep_days || '',
                                title: 'Days by default, or add d, w, m, or y (for example 24w or 1y).' });
     const episodes = el('input', { type: 'number', min: '1', max: '100000', value: source.keep_episodes || '' });
     const seasons = el('input', { type: 'number', min: '1', max: '1000', value: source.keep_seasons || '' });

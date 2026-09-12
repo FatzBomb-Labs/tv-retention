@@ -15,7 +15,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — nineteen files now: the entry plus `format`, `dom`, `storage`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`, `connections`, `library` |
 | `node --test tests/frontend/*.test.js` | 13 tests, all pass — 8 runtime flows, 4 settings-contract tests, plus module-import purity |
-| `docker build` | 128 MB image — built 2026-09-11 from the v0.3.0 build 3 release |
+| `docker build` | 128 MB image — built 2026-09-11 from the v0.3.0 build 4 release |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; the deployed copy migrated settings v10 to v11; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
 ### Coverage by area
