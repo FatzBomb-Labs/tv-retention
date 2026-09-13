@@ -1,11 +1,11 @@
 #!/bin/bash
-# Validate the worker and the interface using FatzServer's Python, isolated entirely under
+# Validate the worker and the interface using fatzserver-host's Python, isolated entirely under
 # /tmp. It builds no image, writes nothing outside the staging directory, reads no media,
 # and contacts no Sonarr.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # The source arrives on stdin, so the remote script travels as an argument, not a heredoc.
-tar -C "$ROOT" -cf - src tests tools VERSION BUILD | ssh "${TVR_HOST:-FatzServer}" '
+tar -C "$ROOT" -cf - src tests tools VERSION BUILD | ssh "${TVR_HOST:-fatzserver-host}" '
 set -eu
 staging=$(mktemp -d /tmp/tv-retention-dev.XXXXXX)
 trap "rm -rf $staging" EXIT

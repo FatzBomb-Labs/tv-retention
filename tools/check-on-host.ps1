@@ -12,7 +12,7 @@
 # restating it, so the two can never drift apart.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$target = if ($env:TVR_HOST) { $env:TVR_HOST } else { 'FatzServer' }
+$target = if ($env:TVR_HOST) { $env:TVR_HOST } else { 'fatzserver-host' }
 
 $script = Get-Content (Join-Path $PSScriptRoot 'check-on-host.sh') -Raw
 # The remote half is the single-quoted argument to ssh: everything between the first

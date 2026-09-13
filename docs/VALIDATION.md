@@ -1,6 +1,6 @@
 # Validation record
 
-Last run: 2026-09-11, from Windows via `tools\check-on-host.ps1` against FatzServer
+Last run: 2026-09-11, from Windows via `tools\check-on-host.ps1` against fatzserver-host
 (Unraid 7.3.2, Python 3.11.15, Node 22.18.0).
 
 ## Automated

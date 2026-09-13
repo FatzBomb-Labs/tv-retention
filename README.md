@@ -493,7 +493,7 @@ states what it wants is worth more than one that inherits and hopes.
 ```bash
 python3 -m unittest discover -s tests -v   # 388 tests
 docker build -t tv-retention .             # the image
-./tools/check-on-host.sh                   # tests, build, PHP and JS lint on FatzServer
+./tools/check-on-host.sh                   # tests, build, PHP and JS lint on fatzserver-host
 ```
 
 `tools/check-on-host.sh` stages the source under `/tmp` on a host with Python and runs the
