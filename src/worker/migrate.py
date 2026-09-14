@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 11
+SETTINGS_VERSION = 12
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -84,8 +84,39 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v10(document))
     if version < 11:
         document.update(_to_v11(document))
+    if version < 12:
+        document.update(_to_v12(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
+
+
+def _to_v12(document: dict) -> dict:
+    """One monitoring mode becomes no monitoring mode, and two settings groups go.
+
+    Full sync was the only thing that made a *run* monitor anything, and everything it
+    uniquely did is covered: a widened rule is handled by the one-time pass on save, new
+    episodes are Sonarr's own business, and nothing ever drifts into a keep window except
+    unaired episodes, which are always inside it. What was left was its cost — the one
+    setting here that could start hundreds of downloads. Everybody lands on the behaviour
+    the safe mode already had.
+
+    `automation.monitoring` and `automation.persistence` are removed rather than migrated
+    because nothing ever read them: they validated, stored and rendered, and no code
+    anywhere consulted the answers. A setting that does nothing is worse than an absent
+    one, because the page it sits on is the documentation.
+
+    An armed rule gets no re-enable watermark here. A migration has no honest value for
+    one — the mark means "the newest episode when somebody armed this", and that moment is
+    in the past and unrecorded. Such a rule falls back to the status trigger until it is
+    armed again, which is correct rather than a gap to paper over.
+    """
+    retention = {key: value for key, value in (document.get('retention') or {}).items()
+                 if key != 'monitoring'}
+    automation = {key: value for key, value in (document.get('automation') or {}).items()
+                  if key not in ('monitoring', 'persistence')}
+    rules = [{key: value for key, value in rule.items() if key != 'monitoring'}
+             for rule in document.get('rules') or []]
+    return {'retention': retention, 'automation': automation, 'rules': rules}
 
 
 def _to_v11(document: dict) -> dict:

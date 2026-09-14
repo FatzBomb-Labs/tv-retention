@@ -8,6 +8,7 @@
 'use strict';
 
 import { el } from './dom.js';
+import { day } from './format.js';
 
 // Every reason core can give, said in the picker's own words. A reason with no entry
 // here falls back to naming Automation rather than to a template with a hole in it.
@@ -34,6 +35,7 @@ function exclusionTree(seasons, current) {
     .filter((entry) => entry.episode !== null && entry.episode !== undefined)
     .map((entry) => `${entry.season}:${entry.episode}`));
   const seasonRows = [];
+  const watched = [];
 
   (seasons || []).forEach((season) => {
     const rows = season.episodes || [];
@@ -43,8 +45,13 @@ function exclusionTree(seasons, current) {
     // and saying that out loud is more use than a box that springs back.
     const auto = rows.filter((episode) => episode.excluded && episode.excluded !== 'manual');
     const locked = auto.length === rows.length;
+    // The box shows how much of the season is excluded; `wholeSeason` is what the box
+    // *means* when it is clicked — every episode including ones that do not exist yet.
+    // They are separate because the display ticks when every existing episode is ticked,
+    // and that is not the same claim as "the whole season, for ever".
+    let wholeSeason = wholeSeasons.has(season.season);
     const box = el('input', { type: 'checkbox', className: 'tvr-pick',
-                              checked: wholeSeasons.has(season.season), disabled: locked });
+                              checked: wholeSeason, disabled: locked });
     const count = el('span', { className: 'tvr-tree-count' });
     const caret = el('button', { type: 'button', className: 'tvr-tree-caret' },
                      [el('i', { className: 'fa fa-caret-right' })]);
@@ -69,30 +76,60 @@ function exclusionTree(seasons, current) {
       // reason nobody taught this about as `matches “undefined”`, which is worse than
       // saying less.
       const why = !isAuto ? '' : (EXCLUDED_WHY[episode.excluded] || (() => 'excluded by Automation'))(episode);
-      list.append(el('label', { className: `tvr-tree-row tvr-tree-episode${isAuto ? ' tvr-tree-auto' : ''}` }, [
-        tick,
-        el('span', { textContent: `E${String(episode.episode).padStart(2, '0')} · ${episode.title || ''}` }),
+      // Sonarr's own flag, offered beside the exclusion because excluding is the moment
+      // the decision is made. Nothing here ever changes it on an excluded episode, so
+      // this is the one place it can be set without a run undoing it. Pre-filled from
+      // what Sonarr reports rather than from what we would like: an episode already
+      // unmonitored by hand should read that way.
+      const watch = el('input', { type: 'checkbox', className: 'tvr-pick tvr-pick-watch',
+                                  checked: !!episode.monitored,
+                                  title: 'Monitored in Sonarr' });
+      const watchCell = el('label', { className: 'tvr-tree-watch',
+                                      title: 'Monitored in Sonarr' }, [watch]);
+      // Inside the keep window is the thing the whole dialog is about, so it is the row
+      // that carries it rather than a marker on the row.
+      const classes = ['tvr-tree-row', 'tvr-tree-episode'];
+      if (isAuto) classes.push('tvr-tree-auto');
+      if (episode.in_scope) classes.push('tvr-tree-kept');
+      list.append(el('div', { className: classes.join(' '),
+                              title: episode.in_scope ? 'Inside the keep window' : '' }, [
+        el('label', { className: 'tvr-tree-pick' }, [
+          tick,
+          el('span', { textContent: `E${String(episode.episode).padStart(2, '0')} · ${episode.title || ''}` }),
+        ]),
+        el('span', { className: 'tvr-tree-note tvr-tree-aired',
+                     textContent: day(episode.air_date) || 'no air date' }),
         el('span', { className: 'tvr-tree-note tvr-tree-why', textContent: why }),
+        watchCell,
       ]));
       if (!isAuto) ticks.push({ tick, episode });
+      watched.push({ watch, episode, was: !!episode.monitored });
       tick.addEventListener('change', refresh);
     });
     box.addEventListener('change', () => {
-      ticks.forEach((entry) => { entry.tick.disabled = box.checked;
-                                 if (box.checked) entry.tick.checked = true; });
+      wholeSeason = box.checked;
+      ticks.forEach((entry) => { entry.tick.disabled = wholeSeason;
+                                 if (wholeSeason) entry.tick.checked = true; });
       refresh();
     });
-    ticks.forEach((entry) => { entry.tick.disabled = box.checked; });
-    seasonRows.push({ season: season.season, box, ticks, count, total: rows.length, auto: auto.length });
+    ticks.forEach((entry) => { entry.tick.disabled = wholeSeason; });
+    seasonRows.push({ season: season.season, box, ticks, count, total: rows.length,
+                      auto: auto.length, whole: () => wholeSeason });
     node.append(el('div', { className: 'tvr-tree-season-wrap' },
                    [el('div', { className: 'tvr-tree-head' }, [caret, header]), list]));
   });
 
   function refresh() {
     seasonRows.forEach((row) => {
-      const on = row.box.checked ? row.total
+      const on = row.whole() ? row.total
         : row.auto + row.ticks.filter((entry) => entry.tick.checked).length;
       row.count.textContent = `${on}/${row.total} excluded`;
+      // Ticked when everything under it is, indeterminate when only some is — so the
+      // header agrees with what is beneath it instead of having to be opened to find out.
+      if (!row.box.disabled) {
+        row.box.checked = on === row.total;
+        row.box.indeterminate = on > 0 && on < row.total;
+      }
     });
   }
   refresh();
@@ -106,12 +143,28 @@ function exclusionTree(seasons, current) {
     picked: () => {
       const found = [];
       seasonRows.forEach((row) => {
-        if (row.box.checked) { found.push({ season: row.season, episode: null }); return; }
+        // `whole()`, not the box: the box also ticks when every *existing* episode is
+        // ticked, and storing that as a whole-season entry would quietly extend it over
+        // episodes that have not aired.
+        if (row.whole()) { found.push({ season: row.season, episode: null }); return; }
         row.ticks.forEach((entry) => {
           if (entry.tick.checked) found.push({ season: row.season, episode: entry.episode.episode });
         });
       });
       return found;
+    },
+    // Only what was actually changed, and only where there is something to change: an
+    // episode with no file and no air date has no monitored state worth setting, and a
+    // whole-season tick sweeps in plenty of those.
+    monitoring: () => {
+      const monitor = [], unmonitor = [];
+      watched.forEach((entry) => {
+        const wanted = entry.watch.checked;
+        if (wanted === entry.was || !entry.episode.episode_id) return;
+        if (!entry.episode.has_file && !entry.episode.air_date) return;
+        (wanted ? monitor : unmonitor).push(entry.episode.episode_id);
+      });
+      return { monitor, unmonitor };
     },
   };
 }

@@ -815,12 +815,84 @@ class Interface(unittest.TestCase):
 
     def test_excluding_and_monitoring_do_not_share_a_tree(self):
         """A tick means "never touch this" in one and "Sonarr should have this" in the
-        other. The day they share a code path, one of them is wrong."""
+        other. The day they share a code path, one of them is wrong.
+
+        The exclusion picker now offers Sonarr's flag beside each episode, because an
+        excluded episode is the one thing no run ever unmonitors — so it is the only place
+        the flag can be set and stay set. That is a second column, not a shared tree: the
+        two readers stay separate, and neither reads the other's boxes.
+        """
         self.assertIn('function exclusionTree(', self.js)
         self.assertIn('function monitorTree(', self.js)
         picker = function_body(self.js, 'exclusionTree')
         self.assertNotIn('monitorTree(', picker)
-        self.assertNotIn('monitored', picker.split('picked:')[1])
+        # The exclusion list is read back by season and episode *number*, and carries no
+        # trace of a monitored flag: ids do not survive a series being re-added.
+        exclusions = picker.split('picked: ()')[1].split('return found;')[0]
+        self.assertNotIn('monitored', exclusions)
+        self.assertNotIn('episode_id', exclusions)
+        # The monitoring half reads back ids and only the ones that moved.
+        moved = picker.split('monitoring: ()')[1]
+        self.assertIn('episode_id', moved)
+        self.assertIn('wanted === entry.was', moved)
+
+    def test_the_exclusion_picker_offers_sonarrs_flag_as_sonarr_has_it(self):
+        """Pre-filled from Sonarr, not from what we would like.
+
+        An episode somebody already unmonitored by hand has to read that way, or the
+        dialog proposes to re-monitor it the moment it is opened — and sending only the
+        difference is what stops an unopened dialog writing anything at all.
+        """
+        picker = function_body(self.js, 'exclusionTree')
+        self.assertIn('checked: !!episode.monitored', picker)
+        # Unaired and fileless episodes have no monitored state worth setting, and a
+        # whole-season tick sweeps in plenty of them.
+        self.assertIn('if (!entry.episode.has_file && !entry.episode.air_date) return;', picker)
+
+    def test_the_two_boxes_on_a_row_each_carry_their_own_label(self):
+        # One label wrapping both toggles whichever box the click landed nearest.
+        picker = function_body(self.js, 'exclusionTree')
+        self.assertIn("className: 'tvr-tree-pick'", picker)
+        self.assertIn("className: 'tvr-tree-watch'", picker)
+        self.assertRegex(self.css, r'\.tvr-tree-pick \{[^}]*cursor: pointer')
+        self.assertRegex(self.css, r'\.tvr-tree-watch \{[^}]*margin-left: auto')
+
+    def test_a_season_header_shows_how_much_of_it_is_excluded(self):
+        """Ticked when all of it is, indeterminate when some of it is.
+
+        A header that stays clear while every episode under it is ticked has to be opened
+        to be believed, which is the whole reason a tri-state box exists.
+        """
+        picker = function_body(self.js, 'exclusionTree')
+        self.assertIn('row.box.checked = on === row.total;', picker)
+        self.assertIn('row.box.indeterminate = on > 0 && on < row.total;', picker)
+
+    def test_a_whole_season_entry_is_not_inferred_from_ticking_every_episode(self):
+        """The two claims differ, and only one of them covers episodes that do not exist.
+
+        Ticking every episode says "these"; the season box says "this season, including
+        what has not aired". Reading the display box back would silently promote the first
+        into the second the moment a season happened to be fully ticked.
+        """
+        picker = function_body(self.js, 'exclusionTree')
+        stored = picker.split('picked: ()')[1].split('return found;')[0]
+        self.assertIn('if (row.whole())', stored)
+        self.assertNotIn('row.box.checked', stored)
+
+    def test_every_episode_says_when_it_aired(self):
+        # A keep-by-age rule turns on this date, so the picker should not make anyone go
+        # and look it up somewhere else.
+        picker = function_body(self.js, 'exclusionTree')
+        self.assertIn("day(episode.air_date) || 'no air date'", picker)
+        self.assertRegex(self.css, r'\.tvr-tree-aired \{[^}]*text-align: right')
+
+    def test_the_keep_window_is_drawn_on_the_row_it_is_about(self):
+        picker = function_body(self.js, 'exclusionTree')
+        self.assertIn("if (episode.in_scope) classes.push('tvr-tree-kept');", picker)
+        self.assertRegex(self.css, r'\.tvr-tree-kept \{[^}]*background:')
+        # Shading with no key is a colour nobody can look up.
+        self.assertIn('tvr-tree-legend-key', self.js)
+        self.assertRegex(self.css, r'\.tvr-tree-legend-key \{')
 
     def test_the_unsaved_mark_reaches_every_view_that_can_save(self):
         """It was bound to views whose id began "tvr-view-settings".
@@ -1038,7 +1110,6 @@ class Interface(unittest.TestCase):
     def test_inheriting_names_what_it_inherits(self):
         # "Use the global setting" made you go and look it up.
         self.assertIn('`[Default] ${globalSpecials}`', self.js)
-        self.assertIn('`[Default] ${globalMonitoring}`', self.js)
 
     def test_the_border_says_one_thing_and_says_it_in_both_layouts(self):
         """Ranked, because a border can only say one thing.
@@ -1489,7 +1560,6 @@ class Interface(unittest.TestCase):
         """
         form = self.js.split('function ruleForm')[1].split('// -- the details pane')[0]
         self.assertNotIn('const monitoring =', form)
-        self.assertIn('const monitorMode = options(', form)
         # The readings arrive as an accessor now: the entry replaces the map wholesale on
         # every health reading, so the editor may not hold the object it was built with.
         self.assertIn('const reading = existing ? (getMonitoring()[rule.id] || {}) : {};', form)

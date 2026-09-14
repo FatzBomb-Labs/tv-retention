@@ -180,9 +180,10 @@ be determined, another condition cannot use that missing fact as permission to d
 Example: `Age = 180`, `Episodes = 20`, Keep `Any` keeps everything from
 the last 180 days **and** the 20 newest episodes, whichever is more generous.
 
-An ended, disabled series can arm **Auto re-enable**. The next catalogue sync re-enables
-it once if Sonarr changes the series back to continuing or reports a newly added episode.
-A new special counts only when that series' effective **Include specials** setting is on.
+An ended, disabled series can arm **Auto re-enable**. The next catalogue sync switches it
+back on, once, if Sonarr marks the series continuing again, or if an episode newer than
+anything it knew about has aired or been scheduled. A special counts only when that
+series' effective **Include specials** setting is on.
 
 ### Choosing a show
 
@@ -239,15 +240,8 @@ cannot be deleted.
 
 ## Monitoring
 
-Sonarr's monitored flags decide what it will fetch, so what this plugin does with them is
-one setting with two values. It is global, and any series can override it.
-
-| Mode | What it does |
-|---|---|
-| **Unmonitor only** (default) | Never monitors anything. Unmonitors what it deletes, and anything that falls outside the keep window. |
-| **Full sync** | The keep window is authoritative in both directions: episodes inside it are set to monitored, including ones with no file. |
-
-Two things are true in both modes, and neither is a setting:
+Sonarr's monitored flags decide what it will fetch. **A run only ever unmonitors**, and
+that is not a setting — it is the whole of the behaviour:
 
 - **Deleting a file always unmonitors it.** Anything else builds a fetch-and-delete loop:
   Sonarr re-grabs the episode tonight and the next run deletes it again, for ever.
@@ -255,19 +249,27 @@ Two things are true in both modes, and neither is a setting:
   are never deleted, so nothing else would ever reach them, and Sonarr would go on fetching
   what the next run removes. That is the same loop by a side door.
 
-There is deliberately no third mode that leaves Sonarr's flags alone. It would mean exactly
-the loop above, and a setting whose interface needs a danger label is a missing invariant.
+Unmonitoring is protection: it only ever stops a download. Monitoring is intent, and it
+costs downloads — on this library, 290 episodes against zero — so nothing decides it on a
+schedule. It happens once, when you ask for it.
 
-**Full sync can be expensive.** Monitoring an episode with no file asks Sonarr to download
-it. On this library that is 290 episodes against zero, so the safe mode is the default and
-an upgrade never moves anyone onto the other one.
+### Keeping an episode outside the keep window
+
+**Add it to the exclusion list first.** An excluded episode sits outside everything a run
+acts on, so its monitored flag is never touched — whatever you set in Sonarr afterwards
+stays set, permanently. Without the exclusion, the next run unmonitors it.
+
+The exclusion picker offers the monitored flag alongside each episode, in a second column,
+so the whole decision is made in one place rather than half here and half in Sonarr. The
+boxes are pre-filled from what Sonarr reports now — an episode you unmonitored by hand
+reads that way — and only the ones you actually move are sent, so opening the picker and
+closing it changes nothing.
 
 ### The one-time pass
 
 Widening a rule does not start downloads. When you add a series, or save a rule with a
 larger keep window, the editor offers **Monitor the episodes this brings into scope** —
-once, for the episodes the widening added, and nothing else. It is not offered under Full
-sync, where the same thing happens continuously.
+once, for the episodes the widening added, and nothing else.
 
 It stores the window *as it was*, not a list of episode ids, so an episode that arrives
 between the save and the run is judged by where it actually falls.
@@ -295,9 +297,22 @@ apply.
 
 ## Finished shows
 
-When Sonarr reports a series as ended, the card says so, once, and a notification is
-sent the first time. If nothing remains inside its keep window the rule has nothing further
-to do, and its card offers to remove it.
+When Sonarr reports a series as ended, the card says so, once, and a notification is sent
+the first time. The rule stays on: there is still something inside its keep window, and
+the notice says it will be switched off when there is not.
+
+When nothing is left inside the window, **the rule is switched off automatically** and a
+notice records it. No further episodes are coming and nothing remains to act on, so the
+only thing left for it to do was be evaluated for ever. Nothing is deleted, the rule is
+not removed, and switching it back on is one click — the notice offers to remove it if you
+are done with the show.
+
+A series whose only remaining files are *excluded* reaches the same point, and needs no
+rule of its own to get there: exclusions are set aside before the keep window is worked
+out, so a series holding nothing else has an empty window.
+
+None of this happens in Test Mode. A run says what it would have switched off, and changes
+nothing.
 
 ## Staying current
 

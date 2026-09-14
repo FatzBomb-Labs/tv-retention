@@ -54,14 +54,22 @@ fact that there is currently nothing to audit but the interpreter.
   and monitoring arrive with the episodes, and deletion is a Sonarr call. There is no
   path mapping, and no setting that duplicates something Sonarr already does.
 - Unmonitoring is protection, monitoring is intent. Unmonitoring only ever stops a
-  download, so it happens in both modes — including episodes with no file, which are never
+  download, so a run always does it — including episodes with no file, which are never
   deleted and so would otherwise never be reached. Monitoring can start hundreds of
-  downloads, so it happens only under Full sync, or once when someone asks for it on a rule
+  downloads, so a run never does it: it happens once, when someone asks for it on a rule
   they just widened.
-- There are two monitoring modes and there is no third. "Leave it to Sonarr" would let
-  Sonarr re-fetch what a run just deleted, which is the fetch-and-delete loop the invariant
-  below exists to prevent. A setting whose interface needs a danger label is a missing
-  invariant.
+- There is no monitoring mode, because there is only one behaviour left to choose between.
+  Full sync was the other one, and everything it uniquely did is covered by the one-time
+  pass, by Sonarr monitoring its own new episodes, and by the fact that nothing ever drifts
+  into a keep window except unaired episodes, which are always inside it. What remained was
+  the only setting here that could start hundreds of downloads. "Leave it to Sonarr" was
+  never on offer either: it would let Sonarr re-fetch what a run just deleted, which is the
+  fetch-and-delete loop the invariant below exists to prevent.
+- To keep an episode that falls outside the keep window, exclude it. An excluded episode is
+  set aside before the keep frame is computed, so it is in neither half of it and its
+  monitored flag is never touched by anything here — which is what makes the exclusion the
+  answer rather than a workaround. The picker offers the monitored flag alongside it, so
+  the decision is not half-made here and half in Sonarr.
 - Deleting an episode file always unmonitors it. That is an invariant, not a setting:
   anything else builds a fetch-and-delete loop.
 - Nothing destructive a series card offers happens immediately: removals queue, and only a

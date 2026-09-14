@@ -122,8 +122,60 @@ an **Edit** button. What is left:
    to speak up rather than a nuisance.
 3. **Persistence, with an intent ledger** — what was decided, what was written, and what
    is still owed, so a run interrupted mid-write can be finished rather than repeated.
+   Nothing to do with `automation.persistence` below, which is a settings group being
+   deleted; this is durability for a run in flight.
 
-### Elsewhere
+## Series end handling: what is left
+
+The audit, the Full sync removal, settings v12, the auto-disable, the surviving notice, the
+re-enable watermark and the exclusion picker's monitoring column have all landed. What
+remains of this line of work:
+
+### The series details pane: one Automation box
+
+Today the pane says automation in two places — a read-only Automation box whose single
+**Edit** button opens only exclusions, and a separate select for specials below it.
+
+Replace with one box listing every automation as a line, each line clickable to edit, each
+line showing whether the value is inherited or set on this series. The data for that
+distinction already exists — `action_automation` returns `specials_default` — it is simply
+not drawn as a difference.
+
+What is left to list, after the deletions: the one-time monitoring pass, specials,
+exclusions, and the ended-series state.
+
+Two constraints:
+
+- **The one-time pass is not the same kind of thing as the rest.** The others are standing
+  policy; that one is an action taken on save, shown only when the window has moved. Inside
+  a list of settings it reads as a setting that vanishes. Keep it visually distinct.
+- **Expand inline rather than opening dialogs.** The pane already expands the monitor tree
+  in place. Exclusions stay a dialog, because the tree needs the room.
+
+In the exclusions dialog, specials come first, and the tree shows season 0 only when
+specials are not automatically excluded — the picker offers the hand-picked half and no
+more.
+
+Ask on close only when something would actually change. "Nothing to monitor" as a dialog
+is a dialog that teaches people to dismiss dialogs. Unmonitoring outside the window stays
+a *statement* rather than a question, as it is today: a run does it regardless, so offering
+the choice only decides whether it happens now or within a day.
+
+### Decisions from that work worth not relitigating
+
+- **Our own writes are never drift.** There is no Sonarr change feed: drift would be found
+  by comparing a fresh read to the stored episode cache, and a run re-reads with
+  `force=True` after it writes. By the next comparison the cache already holds what the run
+  did. Sonarr is never asked who moved a flag, and does not say.
+- **Persistence settings were deleted rather than wired.** Sync runs once a day, so
+  detecting "somebody monitored this outside the window" only works when the intent happens
+  to straddle a sync boundary — monitor it, get the file, unmonitor it is one evening.
+  The exclusion guarantee covers the same ground without a race or a setting.
+- **There is no per-series override mechanism to build.** It was a prerequisite when eight
+  automation settings needed one. After the deletions only `include_specials` remains, and
+  it already has one.
+
+## Elsewhere
 
 **A smaller schedule.** Shows air at most once a day, and the interface offers hourly,
 daily, weekly, monthly by date, monthly by nth weekday, and a custom cron expression — six

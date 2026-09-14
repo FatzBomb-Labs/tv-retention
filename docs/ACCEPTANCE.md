@@ -100,16 +100,29 @@ gets turned off, and it is the first thing here that can delete anything.
 
 ## 7. Monitoring
 
-- [ ] With a rule under **Unmonitor only**, confirm a run unmonitors what falls outside the
-      keep window and asks Sonarr to fetch nothing.
-- [ ] Switch one rule to **Full sync** and confirm the plan gains a monitor count.
+- [ ] Confirm a run unmonitors what falls outside the keep window and asks Sonarr to fetch
+      nothing. The plan's monitor count is always zero: no run monitors anything.
 - [ ] Widen a rule and save. Confirm the one-time pass is offered for the episodes the
       widening brought into scope, that the tree shows the window's own episodes checked as
       Sonarr has them, and that only the difference is sent.
 - [ ] Confirm the unmonitor half happened on save without being offered — a run does it
       regardless, so waiting only gives Sonarr a day to fetch what that run would delete.
-- [ ] Confirm an episode you unmonitored by hand in Sonarr is not re-monitored under
-      Unmonitor only.
+- [ ] Confirm an episode you unmonitored by hand in Sonarr is not re-monitored.
+- [ ] Exclude an episode that falls outside the keep window, monitor it in Sonarr, and run.
+      Confirm it is neither deleted nor unmonitored — that guarantee is the reason there is
+      no setting for this.
+- [ ] In the exclusion picker, confirm the second column reads as Sonarr has it: unmonitor
+      something in Sonarr, reopen, and confirm the box is clear rather than ticked.
+- [ ] Open the picker and close it with **Save**, having touched nothing. Confirm no
+      monitoring change is sent — only what you move is written.
+- [ ] Move one box, save, and confirm the log names that series and counts exactly one.
+- [ ] Confirm every episode shows its air date, and that one with none says so rather than
+      showing a blank.
+- [ ] Confirm episodes inside the keep window are shaded, and that the count matches what
+      the pane says the next run would keep.
+- [ ] Tick every episode of a season one by one. Confirm the season heading fills in, and
+      that what is **saved** is still one entry per episode — the heading's own box is the
+      only thing that means "including episodes that have not aired".
 
 ## 8. Alerts and freshness
 

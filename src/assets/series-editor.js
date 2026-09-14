@@ -316,16 +316,11 @@ export function createSeriesEditor({
         // Inheriting says what it will inherit. "Use the global setting" made you go and
         // look; naming the value means the row already answers the question.
         const globalSpecials = (getSettings().retention || {}).include_specials ? 'Include specials' : 'Exclude specials';
-        const globalMonitoring = MONITOR_NAMES[(getSettings().retention || {}).monitoring || 'unmonitor-only'];
         const specials = options(el('select'), [['', `[Default] ${globalSpecials}`], ['no', 'Exclude specials'],
                                                 ['yes', 'Include specials']],
           rule.include_specials === true ? 'yes' : (rule.include_specials === false ? 'no' : ''));
-        const monitorMode = options(el('select'), [['', `[Default] ${globalMonitoring}`],
-                                                  ['unmonitor-only', 'Unmonitor only'],
-                                                  ['full-sync', 'Full sync']],
-                                   rule.monitoring || '');
         autoReenable = toggle(
-          'Re-enable when Sonarr reports a new episode or the series resumes',
+          'Switch back on if the series resumes or a newer episode appears',
           rule.auto_reenable, null, { className: 'tvr-row-switch' });
         showAutoReenable();
 
@@ -399,10 +394,7 @@ export function createSeriesEditor({
           const line = (className, label) => el('div', { className: `tvr-auto-line ${className}`,
                                                          textContent: label });
           const from = (n) => `${plural(n, 'episode')}, from Automation`;
-          const lines = [
-            line('tvr-auto-plain', `Monitoring: ${MONITOR_NAMES[data.monitoring] || data.monitoring}`
-              + (data.monitoring_default ? ' — from Automation' : ' — set on this series')),
-          ];
+          const lines = [];
           if (!data.specials_default) lines.push(line('tvr-auto-plain',
             `Specials: ${data.specials ? 'kept' : 'excluded'} — set on this series`));
           if (found.specials) lines.push(line('tvr-auto-rule', `Specials excluded — ${from(found.specials)}`));
@@ -438,6 +430,15 @@ export function createSeriesEditor({
               'Greyed episodes are excluded by Automation, which applies to every series and '
               + 'changes there. A season’s own box excludes the whole season, including '
               + 'episodes that have not aired yet.' }));
+            box.append(el('p', { className: 'tvr-lede', textContent:
+              'The second column is Sonarr’s monitored flag, as Sonarr has it now. Nothing '
+              + 'here ever changes it on an excluded episode, so this is the place to set '
+              + 'it: whatever you leave it on stays on.' }));
+            box.append(el('p', { className: 'tvr-lede tvr-tree-legend' }, [
+              el('span', { className: 'tvr-tree-legend-key' }),
+              text('Shaded episodes are inside the keep window as the rule stands now — '
+                   + 'a run would keep them whether or not they are excluded.'),
+            ]));
             box.append(tree.empty
               ? el('p', { className: 'tvr-empty', textContent: 'Sonarr has no episodes for this series.' })
               : el('div', { className: 'tvr-tree-box' }, [tree.node]));
@@ -448,6 +449,11 @@ export function createSeriesEditor({
             manualExclusions = picked.picked();
             target.exclusions = rule.exclusions = manualExclusions;
             await saveSettings('Exclusions saved.');
+            const moved = picked.monitoring();
+            if (moved.monitor.length || moved.unmonitor.length) {
+              await api('set-monitored', Object.assign({ rule_id: rule.id }, moved),
+                        'Setting monitoring in Sonarr…');
+            }
             loadAutomation();
             refreshCounts();
           });
@@ -502,7 +508,7 @@ export function createSeriesEditor({
         // The window's own contents are always worth showing; whether they are worth
         // changing is the operator's business, not a rule about widening.
         const updateScopeRow = () => { if (monitorNew.input.checked && tree) loadTree(); };
-        [monitorMode, presetSelect, conditions.days, conditions.episodes, conditions.seasons,
+        [presetSelect, conditions.days, conditions.episodes, conditions.seasons,
          conditions.combine, specials].forEach((input) => {
           input.addEventListener('change', () => { updateScopeRow(); refreshCounts(); });
           input.addEventListener('input', refreshCounts);
@@ -526,7 +532,6 @@ export function createSeriesEditor({
             ? 'Presets are managed under Media management.' : 'No presets yet — create one to reuse values.'),
           conditions.node,
           field('Season 0 / specials', specials),
-          field('Monitoring', monitorMode, 'Unmonitor only never asks Sonarr to fetch anything.'),
           autoReenable.node,
           autoRow, scopeRow, unmonitorNote);
         const formState = () => JSON.stringify({ profile_id: presetSelect.value,
@@ -535,7 +540,6 @@ export function createSeriesEditor({
                                           keep_seasons: conditions.seasons.value,
                                           combine: conditions.combine.value,
                                           include_specials: specials.value,
-                                          monitoring: monitorMode.value,
                                           auto_reenable: autoReenable.input.checked,
                                           once: monitorNew.input.checked });
         // What Update compares against: the rule as saved, captured before any half-typed
@@ -552,14 +556,13 @@ export function createSeriesEditor({
             conditions.seasons.value = values.keep_seasons || '';
             conditions.combine.value = values.combine || 'any';
             specials.value = values.include_specials || '';
-            monitorMode.value = values.monitoring || '';
             applyPreset();
             sayState();
           } catch (error) {
             drafts.delete(draftKey);      // unreadable is not worth carrying
           }
         }
-        return { presetSelect, conditions, specials, monitoring: monitorMode, monitorNew,
+        return { presetSelect, conditions, specials, monitorNew,
                  autoReenable, before, enabled, draftKey, saved, reread, readLine, formBanner,
                  tree: () => (monitorNew.input.checked ? tree : null),
                  // A rule needs somewhere to keep from: a preset, or at least one value.
@@ -578,7 +581,6 @@ export function createSeriesEditor({
           keep_seasons: context.presetSelect.value ? null : (context.conditions.seasons.value || null),
           combine: context.conditions.combine.value,
           include_specials: context.specials.value,
-          monitoring: context.monitoring.value,
           auto_reenable: context.autoReenable.input.checked,
           queue: rule.queue || undefined,
         };
@@ -762,10 +764,6 @@ export function createSeriesEditor({
         check();
       }
     }
-
-    // Said in three places, and it read as two different getSettings() the first time they
-    // disagreed about capitalisation.
-    const MONITOR_NAMES = { 'unmonitor-only': 'Unmonitor only', 'full-sync': 'Full sync' };
 
     // A rule's keep window, as the one-time pass needs to remember it.
     function scopeOf(rule) {

@@ -25,7 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from core import (DEFAULTS, MONITORING_MODES, keep_frame, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
+from core import (DEFAULTS, air_watermark, keep_frame, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
                   canonical_json, classify_monitoring, describe_lifecycle, describe_selectability,
                   effective_rule, evaluate, interpolate_air_dates, new_id, normalise, redact,
                   rule_fingerprint, specials_included, validate_settings)
@@ -241,21 +241,6 @@ def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_ru
 # Monitoring
 # ---------------------------------------------------------------------------
 
-def monitoring_mode(settings: dict, rule: dict) -> str:
-    """How this rule treats Sonarr's monitored flags: 'unmonitor-only' or 'full-sync'.
-
-    One global setting, overridable per series. There is deliberately no third value for
-    "leave Sonarr alone": deleting a file while Sonarr still monitors it builds a
-    fetch-and-delete loop, which is why unmonitoring on delete is an invariant here rather
-    than a preference.
-    """
-    override = (rule or {}).get('monitoring') or ''
-    if override in MONITORING_MODES:
-        return override
-    mode = ((settings.get('retention') or {}).get('monitoring') or '')
-    return mode if mode in MONITORING_MODES else 'unmonitor-only'
-
-
 def newly_scoped_rows(settings: dict, rule: dict, episodes: list, previous_scope) -> list:
     """Unmonitored episodes a save brought into the keep window that were outside it.
 
@@ -365,25 +350,22 @@ def apply_removals(settings: dict, rules, dry_run: bool) -> list:
 
 
 def monitoring_targets(settings: dict, state: dict, rule: dict) -> dict:
-    """Which episodes a run will switch, under the mode this rule is running in.
+    """Which episodes a run will switch.
 
-    Unmonitoring is protection and monitoring is intent, which is the whole distinction
-    the mode rests on. Unmonitoring only ever stops a download, so it happens in both
-    modes: what leaves the keep window is unmonitored whether or not it has a file, and
-    the fileless half matters most — an episode with a file is unmonitored when the file
-    is deleted, but a missing one is never deleted, so nothing else would ever reach it,
-    and Sonarr would go on fetching what the next run deletes.
+    A run only ever unmonitors. Unmonitoring is protection — it stops a download and
+    nothing else — so what leaves the keep window is unmonitored whether or not it has a
+    file, and the fileless half matters most: an episode with a file is unmonitored when
+    the file is deleted, but a missing one is never deleted, so nothing else would ever
+    reach it, and Sonarr would go on fetching what the next run deletes.
 
-    Monitoring can cost hundreds of gigabytes, so it happens only under full sync, or
-    once, when someone asks for it on a rule they just widened.
+    Monitoring is intent, and it costs downloads, so it is never something a run decides.
+    It happens once, when someone asks for it on a rule they just widened.
     """
-    inside = state.get('in_frame_unmonitored') or []
     outside = state.get('out_frame_monitored') or []
-    wanted = inside if monitoring_mode(settings, rule) == 'full-sync' else []
     return {
-        'monitor': [row['episode_id'] for row in wanted if row.get('episode_id')],
+        'monitor': [],
         'unmonitor': [row['episode_id'] for row in outside if row.get('episode_id')],
-        'monitor_list': [row for row in wanted],
+        'monitor_list': [],
         'unmonitor_missing': len([row for row in outside if not row.get('has_file')]),
     }
 
@@ -391,12 +373,12 @@ def monitoring_targets(settings: dict, state: dict, rule: dict) -> dict:
 def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool) -> dict:
     """Bring a series' monitoring in line with its keep window.
 
-    Unmonitoring everything outside the window is unconditional and runs in both modes,
-    including the episodes with no file: those are never deleted, so nothing else would
-    ever unmonitor them, and Sonarr would go on fetching what the next run removes.
+    Unmonitoring everything outside the window is unconditional, including the episodes
+    with no file: those are never deleted, so nothing else would ever unmonitor them, and
+    Sonarr would go on fetching what the next run removes.
 
-    Monitoring happens only under full sync. The one-time passes a save can ask for are
-    applied at that moment, not here — waiting for a run is what made one of them useless.
+    A run never monitors. The one-time pass a save can ask for is applied at that moment,
+    not here — waiting for a run is what made its other half useless.
     """
     targets = monitoring_targets(settings, state, rule)
     monitor = list(targets['monitor'])
@@ -506,7 +488,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     if deleted_ids and not dry_run:
         # Not optional, and not a setting. Deleting a file while leaving the episode
         # monitored guarantees Sonarr fetches it again and the next run deletes it again.
-        # The monitoring mode governs the episodes around it, never this.
         try:
             client.unmonitor(deleted_ids)
             outcome['unmonitored'] = len(deleted_ids)
@@ -548,7 +529,13 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
 
     # Phase one: queued removals. A series leaving takes no further part in this run,
     # because the decision to stop managing it has already been made.
-    removals = apply_removals(settings, selected, dry_run)
+    # Removals are collected from every rule, not only the enabled ones: queueing one is an
+    # explicit decision, and switching a series off afterwards left it stranded for ever
+    # while the scheduled-changes menu went on counting it.
+    queued_rules = [r for r in settings.get('rules', []) if (r.get('queue') or {}).get('removal')]
+    if rule_ids:
+        queued_rules = [r for r in queued_rules if r['id'] in set(rule_ids)]
+    removals = apply_removals(settings, queued_rules, dry_run)
     if removals and not dry_run:
         removed = {record['rule_id'] for record in removals if record['ok']}
         settings['rules'] = [r for r in settings.get('rules', []) if r['id'] not in removed]
@@ -718,22 +705,21 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     return episodes, series, store_episodes(settings, rule, episodes, series), False
 
 
-def relevant_episode_count(series: dict, include_specials: bool):
-    """Count episodes that can affect this rule, or decline an ambiguous comparison."""
-    total = int(series.get('total_episode_count') or 0)
-    seasons = series.get('seasons')
-    if not isinstance(seasons, list) or not seasons:
-        return None
-    season_counts = [(int(season.get('season') or 0), int(season.get('episodes') or 0))
-                     for season in seasons]
-    if sum(count for _, count in season_counts) != total:
-        return None
-    return total if include_specials \
-        else sum(count for number, count in season_counts if number != 0)
-
-
 def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
-    """Re-enable armed, disabled rules when an ended series becomes active again."""
+    """Re-enable armed, disabled rules when an ended series becomes active again.
+
+    Two triggers, because they catch different moments and neither covers the other.
+
+    **Status** is the slow case: Sonarr marks a show continuing when a return is
+    announced, often months before any date exists.
+
+    **The air-date watermark** is the fast case, and the one a status check alone cannot
+    see. A streaming service drops a whole season at once, so Sonarr un-ends the series
+    and re-ends it within hours; sync runs once a day, so `before` and `after` both say
+    ended and the transition is never observed. A status flag is edge-triggered on a value
+    that resets itself. A watermark only moves forward, so it cannot be missed however the
+    syncs happen to fall.
+    """
     changed = []
     for rule in settings.get('rules', []):
         if rule.get('enabled') or not rule.get('auto_reenable') \
@@ -744,20 +730,50 @@ def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
         if not was or not series:
             continue
         resumed = bool(was.get('ended')) and not bool(series.get('ended'))
-        include_specials = specials_included(settings, rule)
-        old_count = relevant_episode_count(was, include_specials)
-        new_count = relevant_episode_count(series, include_specials)
-        new_episode = bool(was.get('ended')) and old_count is not None \
-            and new_count is not None and new_count > old_count
-        if not resumed and not new_episode:
+        reason = 'the series resumed' if resumed else ''
+        if not reason:
+            mark = rule.get('auto_reenable_after') or ''
+            latest = latest_air_date(settings, rule)
+            # Only ever forward: Sonarr revising dates on a refresh can move one backwards,
+            # and that is not news of anything.
+            if mark and latest and latest > mark:
+                reason = 'a newer episode has aired or been scheduled'
+        if not reason:
             continue
         rule['enabled'] = True
         # One-shot: a later manual disable must stay disabled unless this is explicitly
-        # armed again.
+        # armed again. The watermark goes with it, so re-arming takes a fresh reading
+        # rather than resurrecting one from a situation nobody is in any more.
         rule['auto_reenable'] = False
-        changed.append((series.get('title') or rule.get('series_title') or rule['path'],
-                        'resumed' if resumed else 'a new episode appeared'))
+        rule['auto_reenable_after'] = ''
+        changed.append((series.get('title') or rule.get('series_title') or rule['path'], reason))
     return changed
+
+
+def latest_air_date(settings: dict, rule: dict) -> str:
+    """This rule's air-date watermark, from the stored episodes. No network."""
+    cached, _, _ = episode_cache(settings, rule)
+    return air_watermark(cached or [], settings, rule)
+
+
+def refresh_armed_episodes(settings: dict, report: dict) -> None:
+    """Re-read episodes for disabled rules waiting to be re-enabled.
+
+    The sync's own episode pass covers enabled rules only, and runs after the re-enable
+    check besides — so an armed rule's stored episodes would never move and its watermark
+    could never rise. One call each, and only for rules somebody explicitly armed.
+    """
+    for rule in settings.get('rules', []):
+        if rule.get('enabled') or not rule.get('auto_reenable') \
+                or not rule.get('auto_reenable_after') or rule.get('match_status') != 'matched':
+            continue
+        try:
+            client = client_for(settings, rule['instance_id'])
+            episodes = client.episodes(rule['series_id'], files_only=False)
+        except (Rejected, SonarrError) as error:
+            report['errors'].append(f'{rule.get("series_title") or rule["path"]}: {error}')
+            continue
+        store_episodes(settings, rule, episodes, series_record(settings, rule))
 
 
 def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
@@ -809,6 +825,7 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
         catalogue[instance['id']] = {'schema': SCHEMA, 'fetched_at': now_iso(), 'series': fresh}
 
     write_cache(settings, 'catalogue.json', catalogue)
+    refresh_armed_episodes(settings, report)
     reenabled = reenable_returning_rules(settings, before, after)
     if reenabled:
         report['series_reenabled'] = [title for title, _ in reenabled]
@@ -1036,6 +1053,39 @@ def check_connectivity(settings: dict) -> bool:
     return everything_up
 
 
+def disable_expired_rule(settings: dict, rule: dict, state: dict) -> bool:
+    """Switch off a rule whose series has ended with nothing left inside its window.
+
+    No further episodes are coming and nothing remains for a run to act on, so the rule
+    can only sit there being evaluated for ever. A series whose remaining files are all
+    excluded arrives here too, and correctly: exclusions are set aside before the keep
+    frame is computed, so a series holding nothing else has an empty frame.
+
+    Nothing is deleted and the rule is not removed — switching back on is one click, and
+    the notice that says this happened is the one alert kind that survives the disable.
+    """
+    if not rule.get('enabled') or state.get('lifecycle') not in ('ended_expired', 'ended_empty'):
+        return False
+    title = state.get('series_title') or rule.get('series_title') or rule['path']
+    if bool((settings.get('schedule') or {}).get('test_mode', True)):
+        log_line(settings, 'info',
+                 f'{title}: would be switched off — ended with nothing inside the keep '
+                 f'window. Test Mode, so nothing was changed.')
+        return False
+    stored = load_settings()
+    target = next((r for r in stored.get('rules') or [] if r['id'] == rule['id']), None)
+    if not target or not target.get('enabled'):
+        return False
+    target['enabled'] = False
+    rule['enabled'] = False
+    save_settings(stored)
+    settings['rules'] = stored['rules']
+    log_line(settings, 'info',
+             f'{title}: switched off — the series has ended and nothing remains inside '
+             f'its keep window')
+    return True
+
+
 def check_one_rule(settings: dict, rule: dict, instance_state: dict = None, force: bool = False) -> dict:
     """Verify one rule, cache the result, and refresh that rule's alerts.
 
@@ -1074,6 +1124,7 @@ def check_one_rule(settings: dict, rule: dict, instance_state: dict = None, forc
                   if state.get('retention_expired') else '.'),
                event='series_ended')
         log_line(settings, 'warning', f'{state.get("series_title")} has ended in Sonarr')
+    disable_expired_rule(settings, rule, state)
     health['rules'][rule['id']] = state
     others = [alert for alert in (health.get('alerts') or []) if alert.get('rule_id') != rule['id']]
     health['alerts'] = alerts.merge(health.get('alerts') or [],
@@ -1338,7 +1389,6 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
         'unmonitor': len([row for row in outside if row.get('episode_id') in unmonitor]),
         'unmonitor_missing': targets['unmonitor_missing'],
         'monitor': len(monitor),
-        'mode': monitoring_mode(settings, rule),
         'computed_at': now_iso(),
     }
     return state

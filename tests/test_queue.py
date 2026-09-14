@@ -59,13 +59,11 @@ class Overrides(unittest.TestCase):
         self.assertIs(validate_settings(base(include_specials='no'))['rules'][0]['include_specials'], False)
         self.assertIsNone(validate_settings(base())['rules'][0]['include_specials'])
 
-    def test_monitoring_missing_episodes_is_off_unless_chosen(self):
-        # Monitoring an episode with no file starts a download, so it is never a default.
-        self.assertEqual(validate_settings(base())['rules'][0]['monitoring'], '')
-        self.assertEqual(validate_settings(base(monitoring='full-sync'))['rules'][0]['monitoring'],
-                         'full-sync')
-        with self.assertRaises(Rejected):
-            validate_settings(base(monitoring='leave-it-to-sonarr'))
+    def test_a_rule_carries_no_monitoring_mode(self):
+        # There is one behaviour now: a run unmonitors and never monitors. A stale value
+        # in a posted document is dropped rather than honoured.
+        self.assertNotIn('monitoring', validate_settings(base())['rules'][0])
+        self.assertNotIn('monitoring', validate_settings(base(monitoring='full-sync'))['rules'][0])
 
     def test_nonsense_is_refused(self):
         with self.assertRaises(Rejected):
@@ -135,4 +133,5 @@ class LoadNormalises(unittest.TestCase):
                 store.CONFIG = original
             self.assertIn('queue', rule)
             self.assertEqual(rule['queue'], {'removal': None, 'fixes': []})
-            self.assertIn('monitoring', rule)
+            self.assertIn('exclusions', rule)
+            self.assertIn('auto_reenable', rule)

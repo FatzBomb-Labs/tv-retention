@@ -105,41 +105,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   const mutedInputs = {};
 
   // -- automation --------------------------------------------------------
-  // The questions, their answers, and which answer a fresh install starts on. Radios
-  // rather than a dropdown because the answers are the point: a closed select says
-  // "Ask me" and hides the two things it could have done instead, which is how a default
-  // ends up being something nobody chose because nobody saw it.
-  //
-  // The wording matches core's own ANSWERS maps, because the journal explains a run using
-  // those, and a run explaining itself differently from the page that configured it is
-  // worse than either wording alone.
-  const AUTOMATION_QUESTIONS = [
-    ['monitoring', 'tvr-auto-monitoring', [
-      ['in_scope_unmonitored', 'If an episode within the keep scope is unmonitored', [
-        ['monitor', 'Monitor all episodes within the keep scope automatically'],
-        ['ignore', 'Do not change monitoring status'],
-        ['ask', 'Ask me'],
-      ]],
-      ['out_scope_monitored', 'If an episode outside the keep scope is monitored', [
-        ['unmonitor', 'Unmonitor all episodes outside the keep scope automatically'],
-        ['exclude', 'Keep monitored, exclude from deletions'],
-        ['ask', 'Ask me'],
-      ]],
-    ]],
-    ['persistence', 'tvr-auto-persistence', [
-      ['unmonitored_in_scope',
-       'When Sonarr has unmonitored a previously monitored episode within the keep scope', [
-        ['ignore', 'Ignore'],
-        ['notice', 'Ignore, mark as notice'],
-        ['remonitor', 'Remonitor that episode automatically'],
-      ]],
-      ['monitored_out_scope',
-       'When Sonarr has monitored a previously unmonitored episode outside the keep scope', [
-        ['notice-exclude', 'Mark as notice and add to exclusion list'],
-        ['unmonitor', 'Unmonitor automatically'],
-      ]],
-    ]],
-  ];
   // Stored as a flag rather than a word, because it only ever had two answers. Shown as
   // two answers anyway: "off" is not a thing anybody decided, and "wait for the RSS pass"
   // is.
@@ -203,8 +168,8 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   // the page should answer rather than provoke.
   const AIR_PROVIDERS = {
     tmdb: { name: 'TMDB', needs: 'Add an API key under Connections' },
-    tvmaze: { name: 'TVMaze', needs: 'Not built yet — no key needed when it is' },
-    anilist: { name: 'AniList', needs: 'Not built yet — no key needed when it is' },
+    tvmaze: { name: 'TVMaze', needs: 'Planned — no key will be needed' },
+    anilist: { name: 'AniList', needs: 'Planned — no key will be needed' },
     imdb: { name: 'IMDB', needs: 'No public API exists' },
     plex: { name: 'Plex', needs: 'Needs a Plex connection' },
     jellyfin: { name: 'Jellyfin', needs: 'Needs a Jellyfin connection' },
@@ -262,8 +227,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   }
 
   function renderSettings() {
-    const retention = settings().retention || {};
-    $('tvr-monitoring').value = retention.monitoring || 'unmonitor-only';
     const air = settings().air_dates || {};
     airOrder = (air.providers || Object.keys(AIR_PROVIDERS)).slice();
     airEnabled = new Set(air.enabled || []);
@@ -271,20 +234,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     AIR_QUESTIONS.forEach(([name, target, label, answers]) => {
       $(target).replaceChildren(questionNode('air', name, label, answers, air[name]));
     });
-    const describeMonitoring = () => {
-      $('tvr-monitoring-help').textContent = $('tvr-monitoring').value === 'full-sync'
-        ? 'Episodes inside the keep window are set to monitored, including ones with no file — '
-          + 'which asks Sonarr to download them. On a large library that can be hundreds of episodes.'
-        : 'Nothing is ever set to monitored. Widening a series’ keep window will not start '
-          + 'downloads for the seasons it now covers; the series editor offers a one-time pass for that.';
-    };
-    $('tvr-monitoring').onchange = describeMonitoring;
-    describeMonitoring();
     const automation = settings().automation || {};
-    AUTOMATION_QUESTIONS.forEach(([group, target, questions]) => {
-      $(target).replaceChildren(...questions.map(([name, label, answers]) =>
-        questionNode(group, name, label, answers, (automation[group] || {})[name])));
-    });
     $('tvr-auto-search').replaceChildren(
       questionNode('search', 'after_monitor', SEARCH_QUESTION[0], SEARCH_QUESTION[1],
                    automation.search_after_monitor ? 'search' : 'wait'));
@@ -316,7 +266,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     return Object.assign({}, settings(), {
       // `allow_estimated_dates` is not sent: it is derived from the air-date answer on the
       // way in, so posting it as well would be two sources for one decision.
-      retention: { monitoring: $('tvr-monitoring').value },
       air_dates: {
         providers: airOrder.slice(),
         enabled: airOrder.filter((name) => airEnabled.has(name)),
@@ -324,14 +273,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
         still_unresolved: questionInputs['air.still_unresolved'](),
       },
       automation: {
-        monitoring: {
-          in_scope_unmonitored: questionInputs['monitoring.in_scope_unmonitored'](),
-          out_scope_monitored: questionInputs['monitoring.out_scope_monitored'](),
-        },
-        persistence: {
-          unmonitored_in_scope: questionInputs['persistence.unmonitored_in_scope'](),
-          monitored_out_scope: questionInputs['persistence.monitored_out_scope'](),
-        },
         search_after_monitor: questionInputs['search.after_monitor']() === 'search',
         exclude_specials: $('tvr-exclude-specials').checked,
         exclude_seasons: typedList($('tvr-exclude-seasons').value, ','),

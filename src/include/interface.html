@@ -65,7 +65,7 @@
         <button type="button" class="tvr-side-item" data-view="media-schedule">Schedule
           <span class="tvr-tab-badge" id="tvr-badge-media-schedule" hidden></span></button>
         <button type="button" class="tvr-side-item" data-view="media-radarr">Radarr specials
-          <span class="tvr-side-soon">soon</span></button>
+          <span class="tvr-side-soon">planned</span></button>
       </div>
     </div>
 
@@ -205,8 +205,8 @@
       </div>
       <label class="tvr-field" id="tvr-field-cron"><span>Cron expression</span><input type="text" id="tvr-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
       <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-test-mode"><span class="tvr-slider"></span><span class="tvr-switch-text">Test mode — run the schedule without making changes</span></label>
-      <small>Everything happens as it would on a real run: matching, evaluation, history, notifications. Nothing is written to Sonarr, and every line of the output is marked <span class="tvr-mono">[TEST MODE]</span>. Manual runs ignore this and always make real changes.</small>
-      <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity rather than skipped. Sonarr is read again immediately before a run, so nothing acts on a stale reading.</small></p>
+      <small>Everything happens as it would on a real run: matching, evaluation, history, notifications. Nothing is written to Sonarr, and every line of the output is marked <span class="tvr-mono">[TEST MODE]</span>. This applies to every run, scheduled or manual — to delete anything, turn Test mode off.</small>
+      <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity. Sonarr is read again immediately before a run, so nothing acts on a stale reading.</small></p>
     </div>
   </section>
 
@@ -225,31 +225,13 @@
   <!-- ---------------------------------------------------------------- -->
 <section id="tvr-view-media-automation" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Automation</h2></div>
-    <p class="tvr-lede">What happens without anybody asking for it. Every question here had an answer before this page existed — the answer was just buried in the code, which meant the only way to find out what it was was to read it.</p>
+    <p class="tvr-lede">What happens without anybody asking for it. These apply to every series, and a series can opt out of the specials rule from its own editor.</p>
 
     <h3 class="tvr-h3">Monitoring</h3>
     <div class="tvr-card">
-      <div class="tvr-inline-row">
-        <span class="tvr-inline-label">Every run</span>
-        <select id="tvr-monitoring">
-          <option value="unmonitor-only">Unmonitor only — never asks Sonarr to fetch anything</option>
-          <option value="full-sync">Full sync — monitoring follows the keep window both ways</option>
-        </select>
-      </div>
-      <small id="tvr-monitoring-help"></small>
-      <small>Unmonitoring happens either way, including episodes with no file: those are never deleted, so nothing else would ever reach them, and Sonarr would go on fetching what the next run removes. Any series can override this.</small>
-    </div>
-
-    <h3 class="tvr-h3">Monitoring sync</h3>
-    <div class="tvr-card">
-      <small>When a keep scope is set or moved, and when a series is added. Once, on save — not on every run.</small>
-      <div id="tvr-auto-monitoring" class="tvr-questions"></div>
-    </div>
-
-    <h3 class="tvr-h3">Persistence</h3>
-    <div class="tvr-card">
-      <small>Sonarr's monitored flags move on their own — an import, a hand edit, a series refresh. Noticing that is only worth doing if there is a stated answer for it, so here are the two that matter.</small>
-      <div id="tvr-auto-persistence" class="tvr-questions"></div>
+      <small>A run never asks Sonarr to fetch anything. It unmonitors what it deletes, and everything that falls outside the keep window — including episodes with no file, which are never deleted, so nothing else would reach them and Sonarr would go on fetching what the next run removes.</small>
+      <small>Monitoring is only ever set once, when you save a series whose keep window has grown, and only for the episodes that growth brought in.</small>
+      <small><strong>Keeping an episode outside the keep window:</strong> add it to the exclusion list first. An excluded episode's monitored flag is never touched, so whatever you set in Sonarr afterwards stays set. Without the exclusion, the next run unmonitors it.</small>
     </div>
 
     <h3 class="tvr-h3">Automatic search</h3>
@@ -259,9 +241,9 @@
 
     <h3 class="tvr-h3">Exclusions</h3>
     <div class="tvr-card">
-      <small>An excluded episode is never deleted and never unmonitored, whatever a rule says. These are evaluated on every run rather than written into each series, so changing a line here changes every series at once — a list frozen when a series was added would drift silently as these changed.</small>
+      <small>An excluded episode is never deleted and never unmonitored, whatever a rule says. These are applied on every run, so changing a line here changes every series at once.</small>
       <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-exclude-specials"><span class="tvr-slider"></span><span class="tvr-switch-text">Automatically exclude specials</span></label>
-      <small>Sonarr files specials as season 0 or into a folder of their own depending on a naming setting nobody remembers choosing, so both are caught. Any series can opt out of this from its own editor.</small>
+      <small>Sonarr files specials as season 0 or into a folder of their own, depending on your naming settings, and both are caught. Any series can opt out of this from its own editor.</small>
       <label class="tvr-field"><span>Automatically exclude these seasons</span>
         <input type="text" id="tvr-exclude-seasons" spellcheck="false" placeholder="0, 1">
         <small>Season numbers, separated by commas. Sonarr has no season names to match on — its season object carries a number, a monitored flag and statistics, nothing else.</small></label>
@@ -325,7 +307,7 @@
     <p class="tvr-lede">There is no separate "add" screen. A series Sonarr holds and a series you already manage are the same row in the same list, so you find the show under <em>Series</em> and click it. The editor opens beside the list.</p>
     <ol class="tvr-list">
       <li>Open <em>Series → Not watching</em> and search for the show.</li>
-      <li>Set how much to keep: a preset, or <strong>Custom</strong> values for this show alone. Custom is the default, because sharing values with other shows is a decision rather than a starting point.</li>
+      <li>Set how much to keep: a preset, or <strong>Custom</strong> values for this show alone. Custom is the default.</li>
       <li>Press <strong>Save and enable</strong>, or <strong>Save</strong> to add it switched off until you are ready.</li>
     </ol>
     <p class="tvr-lede">Nothing is deleted by saving. The next-run lines in the editor say what the first run would do, and they move as you type, so you can see the consequence of a keep value before you commit to it.</p>
@@ -344,9 +326,9 @@
 <section id="tvr-view-help-connecting" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Connecting apps</h2></div>
     <p class="tvr-lede">Sonarr is the only connection this needs. Add it under <em>Settings → Connections</em> with its URL and API key, and press <strong>Test &amp; save</strong>: it reports the version, counts the series, and says whether Sonarr has a recycle bin configured.</p>
-    <p class="tvr-lede">If Sonarr has <strong>no recycle bin</strong>, everything it deletes is permanent — including what is asked for here. That raises a warning with a one-click fix, because it applies to everything Sonarr deletes rather than only to this.</p>
+    <p class="tvr-lede">If Sonarr has <strong>no recycle bin</strong>, everything it deletes is permanent — including what is asked for here. That raises a warning with a one-click fix.</p>
     <p class="tvr-lede">More than one Sonarr is supported, and each series belongs to exactly one of them. An instance can be disabled without deleting it, which leaves its rules in place and stops them being processed.</p>
-      <p class="tvr-lede">Sonarr is read once a day, and everything on screen is answered from that reading — which is why nothing here waits on it. The age is shown beside the scheduled changes, the refresh control at the top syncs on demand, and a run always reads Sonarr again before it acts.</p>
+      <p class="tvr-lede">Sonarr is read once a day, and everything on screen is answered from that reading, so nothing here waits on it. The age is shown beside the scheduled changes, the refresh control at the top syncs on demand, and a run always reads Sonarr again before it acts.</p>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
@@ -355,16 +337,17 @@
     <div class="tvr-view-head"><h2>Managing presets</h2></div>
     <p class="tvr-lede">A preset is a named set of keep values shared by any number of shows — <em>Keep 30 days</em>, <em>Keep 2 seasons</em>. Raise the preset and every show pointing at it widens at once, with no show-by-show editing.</p>
     <p class="tvr-lede">A preset is the single source of truth for the shows using it, so those shows store no numbers of their own: a card using a preset shows one blue pill, and only a custom rule spells its values out. A preset still in use cannot be deleted.</p>
-    <p class="tvr-lede">Use <strong>Custom</strong> when a show's retention is genuinely its own. Sharing values with other shows is a decision worth making deliberately, which is why a new series starts on Custom rather than on whichever preset happened to be first.</p>
+    <p class="tvr-lede">Use <strong>Custom</strong> when a show's retention is genuinely its own. A new series starts on Custom, so it never picks up a preset's values without you choosing them.</p>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
 
 <section id="tvr-view-help-monitoring" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Monitoring</h2></div>
-      <p class="tvr-lede"><strong>Unmonitor only</strong> never asks Sonarr to fetch anything: it unmonitors what it deletes, and whatever falls outside the keep window. <strong>Full sync</strong> also monitors everything inside the window, including episodes with no file — which asks Sonarr to download them. Deleting a file always unmonitors it in both modes; anything else would have Sonarr fetch it back and the next run delete it again.</p>
-    <p class="tvr-lede">There is deliberately no third mode that leaves Sonarr's flags alone. It would mean Sonarr re-fetching what a run had just removed and the next run deleting it again — and a setting whose interface needs a danger label is a missing invariant rather than a choice.</p>
-    <p class="tvr-lede"><strong>Full sync can be expensive.</strong> Monitoring an episode with no file asks Sonarr to download it, so the mode that never starts a download is the default and an upgrade never moves anyone onto the other one.</p>
+      <p class="tvr-lede">A run <strong>only ever unmonitors</strong>. It unmonitors what it deletes, and whatever falls outside the keep window — including episodes with no file, which are never deleted, so nothing else would reach them and Sonarr would go on fetching what the next run removes.</p>
+    <p class="tvr-lede">Deleting a file always unmonitors it. Anything else would have Sonarr fetch it back and the next run delete it again, for ever. That is why no setting can switch it off.</p>
+    <p class="tvr-lede"><strong>Nothing here ever monitors on a schedule.</strong> Monitoring an episode with no file asks Sonarr to download it, which can be hundreds of episodes. It happens once, and only when you ask: save a series whose keep window has grown, and the editor offers to monitor the episodes that growth brought in.</p>
+    <p class="tvr-lede"><strong>To keep an episode outside the keep window, exclude it first.</strong> An excluded episode is set aside before the keep window is worked out, so it is in neither half of it and nothing here ever touches its monitored flag — whatever you set in Sonarr afterwards stays set. Without the exclusion, the next run unmonitors it. The exclusion picker offers the monitored flag beside each episode, so the whole decision is made in one place.</p>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
@@ -478,8 +461,8 @@
 
 <section id="tvr-view-settings-api" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>TV Retention API</h2></div>
-    <p class="tvr-lede">A key for reaching this instance from something other than a browser. Nothing uses it yet; it exists so that when something does, the key is already here and already yours to rotate.</p>
-    <div class="tvr-card"><p class="tvr-lede tvr-soon">Not built yet.</p></div>
+    <p class="tvr-lede">A key for reaching this instance from something other than a browser.</p>
+    <div class="tvr-card"><p class="tvr-lede tvr-soon">This is planned for a future release. Nothing here needs your attention today.</p></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
@@ -491,10 +474,10 @@
 
     <h3 class="tvr-h3">Air date resolution</h3>
     <div class="tvr-card">
-      <small>A rule that keeps by age needs a date for every episode it judges. Sonarr supplies one for almost everything with a broadcast slot, so this is rare — but where it bites, it bites silently: a series nothing can date is a series a keep-by-age rule processes and finds nothing in.</small>
+      <small>A rule that keeps by age needs a date for every episode it judges. Sonarr supplies one for almost everything with a broadcast slot, so this is rare — but when a series has no dates, a keep-by-age rule quietly finds nothing to act on.</small>
       <div class="tvr-field"><span>If Sonarr has no air date, ask these in order</span>
         <div id="tvr-air-providers" class="tvr-providers"></div>
-        <small>The first enabled service that answers wins, so the order is the setting. A service that cannot be reached yet is shown with the reason rather than left off the list. TVDB is absent on purpose: it is Sonarr's own metadata source, so if Sonarr has no date then TVDB has none either.</small></div>
+        <small>The first enabled service that answers wins, so the order is the setting. A service you cannot use yet is listed with the reason why. TVDB is not listed: it is Sonarr's own metadata source, so if Sonarr has no date then TVDB has none either.</small></div>
       <div id="tvr-air-unresolved" class="tvr-questions"></div>
       <div id="tvr-air-still" class="tvr-questions"></div>
     </div>
@@ -506,15 +489,15 @@
 
 <section id="tvr-view-system-backup" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Backup</h2></div>
-    <p class="tvr-lede">Everything lives under <span class="tvr-mono">/config</span>, so a backup is a copy of one directory and a restore is putting it back. Automatic backups are not built yet.</p>
-    <div class="tvr-card"><p class="tvr-lede tvr-soon">Not built yet.</p></div>
+    <p class="tvr-lede">Everything lives under <span class="tvr-mono">/config</span>, so a backup is a copy of one directory and a restore is putting it back.</p>
+    <div class="tvr-card"><p class="tvr-lede tvr-soon">Scheduled backups are planned for a future release. Until then, copy the <span class="tvr-mono">/config</span> directory whenever you want a restore point.</p></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
 
 <section id="tvr-view-media-radarr" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Radarr specials</h2></div>
-    <div class="tvr-card"><p class="tvr-lede tvr-soon">Not built yet.</p></div>
+    <div class="tvr-card"><p class="tvr-lede tvr-soon">Retention for films through Radarr is planned for a future release.</p></div>
   </section>
   </main>
 </div>

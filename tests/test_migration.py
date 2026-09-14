@@ -148,25 +148,91 @@ class RealConfiguration(unittest.TestCase):
                          sorted(r['id'] for r in self.old['rules']))
 
 
+class TheVersionNumber(unittest.TestCase):
+    def test_validation_stamps_the_version_the_migration_reaches(self):
+        """They were two constants, and only one got bumped.
+
+        `migrate` raised the document to 12 and `validate_settings` stamped it back to 11,
+        so every load migrated it again and the file on disk never moved.
+        """
+        import core
+        self.assertEqual(core.SETTINGS_VERSION, SETTINGS_VERSION)
+
+    def test_a_migrated_document_survives_validation_at_its_new_version(self):
+        document = migrate({'settings_version': 11, 'instances': [], 'rules': []})
+        self.assertEqual(validate_settings(document)['settings_version'], SETTINGS_VERSION)
+
+
+class ToVersionTwelve(unittest.TestCase):
+    """Full sync goes, and with it two settings groups nothing ever read."""
+
+    def setUp(self):
+        self.document = migrate({
+            'settings_version': 11,
+            'retention': {'monitoring': 'full-sync', 'allow_estimated_dates': True},
+            'automation': {'monitoring': {'in_scope_unmonitored': 'monitor'},
+                           'persistence': {'monitored_out_scope': 'unmonitor'},
+                           'search_after_monitor': True, 'exclude_specials': False,
+                           'exclude_seasons': [3]},
+            'instances': [{'id': 'i1', 'name': 'S', 'url': 'http://s:8989', 'api_key': 'a' * 32}],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                       'monitoring': 'full-sync', 'keep_days': 30},
+                      {'id': 'r2', 'instance_id': 'i1', 'series_id': 2, 'path': '/tv/B',
+                       'monitoring': '', 'keep_days': 60}],
+        })
+
+    def test_the_mode_is_gone_from_every_rule(self):
+        for rule in self.document['rules']:
+            self.assertNotIn('monitoring', rule)
+
+    def test_a_series_opted_into_full_sync_lands_on_the_safe_behaviour(self):
+        # There is nowhere left to record the choice, and nothing left that would act on
+        # it: a run no longer monitors anything at all.
+        self.assertNotIn('monitoring', self.document['retention'])
+
+    def test_the_two_unread_groups_are_removed(self):
+        self.assertNotIn('monitoring', self.document['automation'])
+        self.assertNotIn('persistence', self.document['automation'])
+
+    def test_everything_that_was_wired_survives(self):
+        automation = self.document['automation']
+        self.assertTrue(automation['search_after_monitor'])
+        self.assertFalse(automation['exclude_specials'])
+        self.assertEqual(automation['exclude_seasons'], [3])
+        self.assertTrue(self.document['retention']['allow_estimated_dates'])
+
+    def test_keep_values_are_untouched(self):
+        self.assertEqual([r['keep_days'] for r in self.document['rules']], [30, 60])
+
+    def test_migrating_twice_changes_nothing_further(self):
+        self.assertEqual(migrate(self.document), self.document)
+
+    def test_the_migrated_document_validates(self):
+        settings = validate_settings(self.document)
+        self.assertNotIn('monitoring', settings['retention'])
+        self.assertNotIn('monitoring', settings['automation'])
+        self.assertEqual(len(settings['rules']), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
 
 
 class ToVersionFive(unittest.TestCase):
-    """One monitoring mode replaces a per-series flag and an unwritten rule."""
+    """One monitoring mode replaced a per-series flag; v12 then removed the mode itself."""
 
     def test_everyone_lands_on_the_safe_mode(self):
         document = migrate({'settings_version': 4, 'retention': {'include_specials': True},
                             'rules': [{'id': 'r1', 'monitor_missing': True}]})
         self.assertEqual(document['settings_version'], SETTINGS_VERSION)
-        self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')
+        self.assertNotIn('monitoring', document['retention'], 'v12 removed the mode entirely')
         self.assertFalse(document['automation']['exclude_specials'], 'other settings survive')
 
     def test_a_series_opted_into_downloads_is_not_carried_over(self):
         """An upgrade is the wrong moment to start hundreds of downloads."""
         document = migrate({'settings_version': 4, 'rules': [{'id': 'r1', 'monitor_missing': True}]})
         self.assertNotIn('monitor_missing', document['rules'][0])
-        self.assertEqual(document['rules'][0]['monitoring'], '', 'inherits the global mode')
+        self.assertNotIn('monitoring', document['rules'][0])
 
     def test_migrating_twice_changes_nothing_further(self):
         once = migrate({'settings_version': 4, 'rules': [{'id': 'r1', 'monitor_missing': True}]})
@@ -175,7 +241,7 @@ class ToVersionFive(unittest.TestCase):
     def test_the_whole_chain_still_arrives(self):
         document = migrate({'dry_run': True, 'schedule': {'cron': '0 4 * * *', 'enabled': True}})
         self.assertEqual(document['settings_version'], SETTINGS_VERSION)
-        self.assertEqual(document['retention']['monitoring'], 'unmonitor-only')
+        self.assertNotIn('monitoring', document['retention'])
 
 
 class ToVersionSix(unittest.TestCase):

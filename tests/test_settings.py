@@ -208,23 +208,19 @@ class AutomationFromTheForm(unittest.TestCase):
         self.assertEqual(found['exclude_episodes'], [])
         self.assertIs(found['exclude_specials'], True)
         self.assertIs(found['search_after_monitor'], False)
-        self.assertEqual(found['monitoring'],
-                         {'in_scope_unmonitored': 'ask', 'out_scope_monitored': 'ask'})
-        self.assertEqual(found['persistence'],
-                         {'unmonitored_in_scope': 'ignore', 'monitored_out_scope': 'notice-exclude'})
 
-    def test_ask_me_is_the_default_for_both_monitoring_questions(self):
-        """Either half can move hundreds of episodes.
+    def test_the_two_groups_nothing_ever_read_are_gone(self):
+        """They validated, stored and rendered, and no code anywhere consulted them.
 
-        A default that acts is a default nobody chose, and the two that act are the two
-        that download or stop downloading at scale.
+        A setting that does nothing is worse than an absent one, because the page it sits
+        on is the documentation. A stale value posted by an old client is dropped.
         """
-        found = validate_settings(base())['automation']['monitoring']
-        self.assertEqual(set(found.values()), {'ask'})
-
-    def test_an_answer_nobody_offered_is_refused(self):
-        with self.assertRaises(Rejected):
-            validate_settings(base(automation={'monitoring': {'in_scope_unmonitored': 'maybe'}}))
+        found = validate_settings(base(automation={
+            'monitoring': {'in_scope_unmonitored': 'monitor'},
+            'persistence': {'monitored_out_scope': 'unmonitor'},
+        }))['automation']
+        self.assertNotIn('monitoring', found)
+        self.assertNotIn('persistence', found)
 
     def test_specials_are_excluded_until_somebody_says_otherwise(self):
         # The safety it always was, now visible: it appears on the series card as a cause

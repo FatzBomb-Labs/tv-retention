@@ -14,6 +14,15 @@ const bytes = (value) => {
   return `${size.toFixed(size < 10 && index > 0 ? 1 : 0)} ${units[index]}`;
 };
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
+// Date only. An air date is a day, and rendering it through `when` invented a midnight
+// that then moved across the date line in any timezone behind UTC.
+const day = (iso) => {
+  if (!iso) return '';
+  const parts = String(iso).slice(0, 10).split('-');
+  if (parts.length !== 3) return '';
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+    .toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
 // "series" is already plural; nothing ending in s takes another one.
 const plural = (count, word) => `${count} ${word}${count === 1 || word.endsWith('s') ? '' : 's'}`;
 function ago(stamp) {
@@ -33,4 +42,4 @@ const range = (from, to, pad) => {
   return out;
 };
 
-export { bytes, when, plural, ago, range };
+export { bytes, when, day, plural, ago, range };

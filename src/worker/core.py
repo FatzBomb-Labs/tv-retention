@@ -20,7 +20,10 @@ from pathlib import Path
 import schedules
 
 VERSION = '0.3.0'
-SETTINGS_VERSION = 11
+# One number, owned by the module that knows the steps. Held separately once, and the two
+# disagreed: the migration ran and then validation stamped the document back to the older
+# version, so every load migrated it again.
+from migrate import SETTINGS_VERSION  # noqa: E402
 # Bumped whenever anything cached changes shape — a health result, or the mapped series in
 # the catalogue. Both caches store mapped objects, so a change to the mapping must retire
 # them; otherwise a new field reads as absent until the cache happens to expire.
@@ -29,13 +32,6 @@ CACHE_SCHEMA = 8
 # Extensions treated as episode media. Anything else in a season folder is a sidecar
 # candidate or is left alone entirely.
 COMBINE_MODES = ['any', 'all']
-
-# How the plugin treats Sonarr's monitored flags. Two values, not three: "leave Sonarr
-# alone" would let it re-fetch what a run has just deleted, and unmonitoring on delete is
-# an invariant here rather than a preference. Unmonitoring is protection — it only ever
-# stops a download — so it happens in both. Monitoring is intent, and can cost hundreds of
-# gigabytes, so it happens only under full sync or when asked for once.
-MONITORING_MODES = ['unmonitor-only', 'full-sync']
 
 DEFAULTS = {
     'settings_version': SETTINGS_VERSION,
@@ -62,19 +58,6 @@ DEFAULTS = {
     # be taken silently by the code, which meant the only way to find out what it was was
     # to read the code.
     'automation': {
-        # The one-time pass offered when a keep window is set or moved. "Ask me" is the
-        # default for both halves because either can move hundreds of episodes, and a
-        # default that acts is a default nobody chose.
-        'monitoring': {
-            'in_scope_unmonitored': 'ask',    # monitor | ignore | ask
-            'out_scope_monitored': 'ask',     # unmonitor | exclude | ask
-        },
-        # Sonarr's monitored flags move on their own — an import, a hand edit, a series
-        # refresh. Noticing that is only useful if there is a stated answer for it.
-        'persistence': {
-            'unmonitored_in_scope': 'ignore',        # ignore | notice | remonitor
-            'monitored_out_scope': 'notice-exclude',  # notice-exclude | unmonitor
-        },
         # Monitoring an episode does not fetch it until Sonarr's next RSS pass. Searching
         # closes that gap, and can turn a metadata change into a great many downloads.
         'search_after_monitor': False,
@@ -115,9 +98,6 @@ DEFAULTS = {
         # either side. With this off, an episode none of those can date is never deleted.
         # This is `air_dates.unresolved` said in the shape `evaluate` reads.
         'allow_estimated_dates': True,
-        # What the plugin does with Sonarr's monitored flags. See MONITORING_MODES: the
-        # safe one is the default, because the other can start hundreds of downloads.
-        'monitoring': 'unmonitor-only',
     },
     # What the header says, and what may be quietened. Errors are absent on purpose: one
     # blocks a series from running, so it is not something to turn off.
@@ -435,6 +415,23 @@ def specials_included(settings: dict, rule: dict) -> bool:
         else not bool(automation.get('exclude_specials'))
 
 
+def air_watermark(episodes, settings: dict, rule: dict) -> str:
+    """The latest air date that could matter to this rule, as a high-water mark.
+
+    Derived per rule rather than taken from Sonarr's series-level `previousAiring`, which
+    knows nothing about the specials policy: a Christmas special on a show that genuinely
+    finished would move that field and re-arm a rule whose owner excludes season 0.
+    Computing it here inherits the per-series override for free.
+
+    Unaired episodes count. A date that is scheduled is the better moment to notice a
+    series has resumed — retention should be live before the episodes land, not after.
+    """
+    include_specials = specials_included(settings, rule)
+    found = [episode.get('air_date') or '' for episode in episodes or []
+             if include_specials or (episode.get('season') or 0) != 0]
+    return max((date for date in found if date), default='')
+
+
 # series itself: options five and six ask Sonarr to, so its bookkeeping and its recycle
 # bin apply. Everything the plugin removes on its own is still individual episode files.
 REMOVAL_ACTIONS = {
@@ -475,18 +472,6 @@ def validate_queue(raw) -> dict:
     return queue
 
 
-def _answers(raw, allowed, field) -> dict:
-    """One of a fixed set per question, and never a blank.
-
-    A missing answer is the default rather than an error: this section grew a question at
-    a time, and a document written before one existed still has to load.
-    """
-    raw = raw or {}
-    return {name: _choice(raw.get(name) or allowed[name]['default'],
-                          allowed[name]['options'], f'{field} {name}')
-            for name in allowed}
-
-
 def _phrases(raw, field) -> list:
     """A typed list, in the order it was typed, without the blanks or the repeats."""
     found = []
@@ -495,46 +480,6 @@ def _phrases(raw, field) -> list:
         if text and text not in found:
             found.append(text)
     return found
-
-
-# What the two monitoring questions may be answered with, and what each answer means. The
-# text is here rather than in the interface because the journal says it too, and a run
-# explaining itself differently from the page that configured it is worse than either.
-MONITORING_ANSWERS = {
-    'in_scope_unmonitored': {
-        'monitor': 'Monitor all episodes within the keep scope automatically',
-        'ignore': 'Do not change monitoring status',
-        'ask': 'Ask me',
-    },
-    'out_scope_monitored': {
-        'unmonitor': 'Unmonitor all episodes outside the keep scope automatically',
-        'exclude': 'Keep monitored, exclude from deletions',
-        'ask': 'Ask me',
-    },
-}
-PERSISTENCE_ANSWERS = {
-    'unmonitored_in_scope': {
-        'ignore': 'Ignore',
-        'notice': 'Ignore, mark as notice',
-        'remonitor': 'Remonitor that episode automatically',
-    },
-    'monitored_out_scope': {
-        'notice-exclude': 'Mark as notice and add to exclusion list',
-        'unmonitor': 'Unmonitor automatically',
-    },
-}
-
-AUTOMATION_CHOICES = {
-    'monitoring': {name: {'options': tuple(answers), 'default': default}
-                   for name, answers, default in (
-                       ('in_scope_unmonitored', MONITORING_ANSWERS['in_scope_unmonitored'], 'ask'),
-                       ('out_scope_monitored', MONITORING_ANSWERS['out_scope_monitored'], 'ask'))},
-    'persistence': {name: {'options': tuple(answers), 'default': default}
-                    for name, answers, default in (
-                        ('unmonitored_in_scope', PERSISTENCE_ANSWERS['unmonitored_in_scope'], 'ignore'),
-                        ('monitored_out_scope', PERSISTENCE_ANSWERS['monitored_out_scope'],
-                         'notice-exclude'))},
-}
 
 
 def validate_automation(raw) -> dict:
@@ -548,8 +493,6 @@ def validate_automation(raw) -> dict:
     for value in raw.get('exclude_seasons') or []:
         seasons.add(_whole(value, 'Excluded season', 0, 999, allow_none=False))
     return {
-        'monitoring': _answers(raw.get('monitoring'), AUTOMATION_CHOICES['monitoring'], 'Monitoring sync'),
-        'persistence': _answers(raw.get('persistence'), AUTOMATION_CHOICES['persistence'], 'Persistence'),
         'search_after_monitor': _flag(raw.get('search_after_monitor', False)),
         'exclude_specials': _flag(raw.get('exclude_specials', True)),
         'exclude_seasons': sorted(seasons),
@@ -770,6 +713,9 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         id=_text(raw.get('id'), 'Rule id', 32) or new_id(),
         enabled=_flag(raw.get('enabled', True)),
         auto_reenable=_flag(raw.get('auto_reenable', False)),
+        # The air date this rule was armed at. Anything later means new material, however
+        # the daily syncs happen to fall around a series that un-ends and re-ends in hours.
+        auto_reenable_after=_text(raw.get('auto_reenable_after'), 'Re-enable watermark', 40),
         instance_id=instance_id,
         profile_id=profile_id,
         series_id=series_id,
@@ -781,9 +727,6 @@ def validate_rule(raw, instance_ids, profile_ids=()) -> dict:
         path=validate_path(raw.get('path'), 'Series folder'),
         # Per show, because one series' specials are worth keeping and another's are not.
         include_specials=_tristate(raw.get('include_specials'), 'Include specials'),
-        # Empty means inherit the global mode. A series is the right place to override it:
-        # one show can be worth keeping fully in step with Sonarr while the rest are not.
-        monitoring=_choice(raw.get('monitoring'), MONITORING_MODES, 'Monitoring', allow_blank=True),
         queue=validate_queue(raw.get('queue')),
         # Never monitored by us, never unmonitored by us, never deleted. The one list that
         # outranks every rule, including this rule's own.
@@ -904,8 +847,6 @@ def validate_settings(raw, previous=None) -> dict:
             # somebody set, and this is the shape `evaluate` reads. Derived here so the two
             # cannot drift.
             'allow_estimated_dates': air_dates['unresolved'] == 'estimate',
-            'monitoring': _choice(retention_raw.get('monitoring') or DEFAULTS['retention']['monitoring'],
-                                  MONITORING_MODES, 'Monitoring'),
         },
         'notifications': dict({name: _flag(notify_raw.get(name, default))
                                for name, default in DEFAULTS['notifications'].items()
@@ -1313,8 +1254,6 @@ def rule_fingerprint(rule: dict, settings: dict) -> str:
         'path': active.get('path'),
         'series_id': active.get('series_id'),
         'global_specials': (settings.get('automation') or {}).get('exclude_specials'),
-        'monitoring': active.get('monitoring'),
-        'global_monitoring': retention.get('monitoring'),
         'estimated_dates': retention.get('allow_estimated_dates'),
 
     }

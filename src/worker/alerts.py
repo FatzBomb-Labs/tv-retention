@@ -41,19 +41,30 @@ KINDS = {
         'severity': NOTICE, 'blocking': False, 'scope': 'series',
         'title': 'Series has ended',
         'help': 'No further episodes are coming, so what is kept here will only shrink. '
-                'Worth deciding what you want to keep of it while there is still something '
-                'to decide about.',
+                'This rule will be switched off automatically once nothing is left inside '
+                'its keep window. Worth deciding what you want to keep while there is '
+                'still something to decide about.',
         # Sonarr's own "this series ended" notification already goes out once, the first
         # time it says so. This is the standing fact rather than the news of it.
         'action': '', 'notify': False,
     },
     'ended-expired': {
-        'severity': WARNING, 'blocking': False, 'scope': 'series',
+        # A notice, not a warning: nothing is wrong. The series finished, its window
+        # emptied, and this application switched the rule off — which is what it should
+        # do. Counting an expected event as a problem is how people learn to ignore the
+        # header.
+        'severity': NOTICE, 'blocking': False, 'scope': 'series',
         'title': 'Ended, and nothing is left inside the keep window',
-        'help': 'This rule has nothing further to do. You can remove it, or remove the show.',
+        'help': 'This rule has been switched off: there is nothing left for it to act on, '
+                'and no further episodes are coming. You can remove it, or remove the show.',
         # The series ending is worth telling someone about, and it already is, once, when
         # Sonarr first reports it. Announcing this as well would say it twice.
         'action': 'remove-rule', 'notify': False,
+        # The rule this is about is the rule this switched off, and `managed_only` drops
+        # alerts belonging to a disabled rule. An alert about a *state* is fairly
+        # suppressed when nobody is managing the series; one recording an action this
+        # application took is not, or it would silence the only notice of its own doing.
+        'survives_disable': True,
     },
     'sonarr-unreachable': {
         'severity': ERROR, 'blocking': True, 'scope': 'system',
@@ -161,6 +172,16 @@ def fingerprint(alert) -> str:
     return hashlib.sha256(material.encode('utf-8')).hexdigest()[:16]
 
 
+def survives_disable(alert) -> bool:
+    """Whether this alert still counts once its series is switched off.
+
+    True only for kinds that record something this application *did*. A state nobody is
+    managing is fairly suppressed; an action taken without being asked for is not, and
+    auto-disable would otherwise silence the only notice that it happened.
+    """
+    return bool(KINDS.get(alert.get('kind'), {}).get('survives_disable'))
+
+
 def managed_only(alerts, settings: dict) -> list:
     """Alerts about series a run would actually touch.
 
@@ -176,7 +197,8 @@ def managed_only(alerts, settings: dict) -> list:
     off = {rule.get('id') for rule in settings.get('rules') or [] if not rule.get('enabled')}
     if not off:
         return list(alerts or [])
-    return [alert for alert in alerts or [] if alert.get('rule_id') not in off]
+    return [alert for alert in alerts or []
+            if alert.get('rule_id') not in off or survives_disable(alert)]
 
 
 def annotate(alerts, settings: dict, acknowledged: dict) -> list:
@@ -199,7 +221,7 @@ def annotate(alerts, settings: dict, acknowledged: dict) -> list:
             continue
         seen = (acknowledged or {}).get(alert['key'])
         shown.append(dict(alert, acknowledged=bool(seen and seen == fingerprint(alert)),
-                          unmanaged=alert.get('rule_id') in off))
+                          unmanaged=alert.get('rule_id') in off and not survives_disable(alert)))
     return shown
 
 

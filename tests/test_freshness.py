@@ -352,18 +352,96 @@ class Sync(unittest.TestCase):
         self.episodes[0]['monitored'] = not self.episodes[0]['monitored']
         self.assertEqual(main.sync_from_sonarr(self.settings)['episodes_changed'], ['A'])
 
-    def test_a_sync_reenables_an_armed_ended_series_when_an_episode_appears(self):
-        self.library[0].update(
-            ended=True, status='ended', total_episode_count=5,
-            seasons=[{'season': 1, 'episodes': 5}])
-        self.rule.update(enabled=False, auto_reenable=True)
+    def arm(self, watermark=None):
+        """The real sequence: the rule ran, the series ended, then somebody armed it.
+
+        Order matters. The rule has to have been enabled for a sync so its episodes are
+        stored — the mark is taken from them, and a rule armed with nothing cached falls
+        back to the status trigger.
+        """
         main.sync_from_sonarr(self.settings)
-        self.library[0]['total_episode_count'] = 6
-        self.library[0]['seasons'][0]['episodes'] = 6
+        self.library[0].update(ended=True, status='ended')
+        self.rule.update(enabled=False, auto_reenable=True)
+        self.rule['auto_reenable_after'] = \
+            main.latest_air_date(self.settings, self.rule) if watermark is None else watermark
+        main.sync_from_sonarr(self.settings)
+
+    def add_episode(self, number, days_ahead=0, season=1):
+        aired = (dt.date.today() + dt.timedelta(days=days_ahead)).isoformat()
+        self.episodes.append(dict(episode(number), season=season, air_date=aired))
+
+    def test_a_sync_reenables_an_armed_series_that_sonarr_says_resumed(self):
+        # The slow case: a return announced long before any date exists.
+        self.arm()
+        self.library[0].update(ended=False, status='continuing')
         report = main.sync_from_sonarr(self.settings)
         self.assertEqual(report['series_reenabled'], ['A'])
         self.assertTrue(self.rule['enabled'])
         self.assertFalse(self.rule['auto_reenable'])
+        self.assertEqual(self.rule['auto_reenable_after'], '', 'the mark goes with the arming')
+
+    def test_a_whole_season_dropped_between_two_syncs_still_reenables(self):
+        """The case a status check cannot see.
+
+        A streaming service drops a season at once, so Sonarr un-ends the series and
+        re-ends it within hours. Sync runs daily, so both readings say ended and the
+        transition is never observed — but the newest air date has moved, and that only
+        ever moves forward.
+        """
+        self.arm()
+        self.add_episode(6, days_ahead=1)
+        report = main.sync_from_sonarr(self.settings)
+        self.assertEqual(report['series_reenabled'], ['A'])
+        self.assertTrue(self.rule['enabled'])
+
+    def test_a_scheduled_episode_reenables_before_it_lands(self):
+        # Retention should be live before the episodes arrive, not after.
+        self.arm()
+        self.add_episode(6, days_ahead=30)
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], ['A'])
+
+    def test_nothing_new_leaves_it_alone(self):
+        self.arm()
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], [])
+        self.assertFalse(self.rule['enabled'])
+
+    def test_a_date_moving_backwards_is_not_news(self):
+        # Sonarr revising dates on a refresh must not read as new material.
+        self.arm()
+        self.episodes[-1]['air_date'] = (dt.date.today() - dt.timedelta(days=900)).isoformat()
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], [])
+
+    def test_a_special_does_not_reenable_a_rule_that_excludes_specials(self):
+        """The watermark is per rule, not Sonarr's specials-blind `previousAiring`.
+
+        A Christmas special on a show that genuinely finished would otherwise re-enable a
+        rule whose owner excludes season 0.
+        """
+        self.arm()
+        self.add_episode(7, days_ahead=1, season=0)
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], [])
+
+    def test_a_special_does_reenable_when_the_series_keeps_specials(self):
+        self.rule['include_specials'] = True
+        self.arm()
+        self.add_episode(7, days_ahead=1, season=0)
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], ['A'])
+
+    def test_an_unarmed_rule_is_never_reenabled(self):
+        self.arm()
+        self.rule['auto_reenable'] = False
+        self.add_episode(6, days_ahead=1)
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], [])
+        self.assertFalse(self.rule['enabled'])
+
+    def test_a_rule_armed_before_watermarks_existed_falls_back_to_status(self):
+        # Migrated forward with no mark: the air-date trigger cannot fire, and must not
+        # fire on an empty string either.
+        self.arm(watermark='')
+        self.add_episode(6, days_ahead=1)
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], [])
+        self.library[0].update(ended=False, status='continuing')
+        self.assertEqual(main.sync_from_sonarr(self.settings)['series_reenabled'], ['A'])
 
     def test_the_interval_decides_when_it_is_due(self):
         self.assertTrue(main.sync_is_due(self.settings), 'nothing stored means overdue')
@@ -468,76 +546,26 @@ class AutoReenable(unittest.TestCase):
         changed = main.reenable_returning_rules(
             self.settings, self.before,
             {('i1', 1): {'title': 'Returning', 'ended': False, 'total_episode_count': 20}})
-        self.assertEqual(changed, [('Returning', 'resumed')])
+        self.assertEqual(changed, [('Returning', 'the series resumed')])
         self.assertTrue(self.rule['enabled'])
         self.assertFalse(self.rule['auto_reenable'])
 
-    def test_a_new_episode_reenables_even_before_sonarr_changes_the_status(self):
+    def test_an_episode_count_is_no_longer_a_trigger(self):
+        """It approximated the air-date watermark and needed a guard to be trusted.
+
+        `relevant_episode_count` declined whenever Sonarr's season breakdown failed to
+        reconcile, which is a comparison saying it cannot be relied on. The watermark
+        answers the same question from a value Sonarr sets directly, so counts moving on
+        their own — a renumbering, a refresh — mean nothing here.
+        """
         changed = main.reenable_returning_rules(
             self.settings, self.before,
             {('i1', 1): {
                 'title': 'Returning', 'ended': True, 'total_episode_count': 21,
                 'seasons': [{'season': 0, 'episodes': 2}, {'season': 1, 'episodes': 19}],
             }})
-        self.assertEqual(changed, [('Returning', 'a new episode appeared')])
-        self.assertTrue(self.rule['enabled'])
-
-    def test_a_new_special_does_not_reenable_when_specials_are_excluded(self):
-        changed = main.reenable_returning_rules(
-            self.settings, self.before,
-            {('i1', 1): {
-                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
-                'seasons': [{'season': 0, 'episodes': 3}, {'season': 1, 'episodes': 18}],
-            }})
         self.assertEqual(changed, [])
         self.assertFalse(self.rule['enabled'])
-
-    def test_a_new_special_reenables_when_specials_are_included(self):
-        self.rule['include_specials'] = True
-        changed = main.reenable_returning_rules(
-            self.settings, self.before,
-            {('i1', 1): {
-                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
-                'seasons': [{'season': 0, 'episodes': 3}, {'season': 1, 'episodes': 18}],
-            }})
-        self.assertEqual(changed, [('Returning', 'a new episode appeared')])
-        self.assertTrue(self.rule['enabled'])
-
-    def test_a_rule_can_exclude_specials_when_the_global_default_includes_them(self):
-        self.settings['automation']['exclude_specials'] = False
-        self.rule['include_specials'] = False
-        changed = main.reenable_returning_rules(
-            self.settings, self.before,
-            {('i1', 1): {
-                'title': 'Returning', 'ended': True, 'total_episode_count': 21,
-                'seasons': [{'season': 0, 'episodes': 3}, {'season': 1, 'episodes': 18}],
-            }})
-        self.assertEqual(changed, [])
-        self.assertFalse(self.rule['enabled'])
-
-    def test_an_incomplete_season_breakdown_cannot_look_like_a_new_episode(self):
-        before = {('i1', 1): {'ended': True, 'total_episode_count': 20, 'seasons': []}}
-        changed = main.reenable_returning_rules(
-            self.settings, before,
-            {('i1', 1): {
-                'title': 'Returning', 'ended': True, 'total_episode_count': 20,
-                'seasons': [{'season': 0, 'episodes': 2}, {'season': 1, 'episodes': 18}],
-            }})
-        self.assertEqual(changed, [])
-        self.assertFalse(self.rule['enabled'])
-
-    def test_an_empty_unknown_baseline_cannot_look_like_a_first_episode(self):
-        before = {('i1', 1): {'ended': True, 'total_episode_count': 0, 'seasons': []}}
-        after = {('i1', 1): {
-            'title': 'Returning', 'ended': True, 'total_episode_count': 1,
-            'seasons': [{'season': 1, 'episodes': 1}],
-        }}
-        for include_specials in (False, True):
-            with self.subTest(include_specials=include_specials):
-                self.rule.update(enabled=False, include_specials=include_specials)
-                changed = main.reenable_returning_rules(self.settings, before, after)
-                self.assertEqual(changed, [])
-                self.assertFalse(self.rule['enabled'])
 
     def test_an_unarmed_or_unmatched_rule_stays_disabled(self):
         for field, value in (('auto_reenable', False), ('match_status', 'unmatched')):

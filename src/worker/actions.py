@@ -310,13 +310,9 @@ def action_exclusions(settings, request):
     where the series is, not by opening Automation and doing the matching in your head.
     """
     rule, episodes, _ = series_episodes(settings, request)
-    retention = settings.get('retention') or {}
     automation = settings.get('automation') or {}
     override = rule.get('include_specials')
-    mode = rule.get('monitoring') or ''
     return {
-        'monitoring': mode or retention.get('monitoring') or 'unmonitor-only',
-        'monitoring_default': not mode,
         # Whether specials are *kept*, which is the question the pane asks. The setting is
         # phrased the other way round because it is an exclusion now.
         'specials': bool(override) if override is not None else not automation.get('exclude_specials'),
@@ -528,8 +524,25 @@ def action_check_rule(settings, request):
             'summary': alerts.summarise(visible_alerts(settings, fresh))}
 
 
+def stamp_reenable_watermarks(previous, updated) -> None:
+    """Record the newest air date a rule knows about, the moment it is armed.
+
+    Taken at arming rather than at disabling: arming is when somebody says "tell me if
+    this changes", so it is the reading the change should be measured against. Cleared
+    when the option goes away, so re-arming later takes a fresh one rather than reviving a
+    mark from a situation nobody is in any more.
+    """
+    was = {rule['id']: rule.get('auto_reenable') for rule in previous.get('rules') or []}
+    for rule in updated.get('rules') or []:
+        if not rule.get('auto_reenable'):
+            rule['auto_reenable_after'] = ''
+        elif not was.get(rule['id']) or not rule.get('auto_reenable_after'):
+            rule['auto_reenable_after'] = main.latest_air_date(updated, rule)
+
+
 def action_settings(settings, request):
     updated = validate_settings(request.get('settings') or {}, previous=settings)
+    stamp_reenable_watermarks(settings, updated)
     save_settings(updated)
     main.log_settings_change(updated, settings, updated)
     # A changed URL, key or mapping makes the cached series list wrong in a way no

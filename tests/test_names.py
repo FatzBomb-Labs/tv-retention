@@ -202,12 +202,12 @@ class Acknowledgement(unittest.TestCase):
         which is a real way to lose track of a problem — you turned it off and forgot.
         """
         settings = {'rules': [{'id': 'r1', 'enabled': False}, {'id': 'r2', 'enabled': True}]}
-        found = [self.alerts.make('ended-expired', rule_id='r1'),
+        found = [self.alerts.make('ended', rule_id='r1'),
                  self.alerts.make('unmatched', rule_id='r2'),
                  self.alerts.make('no-recycle-bin', instance_id='i1')]
         shown = self.alerts.annotate(found, settings, {})
         unmanaged = {alert['kind']: alert['unmanaged'] for alert in shown}
-        self.assertEqual(unmanaged, {'ended-expired': True, 'unmatched': False,
+        self.assertEqual(unmanaged, {'ended': True, 'unmatched': False,
                                      'no-recycle-bin': False},
                          'a rule about the instance is not about a series')
         # Counted nowhere: not in the header, not in a badge.
@@ -217,11 +217,32 @@ class Acknowledgement(unittest.TestCase):
 
     def test_switching_it_back_on_makes_its_alerts_count_again(self):
         # Nothing was deleted: the facts stay in the cache and stop being ignored.
-        found = [self.alerts.make('ended-expired', rule_id='r1')]
+        found = [self.alerts.make('ended', rule_id='r1')]
         off = {'rules': [{'id': 'r1', 'enabled': False}]}
         on = {'rules': [{'id': 'r1', 'enabled': True}]}
         self.assertEqual(self.alerts.summarise(self.alerts.annotate(found, off, {}))['total'], 0)
         self.assertEqual(self.alerts.summarise(self.alerts.annotate(found, on, {}))['total'], 1)
+
+    def test_an_alert_about_what_we_did_survives_the_disable_it_announces(self):
+        """Auto-disable would otherwise silence the only notice that it happened.
+
+        The distinction is tense, not scope. A *state* nobody is managing is fairly
+        suppressed; an *action this application took* without being asked is not.
+        """
+        off = {'rules': [{'id': 'r1', 'enabled': False}]}
+        did = self.alerts.make('ended-expired', rule_id='r1')   # we switched it off
+        state = self.alerts.make('ended', rule_id='r1')         # merely true of it
+        self.assertTrue(self.alerts.survives_disable(did))
+        self.assertFalse(self.alerts.survives_disable(state))
+        kept = self.alerts.managed_only([did, state], off)
+        self.assertEqual([a['kind'] for a in kept], ['ended-expired'])
+        shown = {a['kind']: a['unmanaged'] for a in self.alerts.annotate([did, state], off, {})}
+        self.assertEqual(shown, {'ended-expired': False, 'ended': True})
+
+    def test_the_surviving_notice_can_still_be_acknowledged(self):
+        # It records something finished, so putting it away for good is the right end.
+        did = self.alerts.make('ended-expired', rule_id='r1')
+        self.assertTrue(self.alerts.may_acknowledge(did, {'alerts': {'acknowledge': True}}))
 
     def test_muting_and_switching_off_are_not_the_same_question(self):
         """Muting hides a kind across every series and leaves a blocker blocking.
@@ -246,9 +267,10 @@ class Acknowledgement(unittest.TestCase):
         counts = {}
         for wanted in ('errors', 'warnings', 'all'):
             counts[wanted] = len(self.alerts.header_worthy(found, {'alerts': {'header': wanted}}))
-        # ended-expired is a warning now: a rule with nothing left in its window will never
-        # do anything again, which is the one asking to be acted on.
-        self.assertEqual(counts, {'errors': 1, 'warnings': 3, 'all': 3})
+        # ended-expired is a notice: nothing is wrong, the rule was switched off because
+        # there is nothing left for it to do, and counting that as a problem is how a
+        # header stops being read.
+        self.assertEqual(counts, {'errors': 1, 'warnings': 2, 'all': 3})
 
     def test_an_acknowledged_alert_is_never_counted(self):
         found = self.alerts.annotate([self.alerts.make('no-recycle-bin', instance_id='i1')],

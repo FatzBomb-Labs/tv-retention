@@ -22,9 +22,14 @@
   --tvr-line: rgba(0,0,0,.17);
   --tvr-well: rgba(0,0,0,.05);
   /* Semantic, and darker in light mode: the dark-theme values are chosen to glow against
-     near-black and are unreadable as text on paper. */
+     near-black and are unreadable as text on paper.
+
+     `--tvr-action` is the ordinary one — anything primary, selected, active or in
+     progress. `--tvr-accent` is reserved for Test Mode, which is neither a fault nor
+     normal operation; spending it on routine controls made a page of warnings out of a
+     page of buttons. */
   --tvr-accent: #cf6a12;
-  --tvr-action: #2b6cb0;
+  --tvr-action: #1a66c9;
   --tvr-good: #256d43;
   --tvr-warn: #9c6212;
   --tvr-bad: #b02b1e;
@@ -43,7 +48,7 @@
     --tvr-line: rgba(160,160,160,.3);
     --tvr-well: rgba(0,0,0,.25);
     --tvr-accent: #ff8c2b;
-    --tvr-action: #5b9bd5;
+    --tvr-action: #4d9bf5;
     --tvr-good: #3fae69;
     --tvr-warn: #e0952f;
     --tvr-bad: #e0574a;
@@ -61,7 +66,7 @@
   --tvr-line: rgba(160,160,160,.3);
   --tvr-well: rgba(0,0,0,.25);
   --tvr-accent: #ff8c2b;
-  --tvr-action: #5b9bd5;
+  --tvr-action: #4d9bf5;
   --tvr-good: #3fae69;
   --tvr-warn: #e0952f;
   --tvr-bad: #e0574a;
@@ -113,7 +118,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention button.tvr-rollup, #tv-retention button.tvr-side-item,
 #tv-retention button.tvr-tree-caret {
   text-transform: none; letter-spacing: normal; text-align: left; }
-#tv-retention button.tvr-primary { background: var(--tvr-accent); border-color: var(--tvr-accent);
+#tv-retention button.tvr-primary { background: var(--tvr-action); border-color: var(--tvr-action);
   color: var(--tvr-on-fill); font-weight: 600; }
 #tv-retention button.tvr-primary:hover:not([disabled]) { filter: brightness(1.08); }
 #tv-retention button.tvr-danger { border-color: var(--tvr-bad); color: var(--tvr-bad); }
@@ -136,7 +141,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   border-radius: 50%; background: currentColor; opacity: .65; transition: transform .15s, opacity .15s; }
 .tvr-switch input:checked + .tvr-slider { background: rgba(46,158,91,.25); border-color: var(--tvr-good); }
 .tvr-switch input:checked + .tvr-slider::after { transform: translateX(16px); opacity: 1; color: var(--tvr-good); }
-.tvr-switch input:focus-visible + .tvr-slider { outline: 2px solid var(--tvr-accent); outline-offset: 2px; }
+.tvr-switch input:focus-visible + .tvr-slider { outline: 2px solid var(--tvr-action); outline-offset: 2px; }
 .tvr-switch input:disabled + .tvr-slider { opacity: .4; cursor: progress; }
 .tvr-switch-text { font-size: 12px; }
 .tvr-row-switch { display: flex; margin: 6px 0 0; }
@@ -225,7 +230,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-rule-body { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 .tvr-rule-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
 .tvr-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--tvr-line); font-size: 11px; }
-.tvr-chip.on { border-color: var(--tvr-accent); }
+.tvr-chip.on { border-color: var(--tvr-action); }
 .tvr-badge { font-size: 10px; letter-spacing: .08em; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; }
 .tvr-badge.ok, .tvr-badge.quiet { background: var(--tvr-soft); opacity: .8; }
 .tvr-badge.error { background: rgba(192,57,43,.16); color: var(--tvr-bad); }
@@ -275,7 +280,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-busy { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 9999; }
 .tvr-busy-box { display: flex; gap: 10px; align-items: center; padding: 14px 20px; border-radius: 8px;
   border: 1px solid var(--tvr-line); background: var(--tvr-bg); }
-.tvr-spinner { width: 16px; height: 16px; border: 2px solid var(--tvr-line); border-top-color: var(--tvr-accent);
+.tvr-spinner { width: 16px; height: 16px; border: 2px solid var(--tvr-line); border-top-color: var(--tvr-action);
   border-radius: 50%; animation: tvr-spin .8s linear infinite; flex: 0 0 16px; }
 @keyframes tvr-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .tvr-spinner { animation: none; } .tvr-slider, .tvr-slider::after { transition: none; } }
@@ -299,7 +304,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   width: 10px; height: 10px; min-width: 10px; flex-basis: 10px; font-size: 0; }
 #tv-retention .tvr-dot-badge.clear { border-color: var(--tvr-good); background: var(--tvr-good); opacity: .5; }
 #tv-retention .tvr-dot-badge.unknown { opacity: .4; }
-#tv-retention .tvr-dot-badge.checking { border-color: var(--tvr-accent); background: var(--tvr-accent);
+#tv-retention .tvr-dot-badge.checking { border-color: var(--tvr-action); background: var(--tvr-action);
   animation: tvr-pulse 1.2s ease-in-out infinite; }
 #tv-retention .tvr-dot-badge.error { border-color: var(--tvr-bad); background: var(--tvr-bad); color: var(--tvr-on-fill); }
 #tv-retention .tvr-dot-badge.warning { border-color: var(--tvr-warn); background: var(--tvr-warn); color: var(--tvr-on-fill); }
@@ -356,8 +361,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention .tvr-result.ok { color: var(--tvr-good); }
 #tv-retention .tvr-result.bad { color: var(--tvr-bad); }
 
-/* An action, not more prose. Orange is the page's own accent and reads as decoration
-   next to an orange warning, so a fix is blue and says what it will do. */
+/* An action, not more prose: a fix inside an alert is filled and says what it will do. */
 #tv-retention button.tvr-action { background: var(--tvr-action); border-color: var(--tvr-action);
   color: var(--tvr-on-fill); font-weight: 600; padding: 5px 12px; font-size: 12px; border-radius: 4px; }
 #tv-retention button.tvr-action:hover { filter: brightness(1.1); background: var(--tvr-action); }
@@ -591,8 +595,8 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
    disappears is one the eye has to go looking for. */
 .tvr-changes { position: relative; }
 #tv-retention button.tvr-changes-button { display: flex; align-items: center; gap: 6px;
-  padding: 5px 10px; font-size: 12px; border-radius: 999px; border-color: var(--tvr-accent);
-  color: var(--tvr-accent); background: rgba(255,140,43,.08); }
+  padding: 5px 10px; font-size: 12px; border-radius: 999px; border-color: var(--tvr-action);
+  color: var(--tvr-action); background: color-mix(in srgb, var(--tvr-action) 10%, transparent); }
 #tv-retention button.tvr-changes-button.quiet { border-color: var(--tvr-line); color: inherit;
   background: transparent; opacity: .6; }
 #tv-retention button.tvr-changes-button[disabled] { cursor: default; }
@@ -658,7 +662,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-sub-head { margin-top: 4px; }
 #tv-retention button.tvr-side-item:hover { background: var(--tvr-soft); opacity: 1; }
 #tv-retention button.tvr-side-item.active { background: var(--tvr-soft); opacity: 1;
-  font-weight: 600; border-left-color: var(--tvr-accent); }
+  font-weight: 600; border-left-color: var(--tvr-action); }
 .tvr-side-count { margin-left: auto; font-size: 11px; opacity: .5; }
 
 .tvr-main { min-width: 0; padding: 10px 13px 16px; }
@@ -883,7 +887,10 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
    changes the width of the list it was chosen from. */
 .tvr-details-idle { display: grid; place-items: center; padding: 24px 16px; text-align: center;
   font-size: 12px; opacity: .5; }
-.tvr-details-add { padding: 12px 10px; border-top: 1px solid var(--tvr-line); }
+/* `align-items` because this row is a grid child that can be far taller than the button:
+   stretched, the button fills the empty pane. */
+.tvr-details-add { padding: 12px 10px; border-top: 1px solid var(--tvr-line);
+  display: flex; justify-content: center; align-items: start; }
 .tvr-series-shell.open .tvr-details-body { overflow-y: auto; overscroll-behavior: contain;
   min-height: 0; }
 @media (max-width: 1250px) {
@@ -925,6 +932,26 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-tree-why { opacity: 1; color: var(--tvr-bad); }
 .tvr-tree-season-wrap { border-top: 1px solid var(--tvr-line); }
 .tvr-tree-season-wrap:first-of-type { border-top: none; }
+/* Two decisions on one row, so each needs its own label: a single label wrapping both
+   toggles whichever box the click happens to land nearest. */
+.tvr-tree-pick { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  cursor: pointer; }
+.tvr-tree-watch { margin-left: auto; display: flex; align-items: center; flex: none;
+  padding-left: 10px; cursor: pointer; }
+.tvr-tree-episode .tvr-tree-why { margin-left: 8px; }
+/* The air date is what every keep-by-age decision turns on, so it is a column rather
+   than a note: aligned, it can be read down. */
+.tvr-tree-aired { flex: none; width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
+/* Inside the keep window, said by the row rather than by a mark on it. Green is what
+   "monitored" means elsewhere here, so this is the neutral fill and the left edge
+   carries the meaning. */
+.tvr-tree-kept { background: color-mix(in srgb, var(--tvr-good) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--tvr-good); }
+.tvr-tree-kept:hover { background: color-mix(in srgb, var(--tvr-good) 20%, transparent); }
+.tvr-tree-legend { display: flex; align-items: center; gap: 8px; }
+.tvr-tree-legend-key { flex: none; width: 22px; height: 13px; border-radius: 3px;
+  background: color-mix(in srgb, var(--tvr-good) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--tvr-good); }
 
 /* ---------------------------------------------------------------------------
    Poster view: the artwork is the card, and everything else is laid over it or

@@ -2,7 +2,7 @@ import datetime as dt
 import unittest
 
 import context  # noqa: F401
-from core import DEFAULTS, classify_monitoring
+from core import DEFAULTS, classify_monitoring, describe_lifecycle
 
 NOW = dt.datetime(2026, 9, 6, tzinfo=dt.timezone.utc)
 
@@ -137,9 +137,9 @@ class Specials(unittest.TestCase):
 class MonitoringTargets(unittest.TestCase):
     """Unmonitoring is protection; monitoring is intent.
 
-    Unmonitoring only ever stops a download, so it happens in both modes. Monitoring can
-    start hundreds — a real library had 262 missing episodes inside its keep windows — so
-    it happens only where someone asked for it.
+    Unmonitoring only ever stops a download, so a run always does it. Monitoring can start
+    hundreds — a real library had 262 missing episodes inside its keep windows — so a run
+    never does it at all. It happens once, where someone asked for it.
     """
 
     def setUp(self):
@@ -156,40 +156,66 @@ class MonitoringTargets(unittest.TestCase):
             'out_frame_monitored': [{'episode_id': 9, 'has_file': False}],
         }
 
-    def settings(self, mode):
-        return {'retention': {'monitoring': mode}}
-
-    def test_unmonitor_only_never_monitors_anything(self):
-        result = self.targets(self.settings('unmonitor-only'), self.state(), {})
+    def test_a_run_never_monitors_anything(self):
+        result = self.targets({}, self.state(), {})
         self.assertEqual(result['monitor'], [])
+        self.assertEqual(result['monitor_list'], [])
 
-    def test_full_sync_monitors_everything_inside_the_window(self):
-        result = self.targets(self.settings('full-sync'), self.state(), {})
-        self.assertEqual(sorted(result['monitor']), [1, 2, 3])
+    def test_no_setting_can_make_a_run_monitor(self):
+        # Full sync is gone: a leftover value in a document that skipped the migration
+        # must not resurrect the behaviour.
+        stale = {'retention': {'monitoring': 'full-sync'}}
+        self.assertEqual(self.targets(stale, self.state(), {'monitoring': 'full-sync'})['monitor'], [])
 
-    def test_a_series_may_override_the_global_mode(self):
-        result = self.targets(self.settings('unmonitor-only'), self.state(), {'monitoring': 'full-sync'})
-        self.assertEqual(sorted(result['monitor']), [1, 2, 3])
-        quiet = self.targets(self.settings('full-sync'), self.state(), {'monitoring': 'unmonitor-only'})
-        self.assertEqual(quiet['monitor'], [])
-
-    def test_everything_outside_the_window_is_unmonitored_either_way(self):
-        for mode in ('unmonitor-only', 'full-sync'):
-            self.assertEqual(self.targets(self.settings(mode), self.state(), {})['unmonitor'], [9])
+    def test_everything_outside_the_window_is_unmonitored(self):
+        self.assertEqual(self.targets({}, self.state(), {})['unmonitor'], [9])
 
     def test_the_fileless_ones_outside_are_the_point(self):
         """An episode with a file is unmonitored when the file is deleted.
 
         A missing one is never deleted, so nothing else would ever reach it, and Sonarr
         would go on fetching what the next run removes. That is the side door the rule
-        closes, and it is why unmonitoring is not conditional on the mode.
+        closes, and it is why unmonitoring is unconditional.
         """
-        result = self.targets(self.settings('unmonitor-only'), self.state(), {})
+        result = self.targets({}, self.state(), {})
         self.assertEqual(result['unmonitor_missing'], 1)
 
-    def test_there_is_no_mode_that_leaves_sonarr_alone(self):
-        from core import MONITORING_MODES
-        self.assertEqual(MONITORING_MODES, ['unmonitor-only', 'full-sync'])
+
+class EndedLifecycle(unittest.TestCase):
+    """When a finished series has nothing left for a rule to do.
+
+    Checked through `classify_monitoring` rather than against a hand-written state, because
+    the question is whether the counts the classifier actually produces reach the verdict —
+    which is the way this broke before.
+    """
+
+    ENDED = {'ended': True, 'status': 'ended'}
+
+    def verdict(self, episodes, rule=RULE, conf=None):
+        state = classify_monitoring(episodes, rule, conf or settings(), now=NOW)
+        return describe_lifecycle(state, self.ENDED)['lifecycle']
+
+    def test_an_ended_series_still_holding_something_stays_enabled(self):
+        self.assertEqual(self.verdict([episode(1, 10, True)]), 'ended')
+
+    def test_an_ended_series_with_nothing_left_in_the_window_is_spent(self):
+        self.assertEqual(self.verdict([episode(1, 400, False)]), 'ended_expired')
+
+    def test_an_ended_series_whose_only_files_are_excluded_is_spent(self):
+        """The case that would otherwise need handling of its own, and does not.
+
+        Exclusions are set aside before the keep frame is computed, so an episode on the
+        list is in neither half of it. A series holding nothing else therefore has an
+        empty frame and reaches the same verdict as one holding nothing at all — which is
+        why 'only excluded episodes remain' needs no separate rule anywhere.
+        """
+        rule = dict(RULE, exclusions=[{'season': 1, 'episode': 1}])
+        self.assertEqual(self.verdict([episode(1, 10, True)], rule), 'ended_empty')
+
+    def test_a_kept_special_does_not_keep_a_rule_alive(self):
+        # Specials are excluded by default, so the same reasoning applies to them.
+        special = dict(episode(1, 10, True), season=0, episode=1)
+        self.assertEqual(self.verdict([special]), 'ended_empty')
 
 
 class OneTimePass(unittest.TestCase):
