@@ -56,7 +56,7 @@ what it would do while changing nothing. Read [Safety](#safety) before you turn 
 - [Queued changes](#queued-changes)
 - [Finished shows](#finished-shows)
 - [Staying current](#staying-current)
-- [Alerts and notifications](#alerts-and-notifications)
+- [Alerts](#alerts)
 - [Sonarr instances](#sonarr-instances)
 - [Air dates and TMDB](#air-dates-and-tmdb)
 - [Safety](#safety)
@@ -92,7 +92,7 @@ do not use a global Docker prune.
 Requirements: Docker, and at least one reachable Sonarr v3 or v4 instance. Nothing else —
 no media server, no Tautulli, no library mount.
 
-### Settings
+### General settings
 
 | Variable | Default | |
 |---|---|---|
@@ -115,9 +115,9 @@ anybody is logged in, the same way Sonarr downloads with nobody watching.
 
 The page is a sidebar and a content pane. **Series** is the library — one list of
 everything Sonarr holds, filtered to **All**, **Connected** (has a retention rule) or
-**Not connected**. **Media management** holds connections, the schedule, presets and the
-retention defaults. **System** holds storage, job history, logs, notifications, stats and
-alert settings. **Help** holds the about page and the help text.
+**Not connected**. **Media management** holds the schedule, presets and retention
+automation. **General** holds alerts, connections, air-date settings, safety, logging and
+backup. **System** holds Status and Logs, while **Help** holds the about page and guidance.
 
 There is no separate "add" screen: a series with a rule and a series without are the same
 row in the same list. Clicking either opens its details in the pane beside it; an
@@ -125,7 +125,7 @@ unconnected series shows **Add to Retention** before exposing the rule editor.
 
 ## First run
 
-1. **Media management → Connections** → add each Sonarr with its URL and API key. Press
+1. **General → Connections** → add each Sonarr with its URL and API key. Press
    **Test & save**: it reports the Sonarr version, how many series it holds, and whether
    Sonarr has a recycle bin configured.
 2. **Series → Not connected**, click the show you want, then choose **Add to Retention**.
@@ -297,9 +297,9 @@ apply.
 
 ## Finished shows
 
-When Sonarr reports a series as ended, the card says so, once, and a notification is sent
-the first time. The rule stays on: there is still something inside its keep window, and
-the notice says it will be switched off when there is not.
+When Sonarr reports a series as ended, the card says so, once, and the app records a notice
+the first time. The rule stays on: there is still something inside its keep window, and the
+notice says it will be switched off when there is not.
 
 When nothing is left inside the window, **the rule is switched off automatically** and a
 notice records it. No further episodes are coming and nothing remains to act on, so the
@@ -322,12 +322,11 @@ is what changed. Everything else is arithmetic over episodes it already holds.
 | When | What it costs |
 |---|---|
 | A rule edited, a preset raised, a day passing | **nothing** — the plan is re-decided from the stored episodes |
-| Every 30 s (the worker loop) | two small queries asking Sonarr what changed; only the series it names are re-read |
-| Every 15 s while the page is open | the same question, plus every plan re-decided locally |
-| Every six hours | Sonarr's series list, to notice series added |
-| Daily | a full read of every series, as the backstop |
+| Every 15 s while the page is open | one cache-only heartbeat, plus every plan re-decided locally |
+| On page open, or return after five idle minutes | a quiet background refresh when the stored reading is old enough, plus fresh connection health |
+| Hourly | Sonarr's series list and every managed series, coalesced with manual and page refreshes |
 
-The daily sweep is not redundant. Sonarr's history reports imports and deletions, but
+The managed-series refresh is not redundant. Sonarr's history reports imports and deletions, but
 **monitoring toggled by hand in Sonarr is not a history event** and no cheap endpoint
 reveals it, so a full read is the only thing that catches it.
 
@@ -343,34 +342,31 @@ the page is never left fresher than the cache behind it.
 
 A run always reads Sonarr for itself. A stored reading never stands behind a write.
 
-## Alerts and notifications
+## Alerts
 
 Problems with a **series** live in the library, because that is where they are fixed: a
 badge on the card, and a roll-up above the list that filters to just those shows. Problems
-with the **installation** — Sonarr unreachable, no recycle bin — live under **Media
-management → Connections**. Neither counts the other's; the count in the header opens
-both. **System → Alert settings** decides how loudly you are told, and nothing more.
+with the **installation** — Sonarr unreachable, no recycle bin — live under **General →
+Connections**. Neither counts the other's; contextual badges identify the area that needs
+attention. **General → Alerts** also lists recurring warnings hidden for one specific
+Sonarr instance, so they can be restored without changing any other connection.
 
 **A series that is switched off raises nothing.** It is not being managed, so nothing about
-it is a problem to report — no badge, no roll-up line, no notification. Nothing is deleted:
+it is a problem to report — no badge or roll-up line. Nothing is deleted:
 switch it back on and every alert it had returns. That is not the same as muting, which is
 a decision about a *kind* of alert across every series and leaves a blocking alert
 blocking.
 
-Notifications are a JSON POST to a webhook you configure, and they fire for something
-structurally wrong: a series that cannot be found, a
-Sonarr that will not answer, deletions with no recycle bin to catch them, a series Sonarr
-has newly taken on, a series that has ended. **Never the retention itself.** Episodes being
-scheduled for deletion and monitoring being brought into line are the job, not the news —
-being told about them is what this plugin exists to avoid.
+Issues are shown in the app and can be acknowledged where appropriate. Outbound
+notifications and webhooks are not part of the container; legacy notification settings are
+discarded during migration. Use **System → Status** for the operational overview.
 
-Each problem is announced **once**, when it first appears, and again only if what it says
-changes. A Sonarr that has been unreachable since Tuesday is not news again on Wednesday,
-and a notification that repeats is one people learn to ignore.
+Each problem is shown **once**, when it first appears, and again only if what it says
+changes. A Sonarr that has been unreachable since Tuesday is not news again on Wednesday.
 
 ## Sonarr instances
 
-Add each Sonarr with its URL and API key. **Test & save** confirms the version, counts the
+Add each Sonarr under **General → Connections** with its URL and API key. **Test & save** confirms the version, counts the
 series, and reports whether Sonarr has a recycle bin. An instance can be disabled without
 deleting it, which leaves its rules in place and stops them being processed.
 
@@ -378,28 +374,45 @@ If Sonarr has **no recycle bin**, its deletions — including the ones this plug
 are permanent. That raises a warning with a one-click fix, because it applies to everything
 Sonarr deletes, not only to TV Retention.
 
-## Air dates and TMDB
+## Air dates and optional providers
 
-An episode is dated by the first of these that answers:
+Sonarr remains the primary source. When it leaves a date blank, the enabled providers under
+**General → Air date resolution** are asked in the order shown: TMDB (when its key is set),
+TVMaze, AniList, and a configured Plex or Jellyfin endpoint. Results are cached with the
+episode reading. Missing dates can then be estimated from neighbouring episodes; when an
+entire series has no dated episode, Sonarr history is the last estimate available.
 
-1. Sonarr's own air date
-2. TMDB, if an API key is configured (cached for 30 days)
-3. an estimate interpolated from the episodes either side of it
-4. the date Sonarr first acquired the episode, from its history
-5. the file's import date
+Every plan and episode picker shows the date source (`sonarr`, a provider, `estimated`, or
+`acquired`). If a keep-by-age rule still has undated files, the configured safety answer is
+applied: exclude those files automatically, or disable the rule and raise a blocking alert.
+No unresolved file is silently judged by its import date.
 
-Estimated dates can be switched off, in which case an episode none of the first two can date
-is never deleted. Every plan shows the source of each date, so it is obvious when a decision
-rests on an estimate rather than a real air date.
+## API key lifecycle
+
+**General → Connections** can create a key reserved for future API operations. The full
+value is shown once and can be copied; the settings file stores only a hash, prefix and
+creation/revocation metadata. Regenerate replaces the active key, and Revoke disables it.
+
+## Backups and Status
+
+**General → Backup** writes timestamped ZIP archives of TV Retention's `/config` data —
+settings, state, journal and caches — to a separate absolute destination. The destination
+is never included in itself, archives are atomic, and old archives are pruned to the
+configured count. Backups contain credentials. Restore requires typing `RESTORE` and then
+reloading the page; no Sonarr or media operation is performed.
+
+**System → Status** reports build and uptime, Test Mode and schedule state, sync age,
+pending/current runs, Sonarr reachability and recycle-bin state, storage health, API-key
+state, and current warnings/errors. Its refresh is read-only.
 
 ## Safety
 
 - **Mandatory Sonarr match** — a rule that does not resolve to exactly one series is
   skipped, with the reason shown.
 - **Test Mode** — on for a new install, and it means **nothing writes**. Scheduled or
-  manual, no exceptions: a run does everything except write, marks its output `[TEST MODE]`
-  and notifies as a real run would. To delete something, turn it off. The Run button says
-  which of the two it is about to do.
+   manual, no exceptions: a run does everything except write and marks its output
+   `[TEST MODE]`. To delete something, turn it off. The Run button says which of the two it
+   is about to do.
 - **Typed confirmation** — removing a series' files requires typing `DELETE ALL`.
 - **Deleting always unmonitors** — not a setting, so no configuration can build a
   fetch-and-delete loop.
@@ -413,14 +426,10 @@ rests on an estimate rather than a real air date.
 
 ## Scheduling
 
-**Media management → Schedule** offers hourly, daily, weekly, monthly by date, monthly by weekday
-(*the first Monday*, *the last Friday*), or a custom five-field cron expression.
-
-The crontab holds one fixed entry that wakes the worker every minute; the worker decides
-what is due. A generated crontab cannot express "the first Monday of the month", cannot
-notice a run missed while the server was off, and cannot hold a job back until Sonarr
-answers — all three of which this does. A run held back because Sonarr was unreachable goes
-as soon as it answers, and exactly one is ever queued.
+**Media management → Schedule** offers hourly, daily, weekly, monthly by date, monthly by
+weekday (*the first Monday*, *the last Friday*), or a custom five-field cron expression.
+The resident worker decides what is due, catches up a missed run, and holds one pending run
+until Sonarr answers. A page does not need to be open.
 
 ## Where things are stored
 
@@ -449,6 +458,10 @@ Then remove the plugin. The caches are rebuilt on the first sync and are not wor
 | `/config/state/jobs.json` | When each scheduled job last ran. |
 | `/config/state/posters/` | Artwork borrowed from Sonarr, keyed so a changed poster is a new file. |
 | `/config/state/tmdb-cache.json` | Cached TMDB air dates. |
+| `/config/state/tvmaze-air-date-cache.json`, `/config/state/anilist-air-date-cache.json` | Cached optional-provider dates. |
+
+Backups are written to the separate destination configured under **General → Backup** and
+contain the settings, state, journal and these caches, including credentials.
 
 The state folder can be moved under **System → Storage** if you would rather it sat
 elsewhere; there is rarely a reason.
@@ -460,7 +473,7 @@ mask, and echoing the mask back means "keep the stored key".
 
 ```
 src/
-  include/interface.html Markup for the sidebar shell and its thirteen views
+  include/interface.html Markup for the sidebar shell and its operational views
   assets/app.js          UI logic; holds no authority, re-validates nothing itself
   assets/app.css         Styling
   assets/icons.css       Ten icons, drawn here rather than borrowed
@@ -468,10 +481,13 @@ src/
   worker/core.py         Settings validation and the retention decision. Pure.
   worker/store.py        The filesystem: settings, caches, the log, the progress marker
   worker/sonarr.py       Sonarr v3 client and the rule/series matcher
-  worker/tmdb.py         Optional air-date lookup with an on-disk cache
-  worker/alerts.py       What needs attention, and whether it blocks or notifies
+  worker/tmdb.py         Optional TMDB air-date lookup with an on-disk cache
+  worker/tvmaze.py      Credential-free TVMaze air-date lookup
+  worker/anilist.py     Credential-free AniList air-date lookup
+  worker/backup.py      Atomic config-volume backup and restore
+  worker/alerts.py      What needs attention, and whether it blocks
   worker/schedules.py    When a job is due
-  worker/migrate.py      Settings upgrades, v1 through v8
+  worker/migrate.py      Settings upgrades, v1 through v13
   worker/main.py         Sonarr orchestration, the run executor, the loop, the CLI
   worker/actions.py      The RPC surface, one function per thing the interface can ask for
 ```

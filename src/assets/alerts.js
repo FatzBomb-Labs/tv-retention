@@ -3,20 +3,21 @@ import { ago, plural } from './format.js';
 import { dialog, guarded, notice } from './feedback.js';
 
 // Alerts: the card that shows what is wrong with a series or with the installation, the
-// quick actions that fix it, and the tab that lists the installation's own problems.
+// system actions that fix it, and the tab that lists the installation's own problems.
 //
 // Cut as one module because a card is the only thing here anyone looks at: `alertItem`
 // draws a problem, the two card functions frame a list of them, `runAlertAction` is what
 // the button on one does, and `renderAlerts` and `showSeriesAlerts` are the two places a
 // card is put on screen. The first three are private -- nothing outside ever drew one.
 //
-// `settings`, `snapshot`, `monitoring` and `systemAlerts` arrive as accessors: the entry
-// replaces all four wholesale, so a captured value would go stale the first time a
+// `settings`, `monitoring` and `systemAlerts` arrive as accessors: the entry
+// replaces all three wholesale, so a captured value would go stale the first time a
 // document came back or a reading landed. Navigation arrives as two intents rather than
 // as `showView` -- "find this series in the library" and "open this instance's settings"
 // -- so the navigation module has no edge into this one to honour.
-export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, getSystemAlerts,
-                               applySaved, applyAlerts, seriesAlerts, isBlocked, worstSeverity,
+export function createAlerts({ api, getSettings, getMonitoring, getSystemAlerts,
+                               getSuppressedAlerts, applyAlerts, applySuppressed,
+                               seriesAlerts, isBlocked, worstSeverity,
                                queueChecks, render, showSeriesInLibrary, openInstance }) {
   // One card per series, not one per problem. The series is the thing you act on, so it
   // owns the card; each problem inside it is a short labelled line. Severity is carried by
@@ -31,8 +32,6 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
     'sonarr-unreachable': 'Sonarr unreachable',
   };
   const ACTION_LABEL = {
-    'rematch': 'Re-check against Sonarr',
-    'remove-rule': 'Remove from TV Retention',
     'open-instance': 'Open Sonarr settings',
     'test-instance': 'Test the connection',
     'enable-recycle-bin': 'Give Sonarr a recycle bin',
@@ -64,8 +63,7 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
     }
     // Acknowledging is not dismissing: it hides this alert as it stands, and the alert
     // comes back if what it says changes. An error is never offered it.
-    const ackable = alert.severity !== 'error' && !alert.blocking
-                    && ((getSettings() || {}).alerts || {}).acknowledge !== false;
+    const ackable = alert.severity !== 'error' && !alert.blocking && !alert.suppressed;
     if (ackable) {
       const ack = el('button', { type: 'button', className: 'tvr-small',
                                  textContent: alert.acknowledged ? 'Show again' : 'Acknowledge' });
@@ -77,6 +75,19 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
         notice(alert.acknowledged ? 'Shown again.' : 'Acknowledged — it will return if it changes.', 'ok');
       }));
       foot.append(ack);
+    }
+    if (alert.kind === 'no-recycle-bin') {
+      const suppress = el('button', { type: 'button', className: 'tvr-small',
+                                      textContent: alert.suppressed ? 'Show again' : 'Do not show again' });
+      suppress.addEventListener('click', () => guarded('', async () => {
+        const data = await api('suppress-alert', { key: alert.key, undo: !!alert.suppressed },
+                               'Saving…', true);
+        applyAlerts(data.alerts);
+        applySuppressed(data.suppressed_alerts);
+        render();
+        notice(alert.suppressed ? 'Alert restored.' : 'This warning is hidden for this Sonarr instance.', 'ok');
+      }));
+      foot.append(suppress);
     }
     if (alert.acknowledged) item.classList.add('acknowledged');
     if ((alert.data || {}).files) {
@@ -170,15 +181,7 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
         openInstance(alert.instance_id);
         return;
       }
-      const data = await api('alert-action', { kind: alert.action, rule_id: alert.rule_id },
-                             'Applying the fix…');
-      if (data.settings) applySaved(data);
-      if (data.monitoring) getMonitoring()[alert.rule_id] = data.monitoring;
-      const fresh = await api('alerts', {}, '', true);
-      applyAlerts(fresh.alerts);
-      getSnapshot().alert_summary = fresh.summary;
-      render();
-      notice(data.ok_message || 'Done.', 'ok');
+      throw new Error('That alert action is not available.');
     });
   }
 
@@ -203,7 +206,6 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
     const system = getSystemAlerts().slice();
     const systemBox = $('tvr-alerts-system');
     systemBox.replaceChildren();
-    $('tvr-alerts-system-empty').hidden = system.length > 0;
     const byInstance = new Map();
     system.forEach((alert) => {
       const instance = (getSettings().instances || []).find((i) => i.id === alert.instance_id);
@@ -211,6 +213,18 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
       byInstance.set(name, (byInstance.get(name) || []).concat([alert]));
     });
     byInstance.forEach((list, name) => systemBox.append(systemAlertCard(name, list)));
+    const suppressed = getSuppressedAlerts();
+    const hiddenTitle = $('tvr-suppressed-title');
+    const hiddenBox = $('tvr-alerts-suppressed');
+    hiddenTitle.hidden = !suppressed.length;
+    hiddenBox.replaceChildren();
+    const hiddenByInstance = new Map();
+    suppressed.forEach((alert) => {
+      const instance = (getSettings().instances || []).find((i) => i.id === alert.instance_id);
+      const name = instance ? instance.name : 'TV Retention';
+      hiddenByInstance.set(name, (hiddenByInstance.get(name) || []).concat([alert]));
+    });
+    hiddenByInstance.forEach((list, name) => hiddenBox.append(systemAlertCard(name, list)));
   }
 
   // The one listener on a node the module did not make. It cannot run at import, so the

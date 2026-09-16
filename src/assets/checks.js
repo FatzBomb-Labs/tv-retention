@@ -10,6 +10,7 @@ import { $, el, text } from './dom.js';
 // and `snapshot` are handed over as getters because the entry reassigns both wholesale
 // (a refresh replaces them), while this module only ever writes *into* them.
 export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, applyAlerts,
+                               applySuppressed, applySaved, forgetLibrary,
                                render, renderLibrary, renderAlerts, renderCounts }) {
   const checking = new Set();
   const forced = new Set();
@@ -17,6 +18,8 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
   let checkRunning = false;
   let bulkChecking = false;
   let pollTimer = null;
+  let syncRunning = false;
+  let hiddenAt = Date.now();
 
   const isChecking = (ruleId) => checking.has(ruleId);
 
@@ -55,6 +58,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
           // The alerts arrive with the check that produced them; asking separately cost a
           // second request and a second worker process for every series.
           applyAlerts(data.alerts);
+          applySuppressed(data.suppressed_alerts || []);
         } catch (error) {
           getMonitoring()[ruleId] = Object.assign({}, getMonitoring()[ruleId], {
             ok: false, label: 'Check failed', error: error.message, checked_at: new Date().toISOString(),
@@ -86,6 +90,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
         bulkChecking = !!progress.running;
         const fresh = await api('alerts', {}, '', true);
         applyAlerts(fresh.alerts);
+        if (fresh.status && getSnapshot()) getSnapshot().status = fresh.status;
         renderLibrary();
         renderAlerts();
         renderCounts();
@@ -102,14 +107,36 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
   }
 
   // -- heartbeat ---------------------------------------------------------
-  // One small question to Sonarr — what changed? — and the series it names are re-read
-  // through the same queue a manual refresh uses, so each card is seen being read. The
-  // cron tick asks the same question every minute whether or not anyone is here, which is
-  // why a notification never waits for someone to open this page.
+  // The heartbeat is cache-only. Sonarr freshness belongs to the resident worker and the
+  // quiet open/visibility request below, while this keeps time-based plans and progress
+  // current without making a network read every fifteen seconds.
   const WATCH_SECONDS = 15;
   // The heartbeat costs no network at all now — it re-decides every plan from the stored
   // reading, which is what makes a page left open all day still correct about time.
   let watchStamp = '';
+
+  async function requestFreshness(reason) {
+    if (syncRunning || !getSnapshot()) return;
+    syncRunning = true;
+    try {
+      const data = await api('sync', { reason: reason || 'opened' }, '', true);
+      if (data.busy) return;
+      applySaved(data);
+      applyHealth(data.health);
+      applyAlerts(data.alerts);
+      applySuppressed(data.suppressed_alerts || []);
+      getSnapshot().plan = data.plan;
+      getSnapshot().sync = data.sync;
+      getSnapshot().sync_due = !!data.sync_due;
+      if (data.report) forgetLibrary();
+      render();
+    } catch (error) {
+      // Background freshness is opportunistic. The cached reading remains visible with
+      // its age, and a missed refresh must not interrupt the operator.
+    } finally {
+      syncRunning = false;
+    }
+  }
 
   async function watchTick() {
     if (document.hidden || checkRunning || checkQueue.length || pollTimer) return;
@@ -122,6 +149,8 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     }
     if ((data.progress || {}).running) { startPolling(); return; }
     getSnapshot().sync = data.sync || getSnapshot().sync;
+    getSnapshot().sync_due = !!data.sync_due;
+    if (data.status) getSnapshot().status = data.status;
     // Re-rendering on a timer would fight with whatever is being read on screen, so it
     // only happens when the reply actually differs from the last one.
     const stamp = JSON.stringify([data.alerts, data.plan, data.stale_rules,
@@ -130,6 +159,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     watchStamp = stamp;
     applyHealth(data.health);
     applyAlerts(data.alerts);
+    applySuppressed(data.suppressed_alerts || []);
     getSnapshot().plan = data.plan;
     render();
     if ((data.stale_rules || []).length) queueChecks(data.stale_rules);
@@ -157,8 +187,13 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
   // enforces that for every module but the entry — so the entry calls this at start-up.
   function wire() {
     setInterval(watchTick, WATCH_SECONDS * 1000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) watchTick(); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      if (Date.now() - hiddenAt >= 5 * 60 * 1000) requestFreshness('visible');
+      watchTick();
+    });
   }
 
-  return { isChecking, queueChecks, startPolling, bulkChecking: () => bulkChecking, wire };
+  return { isChecking, queueChecks, startPolling, requestFreshness,
+           bulkChecking: () => bulkChecking, wire };
 }

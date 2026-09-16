@@ -1,5 +1,5 @@
-// The settings views: schedule, notifications, automation, air-date providers, the
-// alert preferences and the About panel. Everything reached from the Settings section
+// The settings views: schedule, automation, air-date providers, the
+// remaining global settings and the About panel. Everything reached from the General section
 // that is not a Sonarr connection or a preset.
 //
 // Two contracts run through this file and must survive any later change. A save posts
@@ -20,6 +20,10 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   // Read through a getter rather than captured once: every save replaces the document.
   const settings = () => getSettings();
   const snapshot = () => getSnapshot();
+  // Background health and sync updates call the entry's render function. Keep the form's
+  // unsaved state here so those renders cannot replace what somebody is typing with the
+  // last saved document.
+  let dirty = false;
   // -- schedule ----------------------------------------------------------
   const WEEKDAYS = [[0, 'Sunday'], [1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'],
                     [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday']];
@@ -83,26 +87,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     await saveSettings(null, true, { schedule: collectSchedule() });
     $('tvr-schedule-summary').textContent = snapshot().schedule_text || 'Off';
   }
-
-  const NOTIFICATIONS = [
-    ['run_started', 'A run has started'],
-    ['run_completed', 'A run has finished'],
-    ['series_removed', 'A series was removed from Sonarr'],
-    ['series_ended', 'Sonarr reports a series has ended'],
-    ['series_added', 'Sonarr has a new series TV Retention does not manage'],
-    ['health_problems', 'A check found something wrong'],
-    ['health_ok', 'A check found nothing wrong'],
-    ['errors', 'Any error'],
-  ];
-  const notifyInputs = {};
-  // Only the two that are a preference rather than a fault. The blocking kinds are absent
-  // on purpose: hiding "this series will not run" does not stop it being true.
-  const MUTABLE_KINDS = [
-    ['no-recycle-bin', 'Sonarr has no recycle bin'],
-    ['ended', 'A series has ended and still has episodes'],
-    ['ended-expired', 'A series has ended with nothing left in its window'],
-  ];
-  const mutedInputs = {};
 
   // -- automation --------------------------------------------------------
   // Stored as a flag rather than a word, because it only ever had two answers. Shown as
@@ -168,8 +152,8 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   // the page should answer rather than provoke.
   const AIR_PROVIDERS = {
     tmdb: { name: 'TMDB', needs: 'Add an API key under Connections' },
-    tvmaze: { name: 'TVMaze', needs: 'Planned — no key will be needed' },
-    anilist: { name: 'AniList', needs: 'Planned — no key will be needed' },
+    tvmaze: { name: 'TVMaze', needs: 'No key needed' },
+    anilist: { name: 'AniList', needs: 'No key needed' },
     imdb: { name: 'IMDB', needs: 'No public API exists' },
     plex: { name: 'Plex', needs: 'Needs a Plex connection' },
     jellyfin: { name: 'Jellyfin', needs: 'Needs a Jellyfin connection' },
@@ -187,10 +171,14 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   let airOrder = [];
   let airEnabled = new Set();
 
-  // Only TMDB is wired to anything today, so only TMDB can be ticked. The rest carry the
-  // reason instead of a box that does nothing, because a checkbox that saves a preference
-  // no code reads is worse than an honest "not yet".
-  const airReady = (name) => name === 'tmdb' && !!((settings().tmdb || {}).api_key || '').trim();
+  // A provider can be selected only when its connection is usable. Credential-free
+  // TVMaze and AniList are ready immediately; Plex/Jellyfin require a saved endpoint.
+  const airReady = (name) => {
+    if (name === 'tvmaze' || name === 'anilist') return true;
+    const connection = ((settings().connections || {})[name]) ||
+      (name === 'tmdb' ? (settings().tmdb || {}) : {});
+    return !!(connection.enabled && (connection.api_key || connection.token || connection.url));
+  };
 
   function renderAirProviders() {
     const box = $('tvr-air-providers');
@@ -242,17 +230,61 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     $('tvr-exclude-seasons').value = (automation.exclude_seasons || []).join(', ');
     folderPhrases = phraseList($('tvr-exclude-folders'), automation.exclude_folders);
     episodePhrases = phraseList($('tvr-exclude-episodes'), automation.exclude_episodes);
-    $('tvr-tmdb-key').value = (settings().tmdb || {}).api_key || '';
+    $('tvr-tmdb-key').value = ((settings().connections || {}).tmdb || settings().tmdb || {}).api_key || '';
     $('tvr-history-size').value = settings().log_retention_runs;
     $('tvr-log-level').value = (settings().logging || {}).level || 'info';
+    renderBackup();
+  }
 
-    const box = $('tvr-notifications');
-    box.replaceChildren();
-    NOTIFICATIONS.forEach(([name, label]) => {
-      const control = toggle(label, (settings().notifications || {})[name], null, { className: 'tvr-notify-row' });
-      notifyInputs[name] = control.input;
-      box.append(control.node);
-    });
+  // Backup is kept in this module because its destination is part of the same whole
+  // settings document as the other General controls. Listing and restoring are explicit
+  // actions; merely opening the page never writes or replaces anything.
+  function renderBackup(data) {
+    const path = $('tvr-backup-path');
+    const keep = $('tvr-backup-keep');
+    const result = $('tvr-backup-result');
+    const configured = Object.assign({ path: '', keep: 5, last: '', last_error: '' },
+                                     settings().backup || {}, (data || {}).backup || {});
+    if (path) path.value = configured.path || '';
+    if (keep) keep.value = String(configured.keep || 5);
+    if (result) {
+      result.textContent = configured.last_error || '';
+      result.className = configured.last_error ? 'tvr-result bad' : 'tvr-result';
+    }
+    const list = $('tvr-backup-list');
+    const empty = $('tvr-backup-empty');
+    if (!list || !empty) return;
+    const backups = (data && data.backups) || [];
+    list.replaceChildren(...backups.map((item) => {
+      const restore = el('button', { type: 'button', className: 'tvr-small tvr-secondary',
+                                    textContent: 'Restore' });
+      restore.addEventListener('click', () => guarded('', async () => {
+        const answer = window.prompt(
+          `Restore ${item.file}? This replaces saved settings, state and caches. Type RESTORE to continue.`,
+          '');
+        if (answer !== 'RESTORE') return;
+        const restored = await api('backup', { operation: 'restore', file: item.file, confirm: answer },
+                                   'Restoring…');
+        if (result) {
+          result.textContent = 'Restored. Reload the page to use the restored settings.';
+          result.className = 'tvr-result ok';
+        }
+        notice(`Restored ${restored.result?.file || item.file}. Reload the page.`, 'ok');
+      }));
+      return el('div', { className: 'tvr-inline-row tvr-backup-row' }, [
+        el('span', { className: 'tvr-mono', textContent: item.file }),
+        el('span', { textContent: item.bytes ? `${item.bytes} bytes` : '' }),
+        el('span', { className: 'tvr-alert-age', textContent: item.modified_at || '' }),
+        restore,
+      ]);
+    }));
+    empty.hidden = backups.length > 0;
+  }
+
+  async function renderBackupView() {
+    renderBackup();
+    const data = await api('backup', { operation: 'list' }, 'Loading backups…', true);
+    renderBackup(data);
   }
 
   // A typed list, one per line or one per comma. Blank lines are how a list is edited, not
@@ -261,8 +293,30 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     .map((entry) => entry.trim()).filter((entry) => entry !== '');
 
   function collectSettings() {
-    const notifications = {};
-    NOTIFICATIONS.forEach(([name]) => { notifications[name] = notifyInputs[name].checked; });
+    const connections = JSON.parse(JSON.stringify(settings().connections || {}));
+    const tmdbKey = $('tvr-tmdb-key').value;
+    const previousTmdb = connections.tmdb || settings().tmdb || {};
+    connections.tmdb = Object.assign({}, connections.tmdb || {}, {
+      api_key: tmdbKey,
+      // A masked field is an instruction to keep the existing credential and enabled
+      // state, not an empty value. This is the same lifecycle contract as Sonarr keys.
+      enabled: tmdbKey === '********' || tmdbKey === '••••••••'
+        ? !!previousTmdb.enabled : !!tmdbKey,
+    });
+    document.querySelectorAll('#tvr-provider-connections [data-connection-kind]').forEach((card) => {
+      const kind = card.dataset.connectionKind;
+      const url = card.querySelector('input[type="text"]');
+      const secret = card.querySelector('input[type="password"]');
+      const enabled = card.querySelector('input[data-connection-role="enabled"]');
+      const verify = card.querySelector('input[data-connection-role="verify-tls"]');
+      const credential = kind === 'plex' ? 'token' : 'api_key';
+      const previous = connections[kind] || {};
+      connections[kind] = Object.assign({}, connections[kind] || {}, {
+        url: url ? url.value.trim() : '', [credential]: secret ? secret.value : '',
+        enabled: enabled ? !!enabled.checked : !!previous.enabled,
+        verify_tls: verify ? !!verify.checked : previous.verify_tls !== false,
+      });
+    });
     return Object.assign({}, settings(), {
       // `allow_estimated_dates` is not sent: it is derived from the air-date answer on the
       // way in, so posting it as well would be two sources for one decision.
@@ -280,20 +334,23 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
         exclude_episodes: episodePhrases(),
       },
       tmdb: { api_key: $('tvr-tmdb-key').value },
+      connections,
+      backup: {
+        // An empty destination is an intentional way to turn backups off. Fall back to
+        // the saved value only when this view is not mounted, not when its field is blank.
+        path: $('tvr-backup-path') ? $('tvr-backup-path').value.trim()
+          : (settings().backup || {}).path || '',
+        keep: $('tvr-backup-keep') ? ($('tvr-backup-keep').value || 5)
+          : (settings().backup || {}).keep || 5,
+      },
       log_retention_runs: $('tvr-history-size').value,
       logging: Object.assign({}, settings().logging, { level: $('tvr-log-level').value }),
-      alerts: {
-        header: $('tvr-alert-header').value,
-        acknowledge: $('tvr-alert-ack').checked,
-        test_banner: $('tvr-test-banner-mode').value,
-        muted: MUTABLE_KINDS.map(([kind]) => kind).filter((kind) => mutedInputs[kind] && mutedInputs[kind].checked),
-      },
+      alerts: {},
       // No longer a control. It was one number doing two jobs — when the daily sweep is
       // due, and when a reading counts as stale — and a resident loop watching the change
       // feed every thirty seconds answers both without being asked. Kept in the settings
       // so the value survives, and left where it is.
       health: settings().health,
-      notifications,
     });
   }
 
@@ -302,6 +359,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     const data = await api('settings', { settings: document_ }, 'Saving…', quiet);
     // The entry owns `settings` and `snapshot`; this is the one hook that writes them.
     applySaved(data);
+    settingsDirty(false);
     render();
     if (message) notice(message, 'ok');
   }
@@ -312,27 +370,9 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   // The settings are spread across several views now, each with its own Save. They all
   // post the whole document, so saving from one view keeps what another holds.
   const settingsDirty = (on) => {
+    dirty = !!on;
     document.querySelectorAll('.tvr-dirty-mark').forEach((mark) => { mark.hidden = !on; });
   };
-  function renderAlertSettings() {
-    const alerts = (settings() || {}).alerts || {};
-    $('tvr-alert-header').value = alerts.header || 'all';
-    $('tvr-alert-ack').checked = alerts.acknowledge !== false;
-    $('tvr-test-banner-mode').value = alerts.test_banner || 'full';
-    const box = $('tvr-alert-muted');
-    box.replaceChildren(el('p', { className: 'tvr-lede',
-                                  textContent: 'A kind hidden here is never shown and never notified '
-                                               + 'about — including ones you have not seen yet. It still '
-                                               + 'blocks a series if that is what it does.' }));
-    MUTABLE_KINDS.forEach(([kind, label]) => {
-      const control = toggle(label, (alerts.muted || []).includes(kind), null,
-                             { className: 'tvr-row-switch' });
-      control.input.dataset.kind = kind;
-      mutedInputs[kind] = control.input;
-      box.append(control.node);
-    });
-  }
-
   function renderAbout() {
     const box = $('tvr-about-state');
     if (!box) return;
@@ -392,11 +432,27 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
         throw error;
       }
     }));
+
+    $('tvr-backup-save').addEventListener('click', () => guarded('', async () => {
+      await saveSettings('Backup settings saved.', false, {
+        backup: { path: $('tvr-backup-path').value.trim(), keep: $('tvr-backup-keep').value },
+      });
+      await renderBackupView();
+    }));
+    $('tvr-backup-now').addEventListener('click', () => guarded('', async () => {
+      const data = await api('backup', { operation: 'create' }, 'Creating backup…');
+      const current = settings().backup || (settings().backup = {});
+      current.last = data.result?.created_at || current.last;
+      current.last_error = '';
+      renderBackup(data);
+      notice(`Backup created: ${data.result?.file || 'archive'}.`, 'ok');
+    }));
   }
 
   return {
-    renderSchedule, renderSettings, renderAlertSettings, renderAbout,
-    renderAirProviders, saveSettings, collectSettings, wire,
+    renderSchedule, renderSettings, renderAbout,
+    renderAirProviders, renderBackup, renderBackupView, saveSettings, collectSettings,
+    isDirty: () => dirty, wire,
   };
 }
 

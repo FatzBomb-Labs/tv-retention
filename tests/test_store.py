@@ -1,4 +1,4 @@
-"""`read_log`'s byte-offset tracking, and `state_dir`'s writability cache.
+"""`read_log`, the durable run intent, and `state_dir`'s writability cache.
 
 Both touch no network and import no `fcntl`, so this runs locally as well as on the host.
 """
@@ -175,4 +175,28 @@ class StateDir(unittest.TestCase):
         blocked.mkdir()
         second = store.state_dir(settings)
         self.assertEqual(second, blocked, 'now writable, and used again rather than left on the fallback')
+
+
+class RunIntent(unittest.TestCase):
+    """The unfinished run record is atomic and never confused with the audit journal."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = {'state_dir': str(Path(self.temp.name) / 'state')}
+        store._writable_since.clear()
+
+    def tearDown(self):
+        store._writable_since.clear()
+        self.temp.cleanup()
+
+    def test_missing_intent_is_not_an_error(self):
+        self.assertIsNone(store.load_intent(self.settings))
+
+    def test_intent_round_trips_as_one_replaceable_record(self):
+        first = {'id': 'run-one', 'status': 'staged', 'operations': [{'status': 'pending'}]}
+        second = {'id': 'run-one', 'status': 'complete', 'operations': [{'status': 'done'}]}
+        store.save_intent(self.settings, first)
+        store.save_intent(self.settings, second)
+        self.assertEqual(store.load_intent(self.settings), second)
+        self.assertFalse((Path(self.settings['state_dir']) / 'run-intent.json.tmp').exists())
 

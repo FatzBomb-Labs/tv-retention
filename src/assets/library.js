@@ -12,7 +12,7 @@
 
 import { $, el, text, toggle } from './dom.js';
 import { bytes, when, plural, ago } from './format.js';
-import { changeLines, changeList } from './changes.js';
+import { changeList } from './changes.js';
 import { guarded } from './feedback.js';
 import { remember, remembered } from './storage.js';
 
@@ -243,8 +243,8 @@ export function createLibrary({
   const bandOpen = (name) => (remembered(`band.${name}`, '') || (BAND_OPEN[name] ? 'open' : 'shut')) === 'open';
 
   // What a band is currently showing of what it holds. Off hides the rows; it never makes
-  // the alert stop counting — the header total and the card badges are about what is true,
-  // and this is about what you want in front of you while you work through it.
+  // the alert stop counting — the card badges are about what is true, and this is about
+  // what you want in front of you while you work through it.
   const bandShows = (key) => remembered(`show.${key}`, 'yes') === 'yes';
   const setBandShows = (key, on) => { remember(`show.${key}`, on ? 'yes' : 'no'); renderLibrary(); };
 
@@ -306,6 +306,8 @@ export function createLibrary({
   function renderLibrary() {
     const container = $('tvr-rules');
     container.className = 'tvr-library';
+    const columns = $('tvr-library-columns');
+    if (columns) columns.hidden = layout === 'grid';
     container.replaceChildren();
     applyScale(container);
     if (library === null) {
@@ -506,45 +508,59 @@ export function createLibrary({
     return card;
   }
 
+  // The default list is an operational row rather than a miniature poster card. Each
+  // column answers one question that matters during a sweep; the details pane remains the
+  // editing surface when the row is clicked. Poster/grid mode keeps the visual treatment
+  // above as an optional way to browse artwork.
   function listCard(row) {
     const { series, rule } = row;
-    const blocked = rule ? isBlocked(rule.id) : false;
     const card = cardShell(row);
-    card.append(posterNode(series, 'tvr-poster tvr-poster-row', rule));
-    const main = el('div', { className: 'tvr-rule-main' });
-
-    const head = el('div', { className: 'tvr-rule-head' });
-    if (rule) head.append(alertBadge(rule));
-    head.append(el('span', { className: `tvr-connected ${rule ? 'yes' : 'no'}`,
-                             title: rule ? 'Has a retention rule' : 'No rule yet' },
-                   [el('i', { className: `fa fa-${rule ? 'check-circle' : 'circle-o'}` })]));
-    head.append(el('span', { className: 'tvr-rule-title', textContent: series.title }));
-    main.append(head);
-    main.append(el('div', { className: 'tvr-card-series-facts', textContent: seriesFacts(series).join(' · ') }));
-
-    if (rule) {
-      const retention = el('span', { className: 'tvr-retention' });
-      const preset = presetFor(rule);
-      if (preset) retention.append(el('span', { className: 'tvr-chip preset', textContent: preset.name }));
-      else ruleSummary(rule).forEach((label) => retention.append(el('span', { className: 'tvr-chip', textContent: label })));
-      main.append(retention);
-
-      const state = getMonitoring()[rule.id] || {};
-      const plan = state.plan;
-      if (isChecking(rule.id)) {
-        main.append(el('div', { className: 'tvr-plan-quiet', textContent: 'Reading from Sonarr…' }));
-      } else if (blocked) {
-        main.append(el('div', { className: 'tvr-plan-quiet', textContent: 'Blocked — nothing will run for this series.' }));
-      } else if (plan && (plan.delete || plan.monitor || plan.unmonitor)) {
-        main.append(changeLines(plan, (kind) => guarded('', async () => {
-          const data = await api('preview', { rule_ids: [rule.id] }, 'Working out what would change…');
-          changeList(data.result, `${rule.series_title}: scheduled changes`, kind);
-        })));
-      } else if (plan) {
-        main.append(el('div', { className: 'tvr-plan-quiet', textContent: 'Nothing scheduled.' }));
-      }
+    card.classList.add('tvr-list-card');
+    const state = rule ? (getMonitoring()[rule.id] || {}) : {};
+    const plan = state.plan || {};
+    const art = posterNode(series, 'tvr-poster tvr-poster-row', rule);
+    // The poster carries the same scheduled-change badges as grid view.  A list row no
+    // longer needs a second, wordier plan column or an unrelated rule-status square.
+    if (rule && plan && (plan.delete || plan.monitor || plan.unmonitor)) {
+      art.append(changeMarks(rule, plan));
     }
-    card.append(main);
+    const identity = el('div', { className: 'tvr-row-cell tvr-row-identity' }, [
+      art,
+      el('div', { className: 'tvr-rule-main' }, [
+        el('div', { className: 'tvr-rule-head' }, [
+          el('span', { className: 'tvr-rule-title', textContent: series.title, title: series.title }),
+        ]),
+        el('div', { className: 'tvr-row-sub', textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
+      ]),
+    ]);
+    const stateLabel = rule ? (rule.enabled ? 'Watching' : 'Not watching') : 'Not connected';
+    const stateCell = el('div', { className: `tvr-row-cell tvr-row-state${rule?.enabled ? ' active' : ''}` }, [
+      el('strong', { textContent: stateLabel }),
+    ]);
+    if (rule) {
+      const preset = presetFor(rule);
+      if (preset) stateCell.append(el('span', { className: 'tvr-chip preset', textContent: preset.name }));
+      else ruleSummary(rule).forEach((label) => stateCell.append(el('span', { className: 'tvr-chip', textContent: label })));
+      if (rule.match_status !== 'matched') stateCell.append(el('small', { textContent: 'Not matched' }));
+    } else {
+      stateCell.append(el('small', { textContent: 'Click to add a rule' }));
+    }
+    const files = series.total_episode_count ? `${series.episode_file_count || 0}/${series.total_episode_count} episodes` : 'No episode count';
+    const mediaCell = el('div', { className: 'tvr-row-cell tvr-row-media' }, [
+      el('strong', { textContent: files }),
+      el('small', { textContent: series.size_on_disk ? bytes(series.size_on_disk) : 'No files on disk' }),
+    ]);
+    const airing = series.ended ? 'Ended' : (series.next_airing ? `Next ${when(series.next_airing)}` : 'No upcoming episode');
+    const nextCell = el('div', { className: 'tvr-row-cell tvr-row-next' }, [
+      el('strong', { textContent: airing }),
+      el('small', { textContent: series.previous_airing ? `Previous ${when(series.previous_airing)}` : '' }),
+    ]);
+    const alertsCell = el('div', { className: 'tvr-row-cell tvr-row-alerts' }, [
+      rule ? alertBadge(rule) : el('span', { className: 'tvr-plan-quiet', textContent: '—' }),
+      el('small', { textContent: rule && row.alerts.length ? plural(row.alerts.length, 'alert') : 'No alerts' }),
+    ]);
+    card.append(el('div', { className: 'tvr-library-row', role: 'row' }, [identity, stateCell,
+      mediaCell, nextCell, alertsCell]));
     return card;
   }
 

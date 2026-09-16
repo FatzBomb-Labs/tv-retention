@@ -40,6 +40,7 @@ function start(root) {
   let monitoring = {};      // rule id -> cached check result
   let alertsByRule = {};    // rule id -> that series' alerts
   let systemAlerts = [];
+  let suppressedAlerts = [];
 
   // The System section's panes. `snapshot` and `settings` are handed over as accessors:
   // both are replaced wholesale whenever a refresh or a save returns, so a value captured
@@ -50,7 +51,7 @@ function start(root) {
     getSnapshot: () => snapshot,
     getSettings: () => settings,
   });
-  const { renderStatsView, showResult, renderHistory, startLog, stopLog } = activity;
+  const { renderStatsView, renderStatusView, renderStatus, showResult, renderHistory, startLog, stopLog } = activity;
 
   // The settings views. Same accessor reasoning, plus a setter: a save returns a fresh
   // document and the module has to be able to put it back, which a getter cannot do.
@@ -62,7 +63,7 @@ function start(root) {
     getSettings: () => settings,
     applySaved,
   });
-  const { renderSchedule, renderSettings, renderAlertSettings, renderAbout,
+  const { renderSchedule, renderSettings, renderBackupView, renderAbout,
           saveSettings } = settingsView;
 
   // -- snapshot and background checking ----------------------------------
@@ -75,6 +76,9 @@ function start(root) {
     getMonitoring: () => monitoring,
     applyHealth,
     applyAlerts,
+    applySuppressed,
+    applySaved,
+    forgetLibrary: () => libraryView.forgetLibrary(),
     render: () => render(),
     renderLibrary: () => libraryView.renderLibrary(),
     renderAlerts: () => renderAlerts(),
@@ -134,11 +138,11 @@ function start(root) {
   const alerts = createAlerts({
     api,
     getSettings: () => settings,
-    getSnapshot: () => snapshot,
     getMonitoring: () => monitoring,
     getSystemAlerts: () => systemAlerts,
-    applySaved,
+    getSuppressedAlerts: () => suppressedAlerts,
     applyAlerts,
+    applySuppressed,
     seriesAlerts: (id) => seriesAlerts(id),
     isBlocked: (id) => isBlocked(id),
     worstSeverity: (list) => worstSeverity(list),
@@ -150,7 +154,7 @@ function start(root) {
       renderLibrary();
     },
     openInstance: (instanceId) => {
-      showView('settings-connections');
+      showView('general-connections');
       const instance = (settings.instances || []).find((i) => i.id === instanceId);
       if (instance) editInstance(instance);
     },
@@ -168,6 +172,8 @@ function start(root) {
     renderDetails: () => renderDetails(),
     renderLibrary: () => libraryView.renderLibrary(),
     renderStatsView: () => renderStatsView(),
+    renderStatusView: () => renderStatusView(),
+    renderBackupView: () => renderBackupView(),
     startLog: () => startLog(),
     stopLog: () => stopLog(),
   });
@@ -180,6 +186,10 @@ function start(root) {
     settings = data.settings;
     snapshot.settings = settings;
     snapshot.schedule_text = data.schedule_text || snapshot.schedule_text;
+    if (data.health) applyHealth(data.health);
+    if (data.alerts) applyAlerts(data.alerts);
+    if (data.suppressed_alerts) applySuppressed(data.suppressed_alerts);
+    if (data.status) snapshot.status = data.status;
   }
 
   async function refresh() {
@@ -187,10 +197,12 @@ function start(root) {
     settings = snapshot.settings;
     applyHealth(snapshot.health);
     applyAlerts(snapshot.alerts || []);
+    applySuppressed(snapshot.suppressed_alerts || []);
     render();
     const progress = snapshot.progress || {};
     if (progress.running) startPolling();
     else queueChecks(snapshot.stale_rules || []);
+    checks.requestFreshness('opened');
   }
 
   function applyHealth(health) {
@@ -209,6 +221,11 @@ function start(root) {
     // A system alert appearing or clearing changes whether a run can happen at all, and
     // alerts arrive on their own schedule without ever passing through renderTopBar.
     if (snapshot) renderRunButton();
+  }
+
+  function applySuppressed(list) {
+    suppressedAlerts = list || [];
+    if (snapshot) snapshot.suppressed_alerts = suppressedAlerts;
   }
 
   const seriesAlerts = (ruleId) => alertsByRule[ruleId] || [];
@@ -244,6 +261,7 @@ function start(root) {
     applySaved,
     applyHealth,
     applyAlerts,
+    applySuppressed,
     forgetLibrary: () => libraryView.forgetLibrary(),
     refresh: () => refresh(),
     render: () => render(),
@@ -255,6 +273,7 @@ function start(root) {
     seriesAlertList: () => seriesAlertList(),
     seriesAlertCard: (rule, list, options) => seriesAlertCard(rule, list, options),
     systemAlertCard: (title, list) => systemAlertCard(title, list),
+    getStatus: () => (snapshot && snapshot.status) || {},
   });
   const { renderTopBar, renderCounts, renderRunButton, syncedAgo,
           showEverythingNeedingAttention } = topbar;
@@ -305,20 +324,27 @@ function start(root) {
 
   function render() {
     $('tvr-version').textContent = snapshot.version ? `v${snapshot.version}` : '';
-    const banner = ((settings || {}).alerts || {}).test_banner || 'full';
-    $('tvr-test-banner').hidden = !testMode() || banner === 'chip';
-    $('tvr-test-chip').hidden = !testMode() || banner !== 'chip';
+    $('tvr-test-chip').hidden = !testMode();
     renderCounts();
     renderTopBar();
     renderLibrary();
     renderAlerts();
     renderPresets();
-    renderInstances();
+    // Optional connection inputs live in the Connections pane and are rendered with the
+    // Sonarr cards. A background health tick must not rebuild those controls while an
+    // operator is typing a URL or credential; the next successful save paints the fresh
+    // connection state again.
+    if (!settingsView.isDirty()) renderInstances();
     renderSchedule();
-    renderSettings();
-    renderAlertSettings();
+    // A watch/check response may arrive while a settings form is being edited. The
+    // saved document is authoritative after a successful save, but not while the form
+    // is dirty: repainting here would silently throw away the operator's draft.
+    if (!settingsView.isDirty()) {
+      renderSettings();
+    }
     renderHistory();
     renderAbout();
+    renderStatus();
   }
 
   // -- start -------------------------------------------------------------

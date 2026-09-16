@@ -28,7 +28,7 @@ src/assets/
   checks.js         background check queue, sweep polling and heartbeat
   series-removal.js queued removal, undo and typed confirmation
   series-editor.js  details pane, drafts and rule-save orchestration
-  alerts.js         alert cards, acknowledgement and quick actions
+  alerts.js         alert cards, acknowledgement, scoped suppression and system actions
   navigation.js     sections, views and library filters
   topbar.js         counts, theme, run/sync actions and alert overview
   presets.js        preset CRUD and reusable retention-condition fields
@@ -98,8 +98,8 @@ The completed graph has also been reviewed for initialization order, stale state
 cache invalidation, listener duplication, render ordering and dependency cycles.
 
 The authoritative gate is `./tools/check-on-host.sh`, or
-`tools\check-on-host.ps1` from Windows. The current release passes 483 Python tests,
-worker imports, syntax checks for all nineteen ES modules, and 13 frontend runtime tests.
+`tools\check-on-host.ps1` from Windows. The current release passes 582 Python tests,
+worker imports, syntax checks for all nineteen ES modules, and 22 frontend runtime tests.
 
 ## Release identity
 

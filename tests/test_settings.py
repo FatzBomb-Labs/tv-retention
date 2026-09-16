@@ -32,6 +32,15 @@ class Settings(unittest.TestCase):
     def test_defaults_are_valid(self):
         self.assertEqual(validate_settings(DEFAULTS)['schedule']['test_mode'], True)
 
+    def test_old_alert_display_preferences_are_dropped(self):
+        document = base(alerts={'header': 'all', 'acknowledge': False, 'muted': [],
+                                'test_banner': 'full'})
+        alerts = validate_settings(document)['alerts']
+        self.assertNotIn('header', alerts)
+        self.assertNotIn('acknowledge', alerts)
+        self.assertNotIn('muted', alerts)
+        self.assertNotIn('test_banner', alerts)
+
     def test_test_mode_defaults_on_and_the_schedule_defaults_off(self):
         # A fresh install cannot delete unattended: no schedule, and Test Mode on if one
         # is enabled before anybody has watched a run go through.

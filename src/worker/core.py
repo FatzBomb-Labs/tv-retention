@@ -54,6 +54,21 @@ DEFAULTS = {
     'rules': [],
     # An API key is the switch: nobody enters one they do not want used.
     'tmdb': {'api_key': ''},
+    # Optional enrichment connections.  Sonarr remains the required source of truth;
+    # these entries only fill missing metadata and are inert until enabled.
+    'connections': {
+        'tmdb': {'name': 'TMDB', 'url': 'https://api.themoviedb.org/3',
+                 'api_key': '', 'enabled': False, 'verify_tls': True, 'verified_at': ''},
+        'plex': {'name': 'Plex', 'url': '', 'token': '', 'enabled': False,
+                 'verify_tls': True, 'verified_at': ''},
+        'jellyfin': {'name': 'Jellyfin', 'url': '', 'api_key': '', 'enabled': False,
+                     'verify_tls': True, 'verified_at': ''},
+    },
+    # Metadata only. The full secret is returned once by the create action and is never
+    # persisted or included in a snapshot.
+    'api_key': {'status': 'not_created', 'hash': '', 'prefix': '',
+                'created_at': '', 'revoked_at': ''},
+    'backup': {'path': '', 'keep': 5, 'last': '', 'last_error': ''},
     # What a run does without being asked. Every one of these is a decision that used to
     # be taken silently by the code, which meant the only way to find out what it was was
     # to read the code.
@@ -99,27 +114,7 @@ DEFAULTS = {
         # This is `air_dates.unresolved` said in the shape `evaluate` reads.
         'allow_estimated_dates': True,
     },
-    # What the header says, and what may be quietened. Errors are absent on purpose: one
-    # blocks a series from running, so it is not something to turn off.
-    'alerts': {
-        'header': 'all',            # errors | warnings | all
-        'acknowledge': True,        # may a warning or notice be acknowledged
-        'muted': [],                # kinds never shown, and never notified about
-        'test_banner': 'full',      # full | chip — never absent
-    },
-    'notifications': {
-        'run_started': False,
-        'run_completed': True,
-        'series_removed': True,
-        'series_ended': True,
-        'series_added': True,
-        'health_ok': False,
-        'health_problems': True,
-        'errors': True,
-        # Where a notification goes. Empty means nowhere, which is the default: a fresh
-        # install has no business posting to anything until someone says where.
-        'webhook_url': '',
-    },
+    'alerts': {},
     'logging': {'level': 'info', 'max_bytes': 2 * 1024 * 1024},
     # Run journals, logs and caches live on the array, not on the flash device.
     'state_dir': '/config/state',
@@ -279,20 +274,115 @@ def validate_path(value, field='Folder') -> str:
     return os.path.normpath(value)
 
 
-def validate_webhook(value, field='Notification webhook') -> str:
-    """Where notifications are posted, or nothing at all.
-
-    Only http and https, and only an absolute URL. A notification carries the series title
-    and what was deleted, so the destination is worth being strict about — this is the one
-    setting that sends anything out of the container.
-    """
+def validate_optional_url(value, field='Connection URL') -> str:
+    """An optional provider URL: blank is allowed until that provider is enabled."""
     url = _text(value, field, 512)
     if not url:
         return ''
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ('http', 'https') or not parsed.netloc:
         raise Rejected(f'{field} must be an http:// or https:// URL')
-    return url
+    return url.rstrip('/')
+
+
+OPTIONAL_CONNECTIONS = {
+    'tmdb': {'name': 'TMDB', 'credential': 'api_key',
+             'default_url': 'https://api.themoviedb.org/3'},
+    'plex': {'name': 'Plex', 'credential': 'token', 'default_url': ''},
+    'jellyfin': {'name': 'Jellyfin', 'credential': 'api_key', 'default_url': ''},
+}
+API_KEY_STATES = ('not_created', 'created', 'revoked')
+
+
+def _connection_map(raw) -> dict:
+    """Accept the keyed map used by the app and a list from early API clients."""
+    if isinstance(raw, dict):
+        return {str(key): value for key, value in raw.items() if isinstance(value, dict)}
+    if isinstance(raw, list):
+        result = {}
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            kind = str(entry.get('kind') or entry.get('type') or entry.get('id') or '')
+            if kind:
+                result[kind] = entry
+        return result
+    return {}
+
+
+def validate_connection(kind: str, raw, previous=None) -> dict:
+    """Validate one optional provider without ever requiring a credential for a disabled one."""
+    meta = OPTIONAL_CONNECTIONS[kind]
+    raw = raw if isinstance(raw, dict) else {}
+    previous = previous if isinstance(previous, dict) else {}
+    credential = meta['credential']
+    value = _text(raw.get(credential), f'{meta["name"]} credential', 512)
+    if value in ('********', '••••••••'):
+        value = _text(previous.get(credential), f'{meta["name"]} credential', 512)
+    enabled = _flag(raw.get('enabled', bool(value)))
+    url = validate_optional_url(raw.get('url') or meta['default_url'], f'{meta["name"]} URL')
+    if enabled and not value:
+        raise Rejected(f'{meta["name"]} needs a credential before it can be enabled')
+    if enabled and kind != 'tmdb' and not url:
+        raise Rejected(f'{meta["name"]} needs a URL before it can be enabled')
+    if value and len(value) > 512:
+        raise Rejected(f'{meta["name"]} credential is too long')
+    result = {
+        'name': meta['name'], 'url': url, credential: value,
+        'enabled': enabled, 'verify_tls': _flag(raw.get('verify_tls', True)),
+        'verified_at': _text(raw.get('verified_at'), f'{meta["name"]} verified at', 40),
+    }
+    # Preserve non-secret provider metadata so a future provider can add fields without
+    # making the current normalizer throw it away.
+    if kind == 'plex':
+        result['server_name'] = _text(raw.get('server_name'), 'Plex server name', 120)
+    return result
+
+
+def validate_api_key(raw, previous=None) -> dict:
+    """Normalize persistent API-key metadata; the secret itself is never a setting value."""
+    raw = raw if isinstance(raw, dict) else {}
+    previous = previous if isinstance(previous, dict) else {}
+    status = _text(raw.get('status') or previous.get('status') or 'not_created',
+                   'API key status', 20)
+    if status not in API_KEY_STATES:
+        raise Rejected('API key status is invalid')
+    digest = _text(raw.get('hash'), 'API key hash', 128)
+    if not digest:
+        digest = _text(previous.get('hash'), 'API key hash', 128)
+    prefix = _text(raw.get('prefix') or previous.get('prefix'), 'API key prefix', 32)
+    created = _text(raw.get('created_at') or previous.get('created_at'), 'API key created at', 40)
+    revoked = _text(raw.get('revoked_at') or previous.get('revoked_at'), 'API key revoked at', 40)
+    if status == 'created' and (not digest or not prefix or not created):
+        # A redacted browser document may omit the hash; the previous value above is the
+        # authoritative copy. A genuinely incomplete stored document is safer as revoked.
+        if previous.get('status') == 'created' and previous.get('hash'):
+            digest = digest or previous['hash']
+            prefix = prefix or previous.get('prefix', '')
+            created = created or previous.get('created_at', '')
+        else:
+            status = 'revoked'
+    return {'status': status, 'hash': digest, 'prefix': prefix,
+            'created_at': created, 'revoked_at': revoked}
+
+
+def validate_backup(raw, state_path='') -> dict:
+    """Normalize backup configuration; path safety is checked again at execution time."""
+    raw = raw if isinstance(raw, dict) else {}
+    path = _text(raw.get('path'), 'Backup destination', 1024)
+    if path:
+        if not path.startswith('/'):
+            raise Rejected('Backup destination must be an absolute path')
+        if '..' in Path(path).parts:
+            raise Rejected('Backup destination may not contain ".."')
+        path = os.path.normpath(path)
+        if state_path and (path == state_path or Path(path).is_relative_to(Path(state_path)) or
+                           Path(state_path).is_relative_to(Path(path))):
+            raise Rejected('Backup destination must not contain the active state directory')
+    keep = _whole(raw.get('keep', 5), 'Backup retention', 1, 100, allow_none=False)
+    return {'path': path, 'keep': keep,
+            'last': _text(raw.get('last'), 'Last backup', 40),
+            'last_error': _text(raw.get('last_error'), 'Last backup error', 500)}
 
 
 def validate_state_dir(value, field='App storage folder') -> str:
@@ -314,7 +404,6 @@ LOG_LEVELS = ['minimal', 'error', 'warning', 'info', 'verbose']
 # Kept here rather than imported from alerts, which imports nothing and is imported by
 # everything. The blocking ones cannot be muted: hiding "this series will not run" does
 # not stop it being true, it only stops you finding out why.
-ALERT_KINDS = ['unmatched', 'ended', 'ended-expired', 'sonarr-unreachable', 'no-recycle-bin']
 BLOCKING_KINDS = ['unmatched', 'sonarr-unreachable']
 
 
@@ -516,8 +605,8 @@ def validate_automation(raw) -> dict:
 # from the page is indistinguishable from one nobody thought of.
 AIR_DATE_PROVIDERS = {
     'tmdb': {'name': 'TMDB', 'needs': 'an API key, under Connections', 'built': True},
-    'tvmaze': {'name': 'TVMaze', 'needs': '', 'built': False},
-    'anilist': {'name': 'AniList', 'needs': '', 'built': False},
+    'tvmaze': {'name': 'TVMaze', 'needs': '', 'built': True},
+    'anilist': {'name': 'AniList', 'needs': '', 'built': True},
     'imdb': {'name': 'IMDB', 'needs': 'no public API exists', 'built': False},
     'plex': {'name': 'Plex', 'needs': 'a Plex connection', 'built': False},
     'jellyfin': {'name': 'Jellyfin', 'needs': 'a Jellyfin connection', 'built': False},
@@ -542,12 +631,16 @@ def validate_air_dates(raw) -> dict:
     dropped rather than refused — a provider removed in a later version should not stop a
     settings document loading.
     """
-    raw = raw or {}
+    raw = raw if isinstance(raw, dict) else {}
     order = [name for name in (raw.get('providers') or []) if name in AIR_DATE_PROVIDERS]
     # Anything this version knows about and the document did not mention goes on the end,
     # so a new provider appears rather than being silently absent.
     order += [name for name in AIR_DATE_PROVIDERS if name not in order]
-    enabled = [name for name in order if name in set(raw.get('enabled') or [])]
+    # A document from before the provider page had no `enabled` list.  Keep the safe
+    # default (TMDB, when a key is present) rather than silently disabling enrichment on
+    # first save.  An explicitly supplied empty list still means "disable them all".
+    requested = raw['enabled'] if 'enabled' in raw else DEFAULTS['air_dates']['enabled']
+    enabled = [name for name in order if name in set(requested or [])]
     return {
         'providers': order,
         'enabled': enabled,
@@ -567,6 +660,7 @@ EXCLUSION_REASONS = {
     'season': 'This whole season is excluded automatically',
     'folder': 'Excluded automatically: its season folder matches',
     'episode': 'Excluded automatically: the episode matches',
+    'air-date': 'Excluded automatically: no air date could be resolved',
 }
 
 # Sonarr can be told to file specials as season 0 or into a folder of their own, and which
@@ -640,6 +734,12 @@ def excluded_causes(episodes, rule, settings) -> dict:
                     if needle in haystack:
                         found[key] = ('episode', shown)
                         break
+                else:
+                    # The worker marks unresolved dates only after all configured
+                    # providers and estimates have had a chance.  This is an automatic
+                    # exclusion, never a hand-edited rule entry.
+                    if episode.get('air_source') == 'unresolved':
+                        found[key] = ('air-date', None)
     return found
 
 
@@ -653,12 +753,14 @@ def exclusion_summary(episodes, rule, settings) -> dict:
     automation = settings.get('automation') or DEFAULTS['automation']
     causes = excluded_causes(episodes, rule, settings)
     seasons, folders, titles = {}, {}, {}
-    manual = specials = 0
+    manual = specials = air_date = 0
     for reason, detail in causes.values():
         if reason == 'manual':
             manual += 1
         elif reason == 'specials':
             specials += 1
+        elif reason == 'air-date':
+            air_date += 1
         elif reason == 'season':
             seasons[detail] = seasons.get(detail, 0) + 1
         elif reason == 'folder':
@@ -674,6 +776,7 @@ def exclusion_summary(episodes, rule, settings) -> dict:
         'episodes': len(episodes),
         'manual': manual,
         'specials': specials,
+        'air_date': air_date,
         'seasons': [{'season': season, 'episodes': count}
                     for season, count in sorted(seasons.items())],
         'folders': [{'pattern': text, 'episodes': folders[text]}
@@ -762,6 +865,11 @@ def validate_settings(raw, previous=None) -> dict:
     previous = previous or {}
     existing_keys = {i['id']: i.get('api_key', '') for i in previous.get('instances', []) if isinstance(i, dict) and i.get('id')}
     previous_tmdb = (previous.get('tmdb') or {}).get('api_key', '')
+    previous_connections = _connection_map(previous.get('connections'))
+    # Older settings kept TMDB at the top level. Treat it as the same connection while
+    # normalizing, so saving a redacted document cannot accidentally clear the key.
+    if 'tmdb' not in previous_connections and previous_tmdb:
+        previous_connections['tmdb'] = {'api_key': previous_tmdb}
 
     instances = []
     seen = set()
@@ -811,12 +919,22 @@ def validate_settings(raw, previous=None) -> dict:
     health_raw = raw.get('health') or {}
     retention_raw = raw.get('retention') or {}
     tmdb_raw = raw.get('tmdb') or {}
-    notify_raw = raw.get('notifications') or {}
     logging_raw = raw.get('logging') or {}
 
     tmdb_key = _text(tmdb_raw.get('api_key'), 'TMDB API key', 128)
     if tmdb_key == '********':
         tmdb_key = previous_tmdb
+    if tmdb_key and not re.match(r'^[A-Za-z0-9._\-]{16,128}$', tmdb_key):
+        raise Rejected('TMDB API key looks malformed')
+
+    connection_raw = _connection_map(raw.get('connections'))
+    legacy_tmdb = raw.get('tmdb') or {}
+    if 'tmdb' not in connection_raw and isinstance(legacy_tmdb, dict):
+        connection_raw['tmdb'] = legacy_tmdb
+    connections = {kind: validate_connection(kind, connection_raw.get(kind),
+                                              previous_connections.get(kind))
+                   for kind in OPTIONAL_CONNECTIONS}
+    tmdb_key = connections['tmdb']['api_key']
     if tmdb_key and not re.match(r'^[A-Za-z0-9._\-]{16,128}$', tmdb_key):
         raise Rejected('TMDB API key looks malformed')
 
@@ -826,18 +944,12 @@ def validate_settings(raw, previous=None) -> dict:
     if 'air_dates' not in raw and 'allow_estimated_dates' in retention_raw:
         air_dates['unresolved'] = 'estimate' if _flag(retention_raw['allow_estimated_dates']) else 'leave'
 
-    alerts_raw = raw.get('alerts') or {}
-    muted = [_text(kind, 'Alert kind', 32) for kind in (alerts_raw.get('muted') or [])]
-    for kind in muted:
-        if kind not in ALERT_KINDS:
-            raise Rejected(f'Unknown alert kind "{kind}"')
-        if kind in BLOCKING_KINDS:
-            raise Rejected(f'"{kind}" stops a series from running and cannot be hidden')
-
     level = _text(logging_raw.get('level'), 'Log level', 16) or 'info'
     if level not in LOG_LEVELS:
         raise Rejected(f'Log level must be one of: {", ".join(LOG_LEVELS)}')
 
+    api_key = validate_api_key(raw.get('api_key'), previous.get('api_key'))
+    state_path = validate_state_dir(raw.get('state_dir') or DEFAULTS['state_dir'])
     settings = {
         'settings_version': SETTINGS_VERSION,
         'schedule': dict(validate_schedule(schedule_raw, 'Schedule'),
@@ -850,6 +962,9 @@ def validate_settings(raw, previous=None) -> dict:
         'profiles': profiles,
         'rules': rules,
         'tmdb': {'api_key': tmdb_key},
+        'connections': connections,
+        'api_key': api_key,
+        'backup': validate_backup(raw.get('backup'), state_path),
         'automation': validate_automation(raw.get('automation')),
         'air_dates': air_dates,
         'retention': {
@@ -858,35 +973,36 @@ def validate_settings(raw, previous=None) -> dict:
             # cannot drift.
             'allow_estimated_dates': air_dates['unresolved'] == 'estimate',
         },
-        'notifications': dict({name: _flag(notify_raw.get(name, default))
-                               for name, default in DEFAULTS['notifications'].items()
-                               if name != 'webhook_url'},
-                              webhook_url=validate_webhook(notify_raw.get('webhook_url'))),
-        'alerts': {
-            'header': _choice(alerts_raw.get('header') or 'all', ['errors', 'warnings', 'all'],
-                              'Header alerts'),
-            'acknowledge': _flag(alerts_raw.get('acknowledge', True)),
-            'muted': sorted(set(muted)),
-            'test_banner': _choice(alerts_raw.get('test_banner') or 'full', ['full', 'chip'],
-                                   'Test mode banner'),
-        },
+        # Acknowledgement and suppression are per-alert state, not global settings.
+        # Keep the empty group so older documents shed their display preferences while
+        # the top-level settings shape remains stable.
+        'alerts': {},
         'logging': {
             'level': level,
             'max_bytes': _whole(logging_raw.get('max_bytes', 2 * 1024 * 1024), 'Log size', 65536, 64 * 1024 * 1024, allow_none=False),
         },
-        'state_dir': validate_state_dir(raw.get('state_dir') or DEFAULTS['state_dir']),
+        'state_dir': state_path,
         'log_retention_runs': _whole(raw.get('log_retention_runs', 50), 'History size', 1, 500, allow_none=False),
     }
     return settings
 
 
 def redact(settings: dict) -> dict:
-    """Settings as shown to the browser: secrets replaced by a mask the UI echoes back."""
+    """Settings as shown to the browser: every provider secret is replaced by a mask."""
     copy = json.loads(json.dumps(settings))
     for instance in copy.get('instances', []):
         instance['api_key'] = '********' if instance.get('api_key') else ''
     if copy.get('tmdb', {}).get('api_key'):
         copy['tmdb']['api_key'] = '********'
+    for connection in (copy.get('connections') or {}).values():
+        for field in ('api_key', 'token', 'password', 'secret'):
+            if field in connection:
+                connection[field] = '********' if connection.get(field) else ''
+    if 'api_key' in copy:
+        # A digest is not useful to the browser and exposing it makes the lifecycle state
+        # look like an API credential.  The action returns only status/prefix metadata.
+        copy['api_key'] = {key: value for key, value in copy['api_key'].items()
+                           if key != 'hash'}
     return copy
 
 
@@ -989,6 +1105,27 @@ def effective_date(episode, allow_import_fallback):
         if added:
             return added, 'imported'
     return None, 'unknown'
+
+
+def air_date_gaps(episodes, rule, settings) -> list:
+    """Episodes a keep-by-age rule would judge without a trustworthy air date.
+
+    Provider and interpolation enrichment happens in the worker.  This pure predicate is
+    the invariant used by the editor, health check, preview, and run so none of those
+    paths can quietly make a different decision about an undated file.
+    """
+    if not rule.get('keep_days'):
+        return []
+    # An ``air-date`` cause is the *result* of this predicate when the operator chose
+    # automatic exclusion.  Do not let a cached unresolved marker make the predicate
+    # disappear on the next pass, especially when the configured outcome is ``disable``.
+    # Manual and other global exclusions still remove an episode from the judged set.
+    excluded = {key for key, (reason, _) in excluded_causes(episodes, rule, settings).items()
+                if reason != 'air-date'}
+    return [episode for episode in episodes or []
+            if episode.get('path') and episode.get('episode_id') not in excluded
+            and episode.get('has_file') and
+            effective_date(episode, allow_import_fallback=False)[0] is None]
 
 
 def next_episode(episodes, now=None):

@@ -386,7 +386,6 @@ export function createSeriesEditor({
         // just saved without waiting for the getSettings() to come round again.
         let manualExclusions = (rule.exclusions || []).slice();
         const sayAutomation = (data) => {
-          if (!existing) return;
           autoRow.hidden = false;
           const found = Object.assign({ seasons: [], folders: [], episode_patterns: [],
                                         manual: 0, specials: 0, total: 0 },
@@ -395,8 +394,9 @@ export function createSeriesEditor({
                                                          textContent: label });
           const from = (n) => `${plural(n, 'episode')}, from Automation`;
           const lines = [];
-          if (!data.specials_default) lines.push(line('tvr-auto-plain',
-            `Specials: ${data.specials ? 'kept' : 'excluded'} — set on this series`));
+          lines.push(line(data.specials_default ? 'tvr-auto-inherited' : 'tvr-auto-plain',
+            `Specials: ${data.specials ? 'kept' : 'excluded'} — `
+            + (data.specials_default ? 'inherited from global Automation' : 'set on this series')));
           if (found.specials) lines.push(line('tvr-auto-rule', `Specials excluded — ${from(found.specials)}`));
           found.seasons.forEach((entry) => lines.push(line('tvr-auto-rule',
             `Season ${entry.season} excluded — ${from(entry.episodes)}`)));
@@ -410,7 +410,11 @@ export function createSeriesEditor({
           autoLines.replaceChildren(...lines);
         };
         const loadAutomation = () => {
-          if (!existing) return;
+          if (!existing) {
+            const global = (getSettings().retention || {}).include_specials;
+            sayAutomation({ specials: !!global, specials_default: true, exclusions: {} });
+            return;
+          }
           guarded('', async () => sayAutomation(await api('exclusions', { rule_id: rule.id }, '', true)));
         };
         // The same episode list the getMonitoring() tree reads, so the picker and the pane agree
@@ -527,13 +531,19 @@ export function createSeriesEditor({
           const alertsHere = seriesAlerts(rule.id);
           if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
         }
+        const automationBox = el('div', { className: 'tvr-automation-box' }, [
+          el('div', { className: 'tvr-automation-title', textContent: 'Automation' }),
+          el('p', { className: 'tvr-lede', textContent:
+            'Global exclusions apply to every series. The value below is this series’ override; '
+            + 'episode exclusions are shown for context and edited in their own picker.' }),
+          field('Season 0 / specials', specials), autoRow,
+        ]);
         body.append(
           field('Retention', presetSelect, (getSettings().profiles || []).length
             ? 'Presets are managed under Media management.' : 'No presets yet — create one to reuse values.'),
           conditions.node,
-          field('Season 0 / specials', specials),
           autoReenable.node,
-          autoRow, scopeRow, unmonitorNote);
+          automationBox, scopeRow, unmonitorNote);
         const formState = () => JSON.stringify({ profile_id: presetSelect.value,
                                           keep_days: conditions.days.value,
                                           keep_episodes: conditions.episodes.value,

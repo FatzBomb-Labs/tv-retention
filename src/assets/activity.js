@@ -8,11 +8,79 @@
 // freeze at whichever document happened to be current when this module was built.
 
 import { $, el, text } from './dom.js';
-import { bytes, when, plural } from './format.js';
+import { ago, bytes, when, plural } from './format.js';
 import { changeRows } from './changes.js';
 import { dialog, guarded, notice } from './feedback.js';
 
 function createActivity({ api, refresh, getSnapshot, getSettings }) {
+  let status = null;
+
+  function renderStatus(data) {
+    status = data || getSnapshot().status || null;
+    if (!status) return;
+    const summary = $('tvr-status-summary');
+    if (!summary) return;
+    const sync = status.sync || {};
+    const schedule = status.schedule || {};
+    summary.replaceChildren(...[
+      ['HEALTH', status.alerts && status.alerts.length ? `${status.alerts.length} issue(s)` : 'Healthy',
+       status.alerts && status.alerts.length ? 'See details below' : 'No status errors or warnings'],
+      ['UPTIME', `${Math.floor((status.uptime_seconds || 0) / 3600)}h ${Math.floor(((status.uptime_seconds || 0) % 3600) / 60)}m`, 'Worker process'],
+      ['SONARR SYNC', sync.synced_at ? ago(sync.synced_at) : 'Not yet', sync.running ? 'Read in progress' : 'Cached reading'],
+      ['SCHEDULE', schedule.enabled ? 'Enabled' : 'Off', status.test_mode ? 'Test Mode on' : 'Live mode'],
+      ['BUILD', `${status.version || 'unknown'} · ${status.build_number || 'dev'}`,
+       status.build_date ? `built ${new Date(status.build_date).toLocaleDateString()}` : 'build date not recorded'],
+    ].map(([name, value, note]) => el('div', {}, [
+      el('span', { textContent: name }), el('strong', { textContent: value }),
+      el('small', { textContent: note }),
+    ])));
+
+    const alerts = $('tvr-status-alerts');
+    alerts.replaceChildren(...(status.alerts || []).map((alert) =>
+      el('div', { className: `tvr-status ${alert.severity === 'error' ? 'bad' : 'ok'}` }, [
+        el('strong', { textContent: alert.title }),
+        el('span', { textContent: alert.detail || alert.help || '' }),
+      ])));
+    const recent = $('tvr-status-recent');
+    if (recent) recent.replaceChildren(...(status.recent || []).map((alert) =>
+      el('div', { className: 'tvr-status-recent' }, [
+        el('span', { className: `tvr-sev ${alert.severity || 'notice'}` }),
+        el('strong', { textContent: alert.title }),
+        el('span', { textContent: alert.detail || '' }),
+        el('span', { className: 'tvr-alert-age', textContent: alert.last_seen ? ago(alert.last_seen) : '' }),
+      ])));
+    const instances = $('tvr-status-instances');
+    instances.replaceChildren(...Object.values(status.instances || {}).map((instance) =>
+      el('div', { className: `tvr-instance ${instance.reachable === false ? 'bad' : 'ok'}` }, [
+        el('span', { className: `tvr-dot ${instance.reachable === false ? 'bad' : 'ok'}` }),
+        el('strong', { textContent: instance.name || instance.instance_id }),
+        el('span', { textContent: instance.reachable === false ? (instance.error || 'Unreachable')
+          : `Sonarr ${instance.sonarr_version || 'connected'} · ${instance.series_count || 0} series` }),
+        el('span', { className: 'tvr-alert-age', textContent: instance.checked_at ? ago(instance.checked_at) : 'not checked' }),
+      ])));
+    const storage = $('tvr-status-storage');
+    const shape = status.storage || {};
+    storage.replaceChildren(...[
+      ['Config readable', shape.config_readable ? 'yes' : 'no'],
+      ['State writable', shape.state_writable ? 'yes' : 'no'],
+      ['Backup destination', shape.backup_path ? (shape.backup_valid ? 'available' : 'unavailable') : 'not configured'],
+      ['API key', (status.api_key || {}).status || 'not_created'],
+    ].map(([name, value]) => el('div', { className: 'tvr-inline-row' }, [
+      el('span', { className: 'tvr-inline-label', textContent: name }), el('span', { textContent: value }),
+    ])));
+    const run = $('tvr-status-run');
+    const last = status.last_run;
+    run.replaceChildren(el('div', { className: 'tvr-inline-row' }, [
+      el('span', { className: 'tvr-inline-label', textContent: 'Last run' }),
+      el('span', { textContent: last ? `${when(last.finished || last.started)} · ${last.deleted || 0} deleted` : 'No runs yet' }),
+    ]));
+  }
+
+  async function renderStatusView() {
+    const data = await api('status', {}, 'Refreshing status…', true);
+    getSnapshot().status = data;
+    renderStatus(data);
+  }
   // -- stats -------------------------------------------------------------
   // Answered from what is already kept: the run journal for what has been reclaimed, and
   // the stored reading for the shape of the library. Nothing new is recorded for this.
@@ -178,9 +246,10 @@ function createActivity({ api, refresh, getSnapshot, getSettings }) {
     }));
 
     $('tvr-log-clear').addEventListener('click', () => { $('tvr-log').textContent = ''; });
+    $('tvr-status-refresh').addEventListener('click', () => guarded('', renderStatusView));
   }
 
-  return { renderStatsView, showResult, renderHistory, startLog, stopLog, wire };
+  return { renderStatsView, renderStatusView, renderStatus, showResult, renderHistory, startLog, stopLog, wire };
 }
 
 export { createActivity };

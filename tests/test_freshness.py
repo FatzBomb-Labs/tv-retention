@@ -381,7 +381,7 @@ class Sync(unittest.TestCase):
         self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1)
         self.assertEqual(len(main.episode_cache(self.settings, self.settings['rules'][0])[0]), 5)
 
-    def test_it_reports_what_moved_since_the_last_one(self):
+    def test_it_reports_what_moved_since_the_last_one_without_outbound_notification(self):
         main.sync_from_sonarr(self.settings)
         self.library.append({'series_id': 2, 'title': 'Brand New', 'added': '2026-09-08T00:00:00Z',
                              'ended': False, 'status': 'continuing', 'path': '/tv/B',
@@ -390,7 +390,7 @@ class Sync(unittest.TestCase):
         report = main.sync_from_sonarr(self.settings)
         self.assertEqual(report['series_added'], ['Brand New'])
         self.assertEqual(report['series_changed'], 1)
-        self.assertEqual([event for _, event in self.notified], ['series_added'])
+        self.assertEqual(self.notified, [], 'library changes stay in the in-app journal')
 
     def test_a_series_leaving_sonarr_is_counted(self):
         main.sync_from_sonarr(self.settings)
@@ -499,9 +499,26 @@ class Sync(unittest.TestCase):
         main.sync_from_sonarr(self.settings)
         self.assertFalse(main.sync_is_due(self.settings))
         stored = main.last_sync(self.settings)
-        stored['synced_at'] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=30)).isoformat()
+        stored['synced_at'] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=61)).isoformat()
         main.write_cache(self.settings, 'sync.json', stored)
         self.assertTrue(main.sync_is_due(self.settings))
+
+    def test_page_refresh_uses_the_shorter_idle_threshold(self):
+        main.sync_from_sonarr(self.settings)
+        stored = main.last_sync(self.settings)
+        stored['synced_at'] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=6)).isoformat()
+        main.write_cache(self.settings, 'sync.json', stored)
+        self.assertFalse(main.sync_is_due(self.settings), 'resident interval is one hour')
+        self.assertTrue(main.sync_is_due(self.settings, main.PAGE_REFRESH_SECONDS))
+
+    def test_recycle_bin_alert_waits_for_an_actual_instance_check(self):
+        health = {'instances': {}, 'alerts': []}
+        self.assertEqual(main.system_alerts(self.settings, health), [])
+        health['instances']['i1'] = {
+            'checked_at': main.now_iso(), 'reachable': True, 'recycle_bin': '',
+        }
+        self.assertEqual([alert['kind'] for alert in main.system_alerts(self.settings, health)],
+                         ['no-recycle-bin'])
 
     def test_browsing_the_library_never_reaches_sonarr(self):
         """The whole point: the picker, a keep window, a plan — all from the stored reading."""
@@ -759,4 +776,3 @@ class RecycleBinWiring(unittest.TestCase):
         put_calls = [call for call in self.mock_request.call_args_list if call.args[1] == 'PUT']
         self.assertEqual(len(put_calls), 1)
         self.assertEqual(put_calls[0].args[2], 'config/mediamanagement/42')
-

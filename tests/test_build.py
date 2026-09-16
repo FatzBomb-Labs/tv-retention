@@ -173,10 +173,11 @@ class Interface(unittest.TestCase):
         self.assertIn('function queueChecks', self.js)
 
     def test_a_show_being_read_says_so(self):
-        # It is not hidden and not silently stale: the card stays, and its plan is replaced
-        # by what is happening to it.
+        # It is not hidden and not silently stale: the card stays while the background
+        # reader owns its plan, and the grid/list badge returns only with fresh data.
         self.assertIn('isChecking(rule.id)', self.js)
-        self.assertRegex(self.js, r"isChecking\(rule\.id\)\) \{\s*\n\s*main\.append")
+        self.assertIn('changeMarks(rule, plan)', self.js)
+        self.assertIn('Reading from Sonarr', self.js)
 
     def test_the_page_has_a_heartbeat_that_never_blocks_it(self):
         # It must not raise the busy overlay, must stand aside for a sweep, and must not
@@ -184,6 +185,18 @@ class Interface(unittest.TestCase):
         self.assertRegex(self.js, r"api\('watch'[^;]*, true\)")
         self.assertIn('if (document.hidden || checkRunning || checkQueue.length || pollTimer) return;', self.js)
         self.assertIn('if (stamp === watchStamp) return;', self.js)
+
+    def test_page_freshness_is_background_coalesced_and_cache_first(self):
+        actions = (ROOT / 'src' / 'worker' / 'actions.py').read_text()
+        snapshot = actions.split('def action_snapshot')[1].split('\ndef action_sync')[0]
+        self.assertNotIn('sync_from_sonarr', snapshot)
+        sync = actions.split('def action_sync')[1].split('\ndef _sync_response')[0]
+        self.assertIn('with main.run_lock()', sync)
+        self.assertIn('main.PAGE_REFRESH_SECONDS', sync)
+        self.assertIn("api('sync', { reason: reason || 'opened' }, '', true)", self.js)
+        self.assertIn("checks.requestFreshness('opened')", self.js)
+        self.assertIn("requestFreshness('visible')", self.js)
+        self.assertIn('5 * 60 * 1000', self.js)
 
     def test_the_tick_asks_what_changed_whether_or_not_anyone_is_looking(self):
         # A problem the page discovers first is a notification that never fired.
@@ -241,7 +254,7 @@ class Interface(unittest.TestCase):
 
     def test_the_series_badge_is_a_count_beside_the_title(self):
         # A circle carrying a number, next to the name — not a pill competing with it.
-        self.assertIn('head.append(alertBadge(rule));', self.js)
+        self.assertIn('function alertBadge(rule)', self.js)
         self.assertIn('tvr-dot-badge', self.js)
 
     def test_removing_a_series_is_queued_and_asks_for_the_right_word(self):
@@ -288,7 +301,7 @@ class Interface(unittest.TestCase):
         self.assertIn("test: ['Run Test'", block)
         self.assertIn("blocked: ['Disabled'", block)
         state = self.js.split('function runState()')[1].split('\n  }')[0]
-        self.assertIn('getSystemAlerts().some((alert) => alert.blocking)', state)
+        self.assertIn('system.some((alert) => alert.blocking)', state)
         self.assertNotIn('isBlocked', state, 'one broken series must not disable the button')
         # Blocked stays pressable: it is the shortest route to the reason.
         self.assertIn("if (runState() === 'blocked') return void showEverythingNeedingAttention();",
@@ -651,17 +664,19 @@ class Interface(unittest.TestCase):
         # A badge next to the thing it is about: series problems on the series items,
         # connection problems on Connections. Neither counts the other's.
         self.assertIn("setBadge($('tvr-badge-series-connected'), connectedAlerts)", self.js)
-        self.assertIn("setBadge($('tvr-badge-media-connections'), instances)", self.js)
+        self.assertIn("setBadge($('tvr-badge-general-connections'), instances)", self.js)
         for identifier in ('tvr-badge-series-all', 'tvr-badge-series-connected',
-                           'tvr-badge-media-connections', 'tvr-alert-total'):
+                           'tvr-badge-general-connections'):
             self.assertIn(f'id="{identifier}"', self.html)
+        self.assertNotIn('tvr-alert-total', self.html)
+        self.assertNotIn('alerts.header', self.js)
 
     def test_a_sweep_clears_each_plan_but_keeps_the_series(self):
         # The series are not what is being re-read; their plans are. A plan left standing
         # during the read is a stale reading shown as a current one — but emptying the
         # whole list to say so throws away the page.
         self.assertIn('bulkChecking', self.js)
-        self.assertIn("textContent: 'Reading from Sonarr…'", self.js)
+        self.assertIn('Reading from Sonarr…', self.js)
         self.assertIn('bulkChecking = false;', self.js)
 
     def test_buttons_do_not_inherit_the_font_shorthand(self):
@@ -703,6 +718,16 @@ class Interface(unittest.TestCase):
         self.assertIn('settingsDirty(true)', self.js)
         self.assertIn('settingsDirty(false)', self.js)
 
+    def test_background_renders_do_not_replace_a_dirty_settings_form(self):
+        """A watch response must not turn an unsaved edit back into the saved value."""
+        self.assertIn('let dirty = false;', self.js)
+        self.assertIn('isDirty: () => dirty', self.js)
+        render = self.js.split('function render()')[1].split('// -- start')[0]
+        self.assertIn('if (!settingsView.isDirty())', render)
+        self.assertIn('renderSettings();', render)
+        saving = self.js.split('async function saveSettings(')[1].split('  }')[0]
+        self.assertIn('settingsDirty(false);', saving)
+
     def test_every_schedule_control_is_wired_to_save(self):
         # A control added to the panel and not to the list would silently not persist,
         # which is the whole bug repeating.
@@ -732,7 +757,7 @@ class Interface(unittest.TestCase):
         """
         collect = self.js.split('function collectSettings()')[1].split('\n  }')[0]
         render = self.js.split('function renderSettings()')[1].split('\n  }\n')[0]
-        for view in ('media-automation', 'settings-safety'):
+        for view in ('media-automation', 'general-safety', 'general-air-dates'):
             for identifier in re.findall(r'id="(tvr-[a-z-]+)"', self._panel(view)):
                 if 'help' in identifier or 'field' in identifier:
                     continue
@@ -806,10 +831,10 @@ class Interface(unittest.TestCase):
         """
         import core
         self.assertEqual(sorted(core.EXCLUSION_REASONS),
-                         ['episode', 'folder', 'manual', 'season', 'specials'])
+                         ['air-date', 'episode', 'folder', 'manual', 'season', 'specials'])
         # Any indent: the keys sit one level inside the declaration, wherever that lands.
-        named = set(re.findall(r'^\s+([a-z]+): \(', self.js.split('EXCLUDED_WHY = {')[1]
-                               .split('};')[0], re.M))
+        named = set(re.findall(r"^\s*'?([a-z-]+)'?\s*:\s*\(",
+                               self.js.split('EXCLUDED_WHY = {')[1].split('};')[0], re.M))
         # `manual` is the one the picker does not explain, because it is the one you did.
         self.assertEqual(named, set(core.EXCLUSION_REASONS) - {'manual'})
 
@@ -918,6 +943,22 @@ class Interface(unittest.TestCase):
         """
         self.assertRegex(self.js, r"const VIEWS = \[\.\.\.document\.querySelectorAll\('\.tvr-side \[data-view\]'\)\]")
 
+    def test_the_old_plugin_surfaces_are_gone_and_general_owns_the_settings(self):
+        self.assertIn('data-section="general"', self.html)
+        self.assertIn('data-view="general-connections"', self.html)
+        self.assertIn('data-view="general-backup"', self.html)
+        self.assertIn('data-view="general-air-dates"', self.html)
+        self.assertNotIn('Notifications', self.html)
+        self.assertNotIn('Radarr specials', self.html)
+        self.assertNotIn('data-view="settings-', self.html)
+        self.assertNotIn('data-view="media-radarr"', self.html)
+        self.assertNotIn('id="tvr-alerts-system-empty"', self.html)
+
+    def test_alert_attention_is_contextual_not_a_global_header_total(self):
+        self.assertNotIn('tvr-alert-header', self.html)
+        self.assertNotIn('header_worthy', self.js)
+        self.assertNotIn('tvr-alert-total', self.css)
+
     def test_every_view_is_inside_the_main_column(self):
         """Five of them were not, and rendered under the shell rather than in it.
 
@@ -1002,12 +1043,12 @@ class Interface(unittest.TestCase):
             self.assertNotIn(heavy, worker.split('LIST_FIELDS = (')[1].split(')')[0])
 
     def test_what_stops_work_sits_above_the_chrome(self):
-        # A banner about a sweep in progress, or about Test Mode, belongs over the page
-        # rather than inside it. The array warning went with the plugin: a container has
-        # no array to be told about.
+        # A banner about a sweep in progress belongs over the page. Test Mode is a
+        # persistent header marker, not a second page-level banner.
         head = self.html.split('<header class="tvr-topbar">')[0]
-        for identifier in ('tvr-checking', 'tvr-test-banner'):
+        for identifier in ('tvr-checking',):
             self.assertIn(f'id="{identifier}"', head, f'{identifier} is below the header')
+        self.assertNotIn('id="tvr-test-banner"', self.html)
 
     def test_no_two_elements_share_an_id(self):
         """A duplicate id is a lookup that silently finds the wrong element.
@@ -1020,26 +1061,28 @@ class Interface(unittest.TestCase):
         duplicates = sorted({name for name in found if found.count(name) > 1})
         self.assertEqual(duplicates, [])
 
-    def test_test_mode_can_be_made_small_but_never_silent(self):
+    def test_test_mode_is_always_the_small_header_marker(self):
         self.assertIn('id="tvr-test-chip"', self.html)
-        options = self.html.split('id="tvr-test-banner-mode"')[1].split('</select>')[0]
-        self.assertIn('value="full"', options)
-        self.assertIn('value="chip"', options)
-        self.assertNotIn('value="off"', options)
-        self.assertNotIn('value="none"', options)
+        self.assertNotIn('tvr-test-banner-mode', self.html)
+        self.assertNotIn('test_banner', self.js)
+        self.assertIn("$('tvr-test-chip').hidden = !testMode();", self.js)
 
-    def test_an_error_can_never_be_acknowledged_or_muted(self):
+    def test_an_error_can_never_be_acknowledged_or_suppressed(self):
         """Hiding \"this series will not run\" does not stop it being true."""
         import alerts as alert_module
         from core import BLOCKING_KINDS
         for kind in BLOCKING_KINDS:
             self.assertTrue(alert_module.KINDS[kind]['blocking'])
         error = alert_module.make('unmatched', rule_id='r1')
-        self.assertFalse(alert_module.may_acknowledge(error, {'alerts': {'acknowledge': True}}))
+        self.assertFalse(alert_module.may_acknowledge(error))
         notice = alert_module.make('ended-expired', rule_id='r1')
-        self.assertTrue(alert_module.may_acknowledge(notice, {'alerts': {'acknowledge': True}}))
+        self.assertTrue(alert_module.may_acknowledge(notice))
         # And the interface offers it on exactly the same terms.
         self.assertIn("alert.severity !== 'error' && !alert.blocking", self.js)
+        self.assertNotIn('tvr-alert-ack', self.html)
+        self.assertNotIn('alerts.acknowledge', self.js)
+        self.assertIn("alert.kind === 'no-recycle-bin'", self.js)
+        self.assertNotIn('tvr-alert-muted', self.html)
 
     def test_add_and_edit_are_one_panel(self):
         """They were the same form with different framing; now they are the same form.
@@ -1688,8 +1731,8 @@ class Bands(unittest.TestCase):
     def test_hiding_a_severity_does_not_stop_it_counting(self):
         """The toggles are about what you want in front of you, not about what is true.
 
-        The header total and the card badges answer a different question, and a control
-        that quietly changed both would be an acknowledgement wearing a filter's clothes.
+        The card badges answer what is true, and a display filter must not quietly change
+        those counts or become an acknowledgement wearing a filter's clothes.
         """
         block = self.js.split('const bandShows = (key)')[1].split('\n\n')[0]
         self.assertIn("remembered(`show.${key}`", block)
@@ -1745,3 +1788,26 @@ class Bands(unittest.TestCase):
         self.assertIn("shell.classList.add('open');", self.js)
         self.assertIn('Select a series to view or modify its details.', self.js)
         self.assertIn('.tvr-details-idle', self.css)
+
+
+class OperationalList(unittest.TestCase):
+    """List mode keeps one Watching column and reuses the grid's change badges."""
+
+    def test_the_keep_window_lives_under_watching_not_in_its_own_column(self):
+        html = (ROOT / 'src' / 'include' / 'interface.html').read_text(encoding='utf-8')
+        library = (ROOT / 'src' / 'assets' / 'library.js').read_text(encoding='utf-8')
+        self.assertIn('<span>Watching</span>', html)
+        self.assertNotIn('<span>Retention</span>', html)
+        self.assertNotIn('<span>Planned changes</span>', html)
+        block = library.split('function listCard(row)')[1].split('\n  const applyLayout')[0]
+        self.assertIn("stateCell.append(el('span', { className: 'tvr-chip", block)
+        self.assertNotIn('tvr-connected', block)
+        self.assertIn('art.append(changeMarks(rule, plan))', block)
+
+    def test_series_automation_is_one_box_with_inheritance_named(self):
+        editor = (ROOT / 'src' / 'assets' / 'series-editor.js').read_text(encoding='utf-8')
+        css = (ROOT / 'src' / 'assets' / 'app.css').read_text(encoding='utf-8')
+        self.assertIn('tvr-automation-box', editor)
+        self.assertIn('inherited from global Automation', editor)
+        self.assertIn("automationBox, scopeRow", editor)
+        self.assertIn('.tvr-automation-box', css)

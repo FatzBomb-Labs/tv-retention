@@ -24,18 +24,20 @@ SEVERITIES = [ERROR, WARNING, NOTICE]
 # action offered against it. Blocking is a property of the kind, not a judgement made at
 # the call site, so the same condition always has the same consequence.
 #
-# `notify` is the same idea applied to Unraid's notifications, and it is deliberately
-# narrow: a notification is for something structurally wrong — a series that cannot be
-# found, a binding that moved, a Sonarr that will not answer. Retention itself is the
-# plugin's job, so episodes being scheduled for deletion and monitoring being brought into
-# line are never announced. Being told about them is the thing you installed this to avoid.
 KINDS = {
     'unmatched': {
         'severity': ERROR, 'blocking': True, 'scope': 'series',
         'title': 'Not matched to a Sonarr series',
         'help': 'This rule no longer resolves to exactly one series. It is skipped by every '
                 'run until it does.',
-        'action': 'rematch', 'notify': True,
+        'action': '',
+    },
+    'air-date-unresolved': {
+        'severity': ERROR, 'blocking': True, 'scope': 'series',
+        'title': 'Air dates unresolved',
+        'help': 'This keep-by-age rule is paused because one or more judged files have no '
+                'date from Sonarr or the configured providers.',
+        'action': '',
     },
     'ended': {
         'severity': NOTICE, 'blocking': False, 'scope': 'series',
@@ -46,7 +48,7 @@ KINDS = {
                 'still something to decide about.',
         # Sonarr's own "this series ended" notification already goes out once, the first
         # time it says so. This is the standing fact rather than the news of it.
-        'action': '', 'notify': False,
+        'action': '',
     },
     'ended-expired': {
         # A notice, not a warning: nothing is wrong. The series finished, its window
@@ -59,7 +61,7 @@ KINDS = {
                 'and no further episodes are coming. You can remove it, or remove the show.',
         # The series ending is worth telling someone about, and it already is, once, when
         # Sonarr first reports it. Announcing this as well would say it twice.
-        'action': 'remove-rule', 'notify': False,
+        'action': '',
         # The rule this is about is the rule this switched off, and `managed_only` drops
         # alerts belonging to a disabled rule. An alert about a *state* is fairly
         # suppressed when nobody is managing the series; one recording an action this
@@ -70,7 +72,7 @@ KINDS = {
         'severity': ERROR, 'blocking': True, 'scope': 'system',
         'title': 'Sonarr is unreachable',
         'help': 'Scheduled runs are held until it answers, then released automatically.',
-        'action': 'test-instance', 'notify': True,
+        'action': 'test-instance',
     },
     'no-recycle-bin': {
         'severity': WARNING, 'blocking': False, 'scope': 'system',
@@ -78,7 +80,32 @@ KINDS = {
         'help': 'Sonarr deletes files outright. Giving it a recycle bin makes every deletion '
                 'recoverable for a while, including the ones this plugin asks for. It applies '
                 'to everything Sonarr deletes, not only to TV Retention.',
-        'action': 'enable-recycle-bin', 'notify': True,
+        'action': 'enable-recycle-bin',
+    },
+    'state-unavailable': {
+        'severity': ERROR, 'blocking': True, 'scope': 'system',
+        'title': 'Application storage unavailable',
+        'help': 'The config/state directory cannot be read or written. Retention is paused '
+                'until the volume is available again.',
+        'action': '',
+    },
+    'backup-unavailable': {
+        'severity': WARNING, 'blocking': False, 'scope': 'system',
+        'title': 'Backup destination unavailable',
+        'help': 'Configure a writable backup destination under General → Backup.',
+        'action': '',
+    },
+    'backup-failed': {
+        'severity': ERROR, 'blocking': False, 'scope': 'system',
+        'title': 'Last backup failed',
+        'help': 'Open General → Backup and run a backup after correcting the destination.',
+        'action': '',
+    },
+    'sync-stale': {
+        'severity': WARNING, 'blocking': False, 'scope': 'system',
+        'title': 'Sonarr sync is stale',
+        'help': 'Refresh Sonarr before relying on the scheduled-change plan.',
+        'action': '',
     },
 }
 
@@ -108,11 +135,8 @@ def make(kind: str, *, rule_id: str = '', instance_id: str = '', detail: str = '
 
 
 def notifies(alert) -> bool:
-    """Whether this alert is worth an Unraid notification.
-
-    A property of the kind, so the answer cannot differ between the two places that ask.
-    """
-    return bool(KINDS.get(alert.get('kind'), {}).get('notify'))
+    """Legacy compatibility hook; outbound notifications no longer exist."""
+    return False
 
 
 def merge(existing, current) -> list:
@@ -201,23 +225,19 @@ def managed_only(alerts, settings: dict) -> list:
             if alert.get('rule_id') not in off or survives_disable(alert)]
 
 
-def annotate(alerts, settings: dict, acknowledged: dict) -> list:
-    """Mark what has been acknowledged, mark what nobody is managing, drop what is muted.
-
-    Muting is a display decision and nothing more: a muted alert still blocks a series if
-    its kind blocks, because the two are not the same question.
+def annotate(alerts, settings: dict, acknowledged: dict, suppressed=None) -> list:
+    """Mark acknowledgements and unmanaged series, omitting narrowly suppressed facts.
 
     An alert against a switched-off series is *marked* rather than dropped. It still counts
-    for nothing — not in the header, not in a badge, and never in a notification, which is
-    what "a series that is off raises nothing" was always about. But the interface can now
-    offer to show them on request, and dropping them here left it with nothing to offer.
+    for nothing — not in a contextual badge or notification, which is what "a series that
+    is off raises nothing" was always about. But the interface can now offer to show them
+    on request, and dropping them here left it with nothing to offer.
     """
-    options = settings.get('alerts') or {}
-    muted = set(options.get('muted') or [])
+    hidden = set((suppressed or {}).keys())
     off = {rule.get('id') for rule in settings.get('rules') or [] if not rule.get('enabled')}
     shown = []
     for alert in alerts or []:
-        if alert.get('kind') in muted:
+        if alert.get('key') in hidden:
             continue
         seen = (acknowledged or {}).get(alert['key'])
         shown.append(dict(alert, acknowledged=bool(seen and seen == fingerprint(alert)),
@@ -225,17 +245,12 @@ def annotate(alerts, settings: dict, acknowledged: dict) -> list:
     return shown
 
 
-def may_acknowledge(alert, settings: dict) -> bool:
-    """Errors are never acknowledgeable: one of them stops a series from running."""
-    if alert.get('severity') == ERROR or alert.get('blocking'):
-        return False
-    return bool((settings.get('alerts') or {}).get('acknowledge', True))
+def suppressed(alerts, suppressed_keys) -> list:
+    """Active recurring alerts hidden by exact key, available for restoration."""
+    hidden = set((suppressed_keys or {}).keys())
+    return [dict(alert, suppressed=True) for alert in alerts or [] if alert.get('key') in hidden]
 
 
-def header_worthy(alerts, settings: dict) -> list:
-    """What the count at the top of the page is counting."""
-    wanted = (settings.get('alerts') or {}).get('header', 'all')
-    ranked = {'errors': [ERROR], 'warnings': [ERROR, WARNING]}.get(wanted, SEVERITIES)
-    return [alert for alert in alerts or []
-            if alert.get('severity') in ranked and not alert.get('acknowledged')
-            and not alert.get('unmanaged')]
+def may_acknowledge(alert) -> bool:
+    """Every non-blocking warning and notice may be acknowledged."""
+    return alert.get('severity') != ERROR and not alert.get('blocking')

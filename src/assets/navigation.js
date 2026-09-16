@@ -18,7 +18,8 @@ import { remember, remembered } from './storage.js';
 // the library discards drafts, so the editor's three calls arrive as callbacks rather than
 // as its state.
 export function createNavigation({ getSettings, forgetDrafts, closeEditor, renderDetails,
-                                   renderLibrary, renderStatsView, startLog, stopLog }) {
+                                   renderLibrary, renderStatsView, renderStatusView, renderBackupView,
+                                   startLog, stopLog }) {
   // One view at a time, named by the sidebar item that reaches it. The list comes from the
   // markup so the two cannot disagree, which is the failure that blanked four tabs.
   const VIEWS = [...document.querySelectorAll('.tvr-side [data-view]')].map((b) => b.dataset.view);
@@ -85,6 +86,8 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
       renderLibrary();          // it fetches itself if what it needs is not in hand
     }
     if (name === 'media-stats') guarded('', renderStatsView);
+    if (name === 'system-status') guarded('', renderStatusView);
+    if (name === 'general-backup') guarded('', renderBackupView);
     if (name === 'system-logs') startLog(); else stopLog();
   }
 

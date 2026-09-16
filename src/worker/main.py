@@ -14,10 +14,9 @@ import datetime as dt
 import fcntl
 import json
 import os
-import shutil
-import subprocess
+import ssl
 import sys
-import urllib.parse
+import urllib.error
 import urllib.request
 import time
 from pathlib import Path
@@ -27,19 +26,70 @@ sys.path.insert(0, str(HERE))
 
 from core import (DEFAULTS, air_watermark, keep_frame, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
                   canonical_json, classify_monitoring, describe_lifecycle, describe_selectability,
-                  effective_rule, evaluate, interpolate_air_dates, new_id, normalise, redact,
+                  effective_rule, evaluate, air_date_gaps, interpolate_air_dates, new_id, normalise, redact,
                   rule_fingerprint, specials_included, validate_settings)
 import alerts
 from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
 import schedules
-from store import (CONFIG, DEVELOPMENT, NAME, RUNTIME, SCHEMA,
+from store import (CONFIG, NAME, RUNTIME, SCHEMA,
                    age_seconds, cache_path, clear_progress, episode_cache, forget_episodes,
                    invalidate_catalogue, job_state, journal, load_health, load_settings,
-                   load_state, log_line, now_iso, read_cache, read_log, read_progress,
+                   load_intent, load_state, log_line, now_iso, read_cache, read_log, read_progress,
                    save_job_state, save_settings, save_state, set_progress, state_dir,
-                   store_episodes, trim_health, write_cache)
+                   save_intent, store_episodes, trim_health, write_cache)
 from tmdb import TMDB, TMDBError, fill_air_dates
+from tvmaze import TVMaze, TVMazeError
+from anilist import AniList, AniListError
+
+OPTIONAL_PROVIDER_KINDS = ('tmdb', 'tvmaze', 'anilist', 'plex', 'jellyfin')
+
+
+class _MediaDateProvider:
+    """A narrowly scoped Plex/Jellyfin connection.
+
+    These integrations are intentionally not media-library adapters.  They only verify
+    the configured endpoint for the Connections page; no watched state or filesystem data
+    is consumed, and their date lookup is a no-op until an endpoint exposes a meaningful
+    episode-date contract.
+    """
+    def __init__(self, kind, connection):
+        self.kind = kind
+        self.connection = connection
+
+    def check(self):
+        url = (self.connection.get('url') or '').rstrip('/')
+        if not url:
+            raise Rejected(f'{self.kind.title()} connection has no URL')
+        path = '/identity' if self.kind == 'plex' else '/System/Info'
+        request = urllib.request.Request(url + path, headers={'Accept': 'application/json'})
+        credential = self.connection.get('token') or self.connection.get('api_key') or ''
+        if credential:
+            request.add_header('X-Emby-Token' if self.kind == 'jellyfin' else 'X-Plex-Token', credential)
+        try:
+            context = None if self.connection.get('verify_tls', True) else ssl._create_unverified_context()
+            with urllib.request.urlopen(request, timeout=20, context=context):
+                return True
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as error:
+            raise Rejected(f'{self.kind.title()} request failed ({error})') from error
+
+    def fill(self, episodes, _identity):
+        return 0
+
+
+def optional_provider(kind, connection, settings):
+    """Build one configured provider; callers decide whether it is enabled."""
+    cache = state_dir(settings) / f'{kind}-air-date-cache.json'
+    if kind == 'tmdb':
+        key = (connection or {}).get('api_key') or ''
+        return TMDB(key, cache_path=state_dir(settings) / 'tmdb-cache.json') if key else None
+    if kind == 'tvmaze':
+        return TVMaze(cache_path=cache)
+    if kind == 'anilist':
+        return AniList(cache_path=cache)
+    if kind in ('plex', 'jellyfin'):
+        return _MediaDateProvider(kind, connection or {})
+    return None
 
 # Sonarr is confirmed reachable this often, and before anything that needs it.
 CONNECTIVITY_SECONDS = 300
@@ -48,6 +98,12 @@ CONNECTIVITY_SECONDS = 300
 # existed — catching up a run missed while the machine was off, holding one until Sonarr
 # answers — are now ordinary rather than carefully arranged.
 TICK_SECONDS = 30
+# The resident worker refreshes Sonarr regularly even when no browser is open. A page
+# opening or returning after an idle spell uses the shorter threshold below, but both go
+# through the same lock so several tabs still cause one read.
+SYNC_FRESH_SECONDS = 3600
+PAGE_REFRESH_SECONDS = 300
+PROCESS_STARTED = time.time()
 
 
 
@@ -68,32 +124,14 @@ def run_lock(blocking: bool = False):
         yield
 
 
-def notify(settings: dict, subject: str, description: str, importance: str = 'normal',
-           event: str = 'errors') -> None:
-    """Post one notification outward, if this kind of event is one the operator asked for.
+def notify(*_args, **_kwargs) -> None:
+    """Compatibility no-op for callers from older integrations.
 
-    A webhook rather than a call into the host: the plugin shelled out to Unraid's `notify`,
-    which reached exactly one audience. A JSON POST reaches anyone — Unraid users included,
-    through a two-line receiver — and needs nothing mounted from the machine underneath.
-
-    Failure is silent by design. A notification that cannot be delivered must never stop a
-    run, and the log already carries everything this would have said.
+    Outbound notifications and webhooks were removed in settings version 13.  Keeping a
+    tiny no-op symbol avoids breaking an external import during a rolling upgrade while
+    guaranteeing that no request can leave the container.
     """
-    wanted = (settings.get('notifications') or {}).get(event, True)
-    url = ((settings.get('notifications') or {}).get('webhook_url') or '').strip()
-    if not wanted or not url or DEVELOPMENT:
-        return
-    payload = json.dumps({'event': event, 'importance': importance, 'subject': subject,
-                          'description': description, 'source': 'tv-retention',
-                          'sent_at': now_iso()}).encode('utf-8')
-    request = urllib.request.Request(url, data=payload, method='POST')
-    request.add_header('Content-Type', 'application/json')
-    request.add_header('User-Agent', 'TV-Retention')
-    try:
-        with urllib.request.urlopen(request, timeout=15):
-            pass
-    except Exception as error:  # noqa: BLE001 - delivery is best effort, never fatal
-        log_line(settings, 'warning', f'notification not delivered: {error}')
+    return None
 
 
 
@@ -191,14 +229,91 @@ def tmdb_provider(settings: dict):
     could never build a client no matter what key was entered, while "Test TMDB" kept
     reporting success because it builds its own client directly from the key alone.
     """
-    tmdb_cfg = settings.get('tmdb') or {}
-    api_key = tmdb_cfg.get('api_key')
+    connections = settings.get('connections') or {}
+    tmdb_cfg = connections.get('tmdb') if isinstance(connections, dict) else None
+    api_key = (tmdb_cfg or {}).get('api_key') or (settings.get('tmdb') or {}).get('api_key')
     if not api_key:
         return None
     return TMDB(api_key, cache_path=state_dir(settings) / 'tmdb-cache.json')
 
 
-def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> list:
+def provider_chain(settings):
+    """Configured air-date providers in their stored priority order."""
+    air = settings.get('air_dates')
+    air = air if isinstance(air, dict) else {}
+    connections = settings.get('connections')
+    connections = connections if isinstance(connections, dict) else {}
+    providers = air['providers'] if 'providers' in air else DEFAULTS['air_dates']['providers']
+    requested = air['enabled'] if 'enabled' in air else DEFAULTS['air_dates']['enabled']
+    enabled = set(requested or [])
+    chain = []
+    for kind in providers or OPTIONAL_PROVIDER_KINDS:
+        if kind not in enabled or kind not in OPTIONAL_PROVIDER_KINDS:
+            continue
+        connection = connections.get(kind) or {}
+        if kind == 'tmdb' and not connection:
+            # A v12 or older caller may still provide only the legacy top-level key.
+            connection = {'api_key': (settings.get('tmdb') or {}).get('api_key', '')}
+        # TMDB is enabled by the presence of its key for backwards compatibility; the
+        # explicit enabled list still controls provider order.
+        if kind == 'tmdb' and not ((connection or {}).get('api_key') or
+                                   (settings.get('tmdb') or {}).get('api_key')):
+            continue
+        if kind in ('plex', 'jellyfin') and not (connection or {}).get('enabled'):
+            continue
+        provider = optional_provider(kind, connection or {}, settings)
+        if provider:
+            chain.append((kind, provider))
+    return chain
+
+
+def enrich_air_dates(settings: dict, rule: dict, episodes, provider_override=None, client=None) -> dict:
+    """Fill missing dates through the configured chain and mark unresolved files safely."""
+    filled = 0
+    chain = provider_chain(settings)
+    # ``collect_episodes`` historically accepted a TMDB client from its caller. Keep that
+    # seam for tests and rolling upgrades, while still applying the configured chain for
+    # every normal read. The explicit client replaces only TMDB; later providers remain
+    # available in their configured order.
+    if provider_override is not None:
+        chain = [('tmdb', provider_override)] + [(kind, provider) for kind, provider in chain
+                                                  if kind != 'tmdb']
+    for kind, provider in chain:
+        try:
+            if kind == 'tmdb':
+                filled += fill_air_dates(episodes, provider, rule.get('tvdb_id'))
+            elif kind == 'tvmaze':
+                filled += provider.fill(episodes, rule.get('tvdb_id'))
+            elif kind == 'anilist':
+                filled += provider.fill(episodes, rule.get('series_title') or rule.get('slug'))
+            else:
+                # Plex/Jellyfin are connectivity checks until they expose a stable
+                # per-episode date contract; they stay in the chain without guessing.
+                continue
+        except (TMDBError, TVMazeError, AniListError, Rejected):
+            continue
+    estimate = (settings.get('air_dates') or {}).get('unresolved', 'estimate') == 'estimate'
+    if estimate:
+        filled += interpolate_air_dates(episodes)
+        # History is a last-resort estimate for files with no neighbouring dates.
+        if not any(episode.get('air_date') for episode in episodes):
+            with contextlib.suppress(SonarrError):
+                history_client = client or client_for(settings, rule['instance_id'])
+                filled += fill_from_history(history_client, rule['series_id'], episodes)
+    else:
+        # Do not make a missing date look like an old file. The core invariant decides
+        # whether this is a blocking error or an automatic exclusion.
+        for episode in episodes:
+            if not episode.get('air_date') and episode.get('has_file'):
+                episode['air_source'] = 'unresolved'
+    gaps = air_date_gaps(episodes, rule, settings)
+    if gaps and (settings.get('air_dates') or {}).get('still_unresolved', 'exclude') == 'exclude':
+        for episode in gaps:
+            episode['air_source'] = 'unresolved'
+    return {'filled': filled, 'unresolved': gaps}
+
+
+def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb=None) -> list:
     """Sonarr's episode files for one rule.
 
     Everything the retention pass needs — sizes, air dates, import dates, monitoring —
@@ -212,11 +327,9 @@ def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> list:
     `monitoring_for` already does.
     """
     episodes = client.episodes(rule['series_id'], files_only=False)
-    if tmdb and rule.get('tvdb_id'):
-        with contextlib.suppress(TMDBError):
-            fill_air_dates(episodes, tmdb, rule['tvdb_id'])
-    if not interpolate_air_dates(episodes):
-        fill_from_history(client, rule['series_id'], episodes)
+    # `tmdb` is retained as an optional argument for callers from older releases; the
+    # configured provider chain now owns enrichment and applies the air-date invariant.
+    enrich_air_dates(settings, rule, episodes, provider_override=tmdb, client=client)
     return episodes
 
 
@@ -237,6 +350,8 @@ def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_ru
     implementation of it.
     """
     action = {
+        'episode_id': episode.get('episode_id'),
+        'file_id': episode.get('file_id'),
         'path': episode['path'],
         'season': episode.get('season'),
         'episode': episode.get('episode'),
@@ -358,9 +473,8 @@ def apply_removals(settings: dict, rules, dry_run: bool) -> list:
             elif action in ('delete-series', 'delete-series-files'):
                 client.delete_series(rule['series_id'], delete_files=(action == 'delete-series-files'))
                 invalidate_catalogue(settings, rule['instance_id'])
-                notify(settings, 'TV Retention removed a series',
-                       f'{rule.get("series_title")}: {REMOVAL_ACTIONS[action].lower()}.',
-                       'warning', event='series_removed')
+                log_line(settings, 'warning',
+                         f'{rule.get("series_title")}: {REMOVAL_ACTIONS[action].lower()}.')
         except (SonarrError, Rejected) as error:
             record.update(ok=False, error=str(error))
             done.append(record)
@@ -430,7 +544,7 @@ def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool)
     return result
 
 
-def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
+def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool, remember: bool = True) -> dict:
     """Evaluate and (unless previewing) execute one rule."""
     outcome = {
         'rule_id': rule['id'],
@@ -469,6 +583,11 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     except SonarrError as error:
         outcome.update(ok=False, error=str(error))
         return outcome
+    gaps = air_date_gaps(episodes, rule, settings)
+    if gaps and (settings.get('air_dates') or {}).get('still_unresolved', 'exclude') == 'disable':
+        outcome.update(ok=False, error=f'{len(gaps)} episode(s) have no resolvable air date',
+                       blocked='Keep-by-age is blocked until every judged episode has an air date.')
+        return outcome
 
     # Phase one: bring monitoring in line with the keep window, before anything is
     # removed. Doing it first means the run leaves Sonarr consistent even if the deletion
@@ -478,7 +597,8 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     # reading is still the one thing that must not stand behind a write, which is what
     # `preloaded` preserves — it is stored exactly as a fetch here would be.
     reconciled = reconcile_monitoring(
-        settings, rule, monitoring_for(settings, rule, force=True, preloaded=episodes), dry_run)
+        settings, rule, monitoring_for(settings, rule, force=True, preloaded=episodes,
+                                      persist=remember), dry_run)
     outcome['monitored'] = reconciled['monitored']
     outcome['unmonitored_frame'] = reconciled['unmonitored']
     outcome['searched'] = reconciled['searched']
@@ -526,138 +646,273 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     return outcome
 
 
+def _run_error(rule: dict, error: Exception) -> dict:
+    return {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
+            'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
+            'considered': 0, 'kept': 0, 'protected': 0, 'blocked': None,
+            'freed_bytes': 0, 'unmonitored': 0, 'preset': '', 'note': ''}
+
+
+def _operation(kind: str, rule: dict, **detail) -> dict:
+    return dict({'id': new_id(), 'kind': kind, 'rule_id': rule['id'],
+                 'instance_id': rule['instance_id'], 'series_id': rule['series_id'],
+                 'status': 'pending', 'attempts': 0, 'error': ''}, **detail)
+
+
+def _removal_stage(settings: dict, rules: list, tmdb, enrich: bool = True) -> tuple[list, list]:
+    """Read each queued removal now; execution happens only after every decision is saved."""
+    records, operations = [], []
+    for rule in rules:
+        queued = (rule.get('queue') or {}).get('removal')
+        if not queued:
+            continue
+        action = queued['action']
+        record = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
+                  'action': action, 'label': REMOVAL_ACTIONS.get(action, action),
+                  'queued_at': queued.get('created_at'), 'dry_run': False, 'ok': True, 'error': ''}
+        try:
+            client = client_for(settings, rule['instance_id'])
+            if action in ('monitor-all', 'unmonitor-all'):
+                ids = [row['episode_id'] for row in client.episodes(rule['series_id'], files_only=False)
+                       if row.get('episode_id')]
+                operations.append(_operation('set-monitored', rule, episode_ids=ids,
+                                             monitored=(action == 'monitor-all'), removal_action=action))
+            elif action == 'monitor-in-frame':
+                episodes = collect_episodes(settings, rule, client, tmdb) if enrich \
+                    else client.episodes(rule['series_id'], files_only=False)
+                frame = keep_frame(episodes, effective_rule(rule, settings.get('profiles')), settings)
+                ids = [row['episode_id'] for row in frame['in_frame']
+                       if not row.get('monitored') and row.get('episode_id')]
+                operations.append(_operation('set-monitored', rule, episode_ids=ids, monitored=True,
+                                             removal_action=action))
+            elif action in ('delete-series', 'delete-series-files'):
+                # A current series lookup is the final identity check before its deletion.
+                client.series_one(rule['series_id'])
+                operations.append(_operation('delete-series', rule,
+                                             delete_files=(action == 'delete-series-files'),
+                                             removal_action=action))
+            else:
+                operations.append(_operation('remove-rule', rule, removal_action=action))
+        except (Rejected, SonarrError) as error:
+            record.update(ok=False, error=str(error))
+        records.append(record)
+    return records, operations
+
+
+def _stage_intent(settings: dict, selected: list, queued_rules: list, tmdb,
+                  remember: bool = True) -> dict:
+    """Read every affected show and freeze one complete, auditable decision."""
+    results, operations = [], []
+    removal_ids = {rule['id'] for rule in queued_rules}
+    removals, removal_operations = _removal_stage(settings, queued_rules, tmdb, enrich=remember)
+    operations.extend(removal_operations)
+    for rule in selected:
+        if rule['id'] in removal_ids:
+            continue
+        try:
+            result = process_rule(settings, rule, tmdb, dry_run=True, remember=remember)
+        except Rejected as error:
+            result = _run_error(rule, error)
+        results.append(result)
+        if not result.get('ok') or result.get('blocked'):
+            continue
+        ids = [row.get('episode_id') for row in result.get('unmonitor_list') or [] if row.get('episode_id')]
+        if ids:
+            operations.append(_operation('set-monitored', rule, episode_ids=ids, monitored=False,
+                                         outcome='unmonitor'))
+        for index, episode in enumerate(result.get('deleted') or []):
+            operations.append(_operation('delete-episode-file', rule, file_id=episode.get('file_id'),
+                                         episode_id=episode.get('episode_id'), outcome_index=index))
+    return {'version': 1, 'id': new_id(), 'status': 'staged', 'started': now_iso(),
+            'rules': results, 'removals': removals, 'operations': operations}
+
+
+def _execute_operation(settings: dict, operation: dict) -> None:
+    """Mark the exact external call in progress, then record its result atomically."""
+    operation['status'] = 'in-progress'
+    operation['attempts'] = int(operation.get('attempts') or 0) + 1
+    operation['started_at'] = now_iso()
+    save_intent(settings, _ACTIVE_INTENT)
+
+
+def _resume_intent(settings: dict, intent: dict) -> None:
+    """Refresh only unfinished targets and recognize a write completed before a crash.
+
+    A network acknowledgement can be lost after Sonarr has accepted a request.  Replaying
+    that request without looking is exactly what the ledger prevents: a fresh read lets us
+    retire a delete that already happened and trim monitoring work that is already true.
+    """
+    fresh = {}
+    for operation in intent.get('operations') or []:
+        if operation.get('status') == 'done' or operation.get('kind') == 'remove-rule':
+            continue
+        if operation.get('kind') == 'delete-series':
+            try:
+                client_for(settings, operation['instance_id']).series_one(operation['series_id'])
+            except (Rejected, SonarrError) as error:
+                if 'not found' in str(error).lower():
+                    operation.update(status='done', error='', recovered_at=now_iso())
+                else:
+                    operation['resume_error'] = str(error)
+            continue
+        key = (operation['instance_id'], operation['series_id'])
+        if key in fresh:
+            continue
+        try:
+            fresh[key] = client_for(settings, key[0]).episodes(key[1], files_only=False)
+        except (Rejected, SonarrError) as error:
+            fresh[key] = None
+            operation['resume_error'] = str(error)
+    for operation in intent.get('operations') or []:
+        if operation.get('status') == 'done':
+            continue
+        rows = fresh.get((operation['instance_id'], operation['series_id']))
+        if rows is None:
+            continue
+        by_id = {row.get('episode_id'): row for row in rows}
+        if operation['kind'] == 'delete-episode-file':
+            row = by_id.get(operation.get('episode_id'))
+            if not row or not row.get('has_file') or row.get('file_id') != operation.get('file_id'):
+                operation.update(status='done', error='', recovered_at=now_iso())
+        elif operation['kind'] == 'set-monitored':
+            wanted = bool(operation.get('monitored'))
+            operation['episode_ids'] = [episode_id for episode_id in operation.get('episode_ids') or []
+                                        if by_id.get(episode_id)
+                                        and bool(by_id[episode_id].get('monitored')) != wanted]
+            if not operation['episode_ids']:
+                operation.update(status='done', error='', recovered_at=now_iso())
+    intent['resumed_at'] = now_iso()
+    save_intent(settings, intent)
+    client = client_for(settings, operation['instance_id'])
+    try:
+        if operation['kind'] == 'set-monitored':
+            client.set_monitored(operation.get('episode_ids') or [], operation.get('monitored', False))
+        elif operation['kind'] == 'delete-episode-file':
+            client.delete_episode_file(operation['file_id'])
+        elif operation['kind'] == 'delete-series':
+            client.delete_series(operation['series_id'], delete_files=operation.get('delete_files', False))
+            invalidate_catalogue(settings, operation['instance_id'])
+        # remove-rule has no Sonarr call; it is finalized with the other settings cleanup.
+    except (Rejected, SonarrError, ValueError) as error:
+        operation.update(status='failed', error=str(error), finished_at=now_iso())
+    else:
+        operation.update(status='done', error='', finished_at=now_iso())
+    save_intent(settings, _ACTIVE_INTENT)
+
+
+def _intent_summary(intent: dict, preview: bool, test_mode: bool, scheduled: bool, started: str) -> dict:
+    """Render the durable decision as the established run-result contract."""
+    rules = json.loads(json.dumps(intent.get('rules') or []))
+    by_rule = {row.get('rule_id'): row for row in rules}
+    for operation in intent.get('operations') or []:
+        outcome = by_rule.get(operation.get('rule_id'))
+        if not outcome:
+            continue
+        if operation.get('status') == 'failed':
+            outcome['ok'] = False
+            outcome['error'] = operation.get('error') or 'A staged write failed'
+        if operation.get('kind') == 'delete-episode-file':
+            index = operation.get('outcome_index')
+            if isinstance(index, int) and index < len(outcome.get('deleted') or []):
+                outcome['deleted'][index].update(ok=operation.get('status') == 'done', dry_run=False,
+                                                  error=operation.get('error') or '')
+        if operation.get('removal_action') and operation.get('status') == 'failed':
+            for record in intent.get('removals') or []:
+                if record.get('rule_id') == operation.get('rule_id'):
+                    record.update(ok=False, error=operation.get('error') or 'A staged write failed')
+    for outcome in rules:
+        outcome['freed_bytes'] = sum(int(row.get('size') or 0) for row in outcome.get('deleted') or []
+                                      if row.get('ok'))
+    deleted = sum(len([row for row in outcome.get('deleted') or [] if row.get('ok')]) for outcome in rules)
+    return {'id': intent['id'], 'started': started, 'finished': now_iso(), 'scheduled': scheduled,
+            'preview': preview, 'test_mode': test_mode, 'dry_run': preview or test_mode,
+            'rules': rules, 'planned': sum(len(row.get('deleted') or []) for row in rules),
+            'removals': intent.get('removals') or [], 'deleted': deleted,
+            'freed_bytes': sum(row.get('freed_bytes') or 0 for row in rules),
+            'errors': [row['error'] for row in rules if row.get('error')]
+            + [row['error'] for row in intent.get('removals') or [] if row.get('error')],
+            'blocked': [row['blocked'] for row in rules if row.get('blocked')], 'duration_seconds': 0}
+
+
+def _finish_removals(settings: dict, intent: dict) -> None:
+    completed = {op['rule_id'] for op in intent.get('operations') or []
+                 if op.get('removal_action') and op.get('status') == 'done'}
+    if not completed:
+        return
+    settings['rules'] = [rule for rule in settings.get('rules', []) if rule['id'] not in completed]
+    save_settings(settings)
+    health = load_health(settings)
+    for rule_id in completed:
+        health['rules'].pop(rule_id, None)
+    health['alerts'] = [a for a in (health.get('alerts') or []) if a.get('rule_id') not in completed]
+    write_cache(settings, 'health.json', health)
+
+
+# The intent is kept here only while `_execute_operation` serializes its before/after
+# checkpoints. `run_lock` makes the worker single-runner, so no second thread can observe it.
+_ACTIVE_INTENT = None
+
+
 def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
-    """Evaluate every enabled rule, and delete unless previewing or in dry-run mode."""
+    """Read the whole run, save its intent, then perform only those saved writes."""
+    global _ACTIVE_INTENT
     settings = load_settings()
-    log_line(settings, 'info',
-             ('scheduled ' if scheduled else '') + ('preview' if preview else 'run') + ' started')
-    # Test Mode means nothing writes. Not "the scheduler does not write" — everything. It
-    # governed only scheduled runs once, so a manual run deleted for real while the
-    # interface said TEST MODE at the top of the page, and the only thing standing between
-    # the two readings was a paragraph in a confirmation dialog. One rule with no
-    # exceptions is worth more here than the flexibility it costs: to delete something,
-    # turn Test Mode off.
     test_mode = bool((settings.get('schedule') or {}).get('test_mode', True))
     dry_run = preview or test_mode
-    started = now_iso()
-    clock = time.monotonic()
+    started, clock = now_iso(), time.monotonic()
 
-    bind_rules(settings)
+    # Test Mode is literal: it does not bind, cache, journal, log, or create an intent.
+    # It still reads and decides the full run so its report is useful.
+    if not dry_run:
+        log_line(settings, 'info', ('scheduled ' if scheduled else '') + 'run started')
+        bind_rules(settings)
     tmdb = tmdb_provider(settings)
-
-    selected = [r for r in settings.get('rules', []) if r.get('enabled')]
+    selected = [rule for rule in settings.get('rules', []) if rule.get('enabled')]
     if rule_ids:
-        selected = [r for r in selected if r['id'] in set(rule_ids)]
-
-    # Phase one: queued removals. A series leaving takes no further part in this run,
-    # because the decision to stop managing it has already been made.
-    # Removals are collected from every rule, not only the enabled ones: queueing one is an
-    # explicit decision, and switching a series off afterwards left it stranded for ever
-    # while the scheduled-changes menu went on counting it.
-    queued_rules = [r for r in settings.get('rules', []) if (r.get('queue') or {}).get('removal')]
+        selected = [rule for rule in selected if rule['id'] in set(rule_ids)]
+    queued = [rule for rule in settings.get('rules', []) if (rule.get('queue') or {}).get('removal')]
     if rule_ids:
-        queued_rules = [r for r in queued_rules if r['id'] in set(rule_ids)]
-    removals = apply_removals(settings, queued_rules, dry_run)
-    if removals and not dry_run:
-        removed = {record['rule_id'] for record in removals if record['ok']}
-        settings['rules'] = [r for r in settings.get('rules', []) if r['id'] not in removed]
-        save_settings(settings)
-        health = load_health(settings)
-        for rule_id in removed:
-            health['rules'].pop(rule_id, None)
-        health['alerts'] = [a for a in (health.get('alerts') or []) if a.get('rule_id') not in removed]
-        write_cache(settings, 'health.json', health)
-        selected = [r for r in selected if r['id'] not in removed]
+        queued = [rule for rule in queued if rule['id'] in set(rule_ids)]
 
-    results, planned = [], []
-    for rule in selected:
-        try:
-            results.append(process_rule(settings, rule, tmdb, dry_run=True))
-        except Rejected as error:
-            results.append({'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
-                            'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
-                            'considered': 0, 'kept': 0, 'protected': 0,
-                            'blocked': None, 'freed_bytes': 0, 'unmonitored': 0,
-                            'preset': '', 'note': ''})
-    total = sum(len(result['deleted']) for result in results)
+    if dry_run:
+        intent = _stage_intent(settings, selected, queued, tmdb, remember=False)
+        summary = _intent_summary(intent, preview, test_mode, scheduled, started)
+        summary['duration_seconds'] = round(time.monotonic() - clock, 1)
+        return summary
 
-    summary = {
-        'id': new_id(),
-        'started': started,
-        'finished': now_iso(),
-        'scheduled': scheduled,
-        'preview': preview,
-        'test_mode': test_mode,
-        'dry_run': dry_run,
-        'rules': results,
-        'planned': total,
-        'removals': removals,
-        'deleted': 0,
-        'freed_bytes': 0,
-        'errors': [r['error'] for r in results if r.get('error')],
-        'blocked': [r['blocked'] for r in results if r.get('blocked')],
-        'duration_seconds': 0,
-    }
-
-    if not preview and not dry_run:
-        # Second pass: the plan is re-derived immediately before acting, so a file that
-        # changed between planning and execution is judged on its current state.
-        executed = []
-        for rule in selected:
-            try:
-                executed.append(process_rule(settings, rule, tmdb, dry_run=False))
-            except Rejected as error:
-                executed.append({'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
-                                 'path': rule['path'], 'ok': False, 'error': str(error), 'deleted': [],
-                                 'considered': 0, 'kept': 0, 'protected': 0,
-                                 'blocked': None, 'freed_bytes': 0, 'unmonitored': 0,
-                                 'preset': '', 'note': ''})
-        summary['rules'] = executed
-        summary['deleted'] = sum(len([d for d in r['deleted'] if d['ok']]) for r in executed)
-        summary['freed_bytes'] = sum(r['freed_bytes'] for r in executed)
-        summary['errors'] = [r['error'] for r in executed if r.get('error')]
-        summary['blocked'] = [r['blocked'] for r in executed if r.get('blocked')]
-        # Deleting unmonitors, so any cached monitoring for those shows is now wrong.
-        for result in executed:
-            if not result.get('deleted') and not result.get('unmonitored'):
-                continue
-            rule = next((r for r in selected if r['id'] == result['rule_id']), None)
-            if rule:
-                with contextlib.suppress(Rejected, SonarrError):
-                    record_monitoring(settings, rule, monitoring_for(settings, rule, force=True))
-
-    summary['finished'] = now_iso()
+    stored = load_intent(settings)
+    if stored and stored.get('status') != 'complete':
+        # Resume the frozen decision. The operation checkpoints make retries targeted;
+        # no rule is re-evaluated and no completed call is repeated blindly.
+        intent = stored
+        _resume_intent(settings, intent)
+    else:
+        intent = _stage_intent(settings, selected, queued, tmdb)
+        save_intent(settings, intent)
+    _ACTIVE_INTENT = intent
+    for operation in intent.get('operations') or []:
+        if operation.get('status') in ('done',):
+            continue
+        _execute_operation(settings, operation)
+    _finish_removals(settings, intent)
+    intent['status'] = 'complete' if all(op.get('status') == 'done' for op in intent.get('operations') or []) else 'incomplete'
+    intent['finished'] = now_iso()
+    save_intent(settings, intent)
+    summary = _intent_summary(intent, preview, test_mode, scheduled, started)
     summary['duration_seconds'] = round(time.monotonic() - clock, 1)
-
-    if not preview:
-        state = load_state(settings)
-        state['runs'] = state.get('runs', []) + [{
-            'id': summary['id'], 'started': summary['started'], 'finished': summary['finished'],
-            'scheduled': scheduled, 'dry_run': dry_run, 'planned': summary['planned'],
-            'deleted': summary['deleted'], 'freed_bytes': summary['freed_bytes'],
-            'errors': summary['errors'][:10],
-        }]
-        state['last_run'] = summary
-        save_state(settings, state)
-        journal(settings, summary)
-        log_line(settings, 'warning',
-                 ('[TEST MODE] ' if test_mode else '')
-                 + f'run finished: {summary["planned"]} planned, {summary["deleted"]} deleted, '
-                 + f'{summary["freed_bytes"] // 1024 // 1024} MiB')
-        if summary['errors']:
-            notify(settings, 'TV Retention finished with errors', '; '.join(summary['errors'])[:400],
-                   'warning', event='errors')
-        elif test_mode:
-            # A test run notifies exactly as a real one would: that is how you learn the
-            # schedule fired correctly at four in the morning.
-            notify(settings, '[TEST MODE] TV Retention scheduled run',
-                   f'{summary["planned"]} file(s) would have been removed. Nothing was changed.',
-                   event='run_completed')
-        elif summary['deleted']:
-            gigabytes = summary['freed_bytes'] / 1024 ** 3
-            notify(settings, 'TV Retention removed old episodes',
-                   f'{summary["deleted"]} files removed, {gigabytes:.1f} GiB reclaimed.',
-                   event='run_completed')
+    state = load_state(settings)
+    state['runs'] = state.get('runs', []) + [{
+        'id': summary['id'], 'started': summary['started'], 'finished': summary['finished'],
+        'scheduled': scheduled, 'dry_run': False, 'planned': summary['planned'],
+        'deleted': summary['deleted'], 'freed_bytes': summary['freed_bytes'], 'errors': summary['errors'][:10]}]
+    state['last_run'] = summary
+    save_state(settings, state)
+    journal(settings, summary)
+    log_line(settings, 'warning', f'run finished: {summary["planned"]} planned, {summary["deleted"]} deleted, '
+             f'{summary["freed_bytes"] // 1024 // 1024} MiB')
+    if summary['errors']:
+        log_line(settings, 'error', 'run errors: ' + '; '.join(summary['errors'])[:600])
+    _ACTIVE_INTENT = None
     return summary
 
 
@@ -699,7 +954,7 @@ def series_record(settings: dict, rule: dict) -> dict:
 
 
 def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool = False,
-                 preloaded: list = None) -> tuple:
+                 preloaded: list = None, persist: bool = True) -> tuple:
     """One rule's reading of Sonarr: its episodes, its series record, and when it was read.
 
     Fetches when asked to, when nothing is stored, or when what is stored has aged past
@@ -726,7 +981,8 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     """
     if preloaded is not None:
         series = series_record(settings, rule)
-        return preloaded, series, store_episodes(settings, rule, preloaded, series), False
+        read_at = store_episodes(settings, rule, preloaded, series) if persist else now_iso()
+        return preloaded, series, read_at, False
     cached, series, fetched_at = episode_cache(settings, rule)
     ttl = int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
     age = age_seconds(fetched_at)
@@ -740,10 +996,10 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
         return cached, series, fetched_at, True
     client = client_for(settings, rule['instance_id'])
     episodes = client.episodes(rule['series_id'], files_only=False)
-    if not interpolate_air_dates(episodes):
-        fill_from_history(client, rule['series_id'], episodes)
+    enrich_air_dates(settings, rule, episodes, client=client)
     series = series_record(settings, rule)
-    return episodes, series, store_episodes(settings, rule, episodes, series), False
+    read_at = store_episodes(settings, rule, episodes, series) if persist else now_iso()
+    return episodes, series, read_at, False
 
 
 def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
@@ -756,7 +1012,7 @@ def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
 
     **The air-date watermark** is the fast case, and the one a status check alone cannot
     see. A streaming service drops a whole season at once, so Sonarr un-ends the series
-    and re-ends it within hours; sync runs once a day, so `before` and `after` both say
+    and re-ends it within a refresh interval, so `before` and `after` can both say
     ended and the transition is never observed. A status flag is edge-triggered on a value
     that resets itself. A watermark only moves forward, so it cannot be missed however the
     syncs happen to fall.
@@ -811,6 +1067,7 @@ def refresh_armed_episodes(settings: dict, report: dict) -> None:
         try:
             client = client_for(settings, rule['instance_id'])
             episodes = client.episodes(rule['series_id'], files_only=False)
+            enrich_air_dates(settings, rule, episodes, client=client)
         except (Rejected, SonarrError) as error:
             report['errors'].append(f'{rule.get("series_title") or rule["path"]}: {error}')
             continue
@@ -880,8 +1137,7 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
         try:
             client = client_for(settings, rule['instance_id'])
             episodes = client.episodes(rule['series_id'], files_only=False)
-            if not interpolate_air_dates(episodes):
-                fill_from_history(client, rule['series_id'], episodes)
+            enrich_air_dates(settings, rule, episodes, client=client)
         except Rejected as error:
             report['errors'].append(f'{rule.get("series_title") or rule["path"]}: {error}')
             continue
@@ -895,9 +1151,7 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
     mark_synced(settings, report)
     if report['series_added']:
         names = ', '.join(report['series_added'][:8])
-        notify(settings, f'Sonarr added {len(report["series_added"])} series',
-               f'{names}. Add a rule in TV Retention if you want retention applied.',
-               event='series_added')
+        log_line(settings, 'info', f'Sonarr added {len(report["series_added"])} series: {names}')
     log_line(settings, 'info',
              f'sync ({reason}): {report["series_changed"]} series changed, '
              f'{len(report["series_added"])} added, {report["series_removed"]} removed, '
@@ -914,10 +1168,65 @@ def last_sync(settings: dict) -> dict:
     return read_cache(settings, 'sync.json')
 
 
-def sync_is_due(settings: dict) -> bool:
+def sync_is_due(settings: dict, max_age_seconds: int = SYNC_FRESH_SECONDS) -> bool:
     """True when the stored reading has aged past the interval, or there is none."""
     age = age_seconds(last_sync(settings).get('synced_at'))
-    return age is None or age > int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
+    return age is None or age > max_age_seconds
+
+
+def status_snapshot(settings: dict, health=None) -> dict:
+    """Read-only operational status for System → Status and its sidebar badge."""
+    health = health if health is not None else load_health(settings)
+    state_path = Path(settings.get('state_dir') or '')
+    config_readable = (not CONFIG.exists() or os.access(CONFIG, os.R_OK))
+    config_writable = CONFIG.parent.exists() and os.access(CONFIG.parent, os.W_OK)
+    config_ok = config_readable and config_writable
+    state_ok = state_path.exists() and os.access(state_path, os.R_OK | os.W_OK)
+    backup_cfg = settings.get('backup') or {}
+    backup_path = Path(backup_cfg.get('path')) if backup_cfg.get('path') else None
+    backup_ok = bool(backup_path and backup_path.exists() and
+                     os.access(backup_path, os.R_OK | os.W_OK))
+    status_alerts = []
+    if not config_ok or not state_ok:
+        status_alerts.append(alerts.make('state-unavailable', detail=str(state_path)))
+    if backup_cfg.get('last_error'):
+        status_alerts.append(alerts.make('backup-failed', detail=backup_cfg['last_error']))
+    elif backup_cfg.get('path') and not backup_ok:
+        status_alerts.append(alerts.make('backup-unavailable', detail=str(backup_path)))
+    sync = last_sync(settings)
+    sync_age = age_seconds(sync.get('synced_at'))
+    if sync_age is None or sync_age > SYNC_FRESH_SECONDS * 2:
+        status_alerts.append(alerts.make('sync-stale', detail='No recent Sonarr library sync'))
+    current = list(health.get('alerts') or [])
+    # Avoid adding an installation alert twice when a caller has already refreshed health.
+    known = {alert.get('key') for alert in current}
+    status_alerts = [alert for alert in status_alerts if alert.get('key') not in known]
+    progress = read_progress(settings)
+    state = load_state(settings)
+    jobs = job_state(settings)
+    recent = sorted((health.get('alerts') or []),
+                    key=lambda alert: alert.get('last_seen') or alert.get('first_seen') or '',
+                    reverse=True)[:20]
+    return {
+        'version': VERSION,
+        'uptime_seconds': max(0, int(time.time() - PROCESS_STARTED)),
+        'test_mode': bool((settings.get('schedule') or {}).get('test_mode', True)),
+        'schedule': dict((settings.get('schedule') or {})),
+        'sync': dict(sync, age_seconds=sync_age, running=bool(progress.get('running'))),
+        'last_run': state.get('last_run'),
+        'pending_run': state.get('pending_run') or jobs.get('pending_run'),
+        'progress': progress,
+        'instances': dict(health.get('instances') or {}),
+        'storage': {'config': str(CONFIG), 'config_readable': config_readable,
+                    'config_writable': config_writable, 'state_dir': str(state_path),
+                    'state_readable': state_path.exists() and os.access(state_path, os.R_OK),
+                    'state_writable': state_ok,
+                    'backup_path': str(backup_path or ''), 'backup_valid': backup_ok},
+        'api_key': {key: value for key, value in (settings.get('api_key') or {}).items()
+                    if key != 'hash'},
+        'alerts': status_alerts,
+        'recent': recent,
+    }
 
 
 def recompute_plans(settings: dict, health: dict) -> int:
@@ -957,8 +1266,9 @@ def recompute_plans(settings: dict, health: dict) -> int:
 
 def log_settings_change(settings: dict, previous: dict, updated: dict) -> None:
     """Say what a save actually changed, so the log answers "when did this become true?"."""
-    for key in ('schedule', 'retention', 'logging', 'notifications', 'health', 'alerts',
-                'state_dir', 'log_retention_runs', 'instances', 'profiles', 'rules', 'tmdb'):
+    for key in ('schedule', 'retention', 'logging', 'health', 'alerts', 'state_dir',
+                'log_retention_runs', 'instances', 'profiles', 'rules', 'tmdb',
+                'connections', 'api_key', 'backup', 'air_dates'):
         if canonical_json(previous.get(key)) == canonical_json(updated.get(key)):
             continue
         if key == 'schedule':
@@ -983,18 +1293,11 @@ def announce_alerts(settings: dict, previous: list, current: list) -> list:
     wrong — a series that cannot be found, a binding that moved, a Sonarr that will not
     answer. Never the retention itself, which is the job, not the news.
     """
-    # A muted kind is not notified about either. Saying "never show me this" and then
-    # sending it to the notification centre would be the plugin arguing with the operator.
-    muted = set(((settings.get('alerts') or {}).get('muted')) or [])
+    suppressed = set((load_health(settings).get('suppressed') or {}).keys())
     known = {alert['key'] for alert in previous or []}
     fresh = [alert for alert in current or []
-             if alert['key'] not in known and alerts.notifies(alert)
-             and alert.get('kind') not in muted]
+             if alert['key'] not in known and alert.get('key') not in suppressed]
     for alert in fresh:
-        notify(settings, f'TV Retention: {alert["title"]}',
-               f'{alert.get("detail") or alert.get("help") or ""}'.strip()[:600],
-               'warning' if alert['severity'] == alerts.ERROR else 'normal',
-               event='health_problems')
         log_line(settings, 'warning', f'{alert["title"]} — {alert.get("detail", "")}')
     return fresh
 
@@ -1037,15 +1340,6 @@ def stale_rule_ids(settings: dict, health: dict) -> list:
 def health_is_stale(settings: dict, health: dict) -> bool:
     """True when any enabled rule has no usable cached result."""
     return bool(stale_rule_ids(settings, health))
-
-
-def record_monitoring(settings: dict, rule: dict, state: dict) -> None:
-    """Store one rule's monitoring result. Called by the health check and by every run,
-    so a library that is checked nightly costs nothing extra to keep current."""
-    health = load_health(settings)
-    health['rules'][rule['id']] = dict(state, checked_at=now_iso(),
-                                       fingerprint=rule_fingerprint(rule, settings))
-    write_cache(settings, 'health.json', health)
 
 
 # ---------------------------------------------------------------------------
@@ -1159,11 +1453,6 @@ def check_one_rule(settings: dict, rule: dict, instance_state: dict = None, forc
     was = (health.get('rules') or {}).get(rule['id']) or {}
     # Said once, when Sonarr first reports it, rather than on every check thereafter.
     if state.get('ended') and not was.get('ended'):
-        notify(settings, 'A series has ended',
-               f'Sonarr reports {state.get("series_title")} as ended'
-               + (' and nothing remains inside its keep window.'
-                  if state.get('retention_expired') else '.'),
-               event='series_ended')
         log_line(settings, 'warning', f'{state.get("series_title")} has ended in Sonarr')
     disable_expired_rule(settings, rule, state)
     health['rules'][rule['id']] = state
@@ -1207,6 +1496,9 @@ def alerts_for_rule(settings: dict, rule: dict, state: dict) -> list:
     if rule.get('match_status') != 'matched':
         return [alerts.make('unmatched', rule_id=rule['id'],
                             detail=rule.get('match_error') or 'No Sonarr series resolves to this rule')]
+    if state.get('status') == 'air-date-unresolved':
+        return [alerts.make('air-date-unresolved', rule_id=rule['id'],
+                            detail=state.get('error') or 'A judged episode has no air date')]
     if not state.get('ok'):
         return [alerts.make('unmatched', rule_id=rule['id'],
                             detail=state.get('error') or state.get('label') or 'Could not read Sonarr')]
@@ -1230,6 +1522,10 @@ def system_alerts(settings: dict, health: dict) -> list:
         if not instance.get('enabled', True):
             continue
         state = (health.get('instances') or {}).get(instance['id']) or {}
+        # Absence is not a failed check. Never invent a recycle-bin warning before this
+        # instance has actually answered the question once.
+        if not state.get('checked_at'):
+            continue
         if state.get('reachable') is False:
             found.append(alerts.make('sonarr-unreachable', instance_id=instance['id'],
                                      detail=f'{instance["name"]}: {state.get("error", "no answer")}'))
@@ -1238,6 +1534,26 @@ def system_alerts(settings: dict, health: dict) -> list:
             found.append(alerts.make('no-recycle-bin', instance_id=instance['id'],
                                      detail=f'{instance["name"]} deletes files outright; nothing is recoverable'))
     return found
+
+
+def refresh_instance_health(settings: dict, instance_ids=None, force: bool = False) -> dict:
+    """Refresh only connection health and merge its system alerts into the health cache."""
+    wanted = set(instance_ids or [])
+    health = load_health(settings)
+    instances = dict(health.get('instances') or {})
+    live = {instance['id'] for instance in settings.get('instances', [])}
+    for gone in set(instances) - live:
+        instances.pop(gone, None)
+    for instance in settings.get('instances', []):
+        if wanted and instance['id'] not in wanted:
+            continue
+        instances[instance['id']] = check_instance(settings, instance, force=force)
+    health['instances'] = instances
+    previous = health.get('alerts') or []
+    series = [alert for alert in previous if alert.get('scope') != 'system']
+    health['alerts'] = alerts.merge(previous, series + system_alerts(settings, health))
+    write_cache(settings, 'health.json', health)
+    return health
 
 
 def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
@@ -1307,10 +1623,7 @@ def run_health_check(scheduled: bool = False, force: bool = True) -> dict:
     # was re-sent by every sweep for as long as the problem stayed true, so a Sonarr that
     # had been unreachable since Tuesday said so again every day — which teaches people to
     # ignore the notification that matters.
-    announced = announce_alerts(settings, alerts.managed_only(previous, settings), reportable)
-    if not announced and not summary['error'] and scheduled:
-        notify(settings, 'TV Retention health check passed',
-               f'{checked} rule(s) verified against Sonarr.', event='health_ok')
+    announce_alerts(settings, alerts.managed_only(previous, settings), reportable)
     log_line(settings, 'warning' if summary['error'] else 'verbose',
              f'series match check: {checked} rule(s), {summary["error"]} error(s), '
              f'{summary["warning"]} warning(s)')
@@ -1347,9 +1660,8 @@ def tick() -> int:
             state = job_state(settings)
             state['last_run'] = now_iso()
 
-    # One reading a day, and the interface answers from it until the next one. Nothing
-    # else here goes to Sonarr: a page open, a rule edited, a keep window widened are all
-    # arithmetic over what this left behind.
+    # Refresh regularly even with no page open. Browsing and editing still use the stored
+    # reading; only this resident path and explicit background requests contact Sonarr.
     if sync_is_due(settings):
         with contextlib.suppress(Rejected, SonarrError):
             with run_lock():
@@ -1386,7 +1698,7 @@ def tick() -> int:
 
 
 def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: bool = False,
-                   preloaded: list = None) -> dict:
+                   preloaded: list = None, persist: bool = True) -> dict:
     """Everything one check knows about a series: monitoring, lifecycle, and the plan.
 
     Entirely from Sonarr. Sizes, air dates, import dates, monitoring and season numbers all
@@ -1405,7 +1717,7 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
     try:
         active = effective_rule(rule, settings.get('profiles'))
         episodes, series, read_at, from_cache = episodes_for(settings, rule, force=force, offline=offline,
-                                                              preloaded=preloaded)
+                                                              preloaded=preloaded, persist=persist)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
 
@@ -1417,6 +1729,19 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
     if series:
         state.update(describe_lifecycle(state, series))
 
+    gaps = air_date_gaps(episodes, active, settings)
+    if gaps and (settings.get('air_dates') or {}).get('still_unresolved', 'exclude') == 'disable':
+        state.update(ok=False, air_date_unresolved=len(gaps),
+                     error=f'{len(gaps)} episode(s) have no resolvable air date',
+                     status='air-date-unresolved', label='Air dates unresolved')
+    elif gaps:
+        state['air_date_unresolved'] = len(gaps)
+
+    if not state.get('ok'):
+        state['plan'] = {'delete': 0, 'delete_bytes': 0, 'unmonitor': 0,
+                         'unmonitor_missing': 0, 'monitor': 0,
+                         'blocked': state.get('error') or 'Blocked', 'computed_at': now_iso()}
+        return state
     present = [episode for episode in episodes if episode.get('has_file')]
     decision = evaluate(present, active, settings)
     would_delete = decision['delete']

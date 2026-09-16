@@ -34,7 +34,8 @@ gets turned off, and it is the first thing here that can delete anything.
 
 - [ ] `cp /boot/config/plugins/tv-retention/settings.json ./config/settings.json`, start,
       and confirm every rule, preset and instance is present with its API key intact.
-- [ ] Confirm the settings file on disk now reads `"settings_version": 8`.
+- [ ] Confirm the settings file on disk now reads `"settings_version": 13` and that any
+      legacy `notifications` block is gone; Sonarr keys, rules and presets remain intact.
 
 ## 2. Sonarr instances
 
@@ -53,7 +54,12 @@ gets turned off, and it is the first thing here that can delete anything.
       matches Sonarr's own.
 - [ ] Switch between **All**, **Connected** and **Not connected** and confirm the counts
       add up.
-- [ ] Switch to poster view and back. Confirm the selected series stays selected.
+- [ ] Confirm the default list is an operational row with title/state, retention,
+      episodes/storage, next airing or ended state, planned changes and alerts.
+- [ ] Switch to poster view and back. Confirm the selected series stays selected and the
+      column header is hidden only in poster mode.
+- [ ] Narrow the browser to a phone-width viewport. Confirm rows collapse into a readable
+      two-column record without clipping the title or planned changes.
 - [ ] **Hide ended** removes finished series with no rule, and keeps a finished series
       that has one. Confirm a finished series with an alert stays visible either way.
 - [ ] Search for a series by part of its name; confirm the sort orders behave.
@@ -116,8 +122,8 @@ gets turned off, and it is the first thing here that can delete anything.
 - [ ] Open the picker and close it with **Save**, having touched nothing. Confirm no
       monitoring change is sent — only what you move is written.
 - [ ] Move one box, save, and confirm the log names that series and counts exactly one.
-- [ ] Confirm every episode shows its air date, and that one with none says so rather than
-      showing a blank.
+- [ ] Confirm every episode shows its air date and source, and that one with none says so
+      rather than showing a blank.
 - [ ] Confirm episodes inside the keep window are shaded, and that the count matches what
       the pane says the next run would keep.
 - [ ] Tick every episode of a season one by one. Confirm the season heading fills in, and
@@ -133,11 +139,11 @@ gets turned off, and it is the first thing here that can delete anything.
 - [ ] On a series with **no rule**, press refresh and confirm the facts actually change —
       it re-reads the catalogue entry, since there is no rule to check.
 - [ ] Stop Sonarr briefly and run
-      `docker exec tv-retention python3 /app/worker/main.py check`. Confirm one
-      notification, the banner at the top of the page, and the affected shows flagged
-      individually.
-- [ ] Switch off a series that has an alert. Confirm its badge, its line in the roll-up and
-      its notifications all stop — and that switching it back on brings them back.
+      `docker exec tv-retention python3 /app/worker/main.py check`. Confirm the Status and
+      Connections badges flag it, the affected shows are flagged individually, and no
+      outbound notification or webhook is attempted.
+- [ ] Switch off a series that has an alert. Confirm its badge and line in the roll-up stop;
+      switching it back on brings them back.
 - [ ] Acknowledge a warning and confirm it hides; change what it says and confirm it
       returns. Confirm an error cannot be acknowledged.
 
@@ -168,14 +174,21 @@ gets turned off, and it is the first thing here that can delete anything.
 - [ ] Confirm it asks *Sonarr* to delete the series rather than deleting anything itself,
       so Sonarr's recycle bin and bookkeeping apply.
 
-## 12. Notifications
+## 12. Connections, API key, backup and status
 
-- [ ] Set `notifications.webhook_url` to something that will show you the body, and cause a
-      problem — stop a Sonarr instance. Confirm one JSON POST arrives.
-- [ ] Leave it broken and let another sweep run. Confirm **no second notification**: a
-      problem is announced once, when it appears, and again only if what it says changes.
-- [ ] Switch off a series that has an alert. Confirm it stops notifying entirely.
-- [ ] Confirm an unreachable webhook is logged and does not stop the run.
+- [ ] Under **General → Connections**, configure an optional provider, test it, and confirm
+      its URL/credential is masked after saving. Saving an unchanged mask keeps the secret.
+- [ ] Create the TV Retention API key, copy it, and confirm the full value is not shown after
+      refresh. Regenerate replaces it; Revoke changes the state without exposing a secret.
+- [ ] Configure a separate writable backup destination and press **Back up now**. Confirm
+      the timestamped ZIP contains settings, state, journal and caches, excludes the backup
+      directory itself, and is pruned to the configured count. Treat the archive as a
+      credential-bearing file.
+- [ ] Restore a point only after typing `RESTORE`; confirm the page asks for a reload and
+      that no Sonarr call or media change occurs during backup/restore.
+- [ ] Open **System → Status** and confirm build/date/uptime, Test Mode, sync age, pending
+      or current run, Sonarr reachability/recycle-bin state, storage health and API-key
+      state. Refreshing Status must be read-only.
 
 ## 13. Remove it
 

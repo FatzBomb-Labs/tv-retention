@@ -82,6 +82,10 @@ def load_settings() -> dict:
 
 
 def save_settings(settings: dict) -> None:
+    # The flag is retained for test fixtures and local diagnostics; it never changes the
+    # write contract (Test Mode is a settings value, not an environment shortcut).
+    if DEVELOPMENT:
+        pass
     atomic_json(CONFIG, settings)
 
 
@@ -130,6 +134,26 @@ def save_state(settings: dict, state: dict) -> None:
     keep = int(settings.get('log_retention_runs', 50))
     state['runs'] = state.get('runs', [])[-keep:]
     atomic_json(state_dir(settings) / 'state.json', state)
+
+
+def load_intent(settings: dict) -> dict | None:
+    """The last staged run, if a real run was interrupted before it finished.
+
+    This is deliberately separate from the append-only journal.  The journal says what a
+    completed run decided; the intent is the small, replaceable work record that lets a
+    restart know precisely which writes are still owed.
+    """
+    path = state_dir(settings) / 'run-intent.json'
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def save_intent(settings: dict, intent: dict) -> None:
+    """Durably replace the run intent before or after one external write."""
+    atomic_json(state_dir(settings) / 'run-intent.json', intent)
 
 
 def journal(settings: dict, record: dict) -> None:
@@ -264,6 +288,7 @@ def load_health(settings: dict) -> dict:
     health = read_cache(settings, 'health.json')
     health.setdefault('rules', {})
     health.setdefault('instances', {})
+    health.setdefault('suppressed', {})
     return health
 
 
@@ -394,5 +419,3 @@ def job_state(settings: dict) -> dict:
 
 def save_job_state(settings: dict, state: dict) -> None:
     write_cache(settings, 'jobs.json', state)
-
-

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 12
+SETTINGS_VERSION = 13
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -62,6 +62,11 @@ def migrate(raw: dict) -> dict:
     document = dict(raw)
     version = int(document.get('settings_version') or 1)
     if version >= SETTINGS_VERSION:
+        # A hand-edited or partially migrated current document may still carry the old
+        # outbound-notification matrix.  Scrub it even when no version step remains, while
+        # preserving unrelated forward-version keys for a later release to interpret.
+        if version == SETTINGS_VERSION:
+            document.pop('notifications', None)
         return document
 
     if version < 2:
@@ -86,6 +91,8 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v11(document))
     if version < 12:
         document.update(_to_v12(document))
+    if version < 13:
+        document.update(_to_v13(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
 
@@ -117,6 +124,31 @@ def _to_v12(document: dict) -> dict:
     rules = [{key: value for key, value in rule.items() if key != 'monitoring'}
              for rule in document.get('rules') or []]
     return {'retention': retention, 'automation': automation, 'rules': rules}
+
+
+def _to_v13(document: dict) -> dict:
+    """Remove the outbound notification surface and seed owned integration metadata.
+
+    Notifications were a webhook/event matrix layered onto the worker.  A container has
+    no host notification bus, and silently retaining a URL would leave a credential-like
+    value in a feature the current release cannot use.  The settings validator also drops
+    the key for documents already at this version, so this migration is safe to repeat.
+
+    The old TMDB key remains available to the normalizer, while the provider connection
+    map and API-key lifecycle get explicit homes for the next release pass.
+    """
+    document.pop('notifications', None)
+    connections = document.get('connections')
+    if not isinstance(connections, dict):
+        connections = {}
+    tmdb = document.get('tmdb')
+    if isinstance(tmdb, dict) and 'tmdb' not in connections:
+        connections['tmdb'] = dict(tmdb)
+    document['connections'] = connections
+    document.setdefault('api_key', {})
+    document.setdefault('backup', {})
+    return {'connections': connections, 'api_key': document['api_key'],
+            'backup': document['backup']}
 
 
 def _to_v11(document: dict) -> dict:

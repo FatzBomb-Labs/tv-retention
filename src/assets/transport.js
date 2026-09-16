@@ -24,7 +24,8 @@ function busy(on, label) {
 // not answered in thirty seconds has failed. Anything not named here gets the default.
 const TIMEOUTS = { run: 3600000, preview: 900000, 'remove-series': 900000, series: 120000,
                           'test-instance': 90000, match: 300000, 'test-tmdb': 60000,
-                          'check-rule': 300000, progress: 30000, log: 30000, alerts: 60000 };
+                          'check-rule': 300000, sync: 900000, progress: 30000,
+                          log: 30000, alerts: 60000 };
 const DEFAULT_TIMEOUT = 60000;
 
 /* Whatever happens, the page must end up interactive. Both window-level handlers and

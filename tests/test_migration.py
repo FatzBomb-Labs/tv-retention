@@ -98,9 +98,9 @@ class Upgrade(unittest.TestCase):
     def test_a_tmdb_key_survives_without_its_enabled_flag(self):
         self.assertEqual(self.new['tmdb'], {'api_key': 'b' * 32})
 
-    def test_the_notify_flag_becomes_a_matrix(self):
-        self.assertFalse(self.new['notifications']['run_completed'])
-        self.assertTrue(self.new['notifications']['health_ok'])
+    def test_old_notification_settings_are_removed(self):
+        self.assertNotIn('notifications', self.new)
+        self.assertEqual(self.new['connections']['tmdb']['api_key'], 'b' * 32)
 
     def test_the_deletion_gate_is_dropped_for_a_typed_confirmation(self):
         self.assertNotIn('allow_series_deletion', self.new)
@@ -284,7 +284,7 @@ class ToV9(unittest.TestCase):
                   'notifications': {'errors': False, 'webhook_url': 'https://example.invalid/hook'}}
         after = migrate(before)
         self.assertEqual(after['rules'], [dict(before['rules'][0], combine='any')])
-        self.assertEqual(after['notifications'], before['notifications'])
+        self.assertNotIn('notifications', after)
 
     def test_nothing_asks_the_filesystem_anything_any_more(self):
         """The folder picker was the last thing that read a directory.

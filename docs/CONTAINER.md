@@ -115,15 +115,12 @@ and know what they are turning on. `SameSite=Strict` plus a per-session token fo
 **This is the decision to make before anything is written**, because it shapes the request
 path every action goes through.
 
-### 2. Notifications
+### 2. Notifications (removed)
 
-The primitive becomes an outbound webhook: a JSON POST on the events the plugin already
-names, with the same "once per problem, keyed" rule `announce_alerts` enforces now. That
-reaches every user rather than only Unraid's.
-
-Unraid users keep what they have through an optional command target, invoking a
-bind-mounted `notify`. Documented as host coupling, opt-in, and never the default —
-the point of the move is not to reintroduce it as a requirement.
+The container has no outbound notification or webhook surface. Alerts remain keyed and
+are shown in the in-app Alerts, owning Connections/Series views, and the System → Status
+overview. Legacy notification settings are discarded by migration so an old webhook URL
+cannot remain as an unused credential.
 
 ### 3. Resident loop, and later a live connection
 
@@ -163,7 +160,7 @@ lying — and one rule with no exceptions is worth more than the flexibility it 
 Said plainly, so it is not discovered later:
 
 - **The WebGUI's authentication**, replaced by something we now own and must get right.
-- **Native Unraid notifications** as the default path.
+- **Native Unraid notifications**; the container reports alerts in its own interface.
 - **Zero memory at rest.** Measured: about 35 MiB held permanently against the plugin's
   nothing. The lightest container on this server idles at 17.7 MiB.
 - **The Tools menu entry**, and with it the fact that it is already in front of you.
@@ -177,8 +174,8 @@ their media. All of them are worth stating before the work starts.
 
 1. **Decide authentication.** Nothing else can be written around an undecided request path.
 2. **Cut the Unraid surface out.** Delete `api.php`, the `.page` and `event/`; replace
-   `array_ready`/`require_ready` with nothing, `notify` with a webhook, `write_cron` with a
-   loop; repoint `store.py` at `/config`. The suite must still pass at the end of this, which
+   `array_ready`/`require_ready` with nothing, remove `notify` and `write_cron` in favour of
+   the resident loop; repoint `store.py` at `/config`. The suite must still pass at the end of this, which
    is what makes it safe — `core.py` is untouched throughout.
 3. **Build the HTTP server and the image.** `actions.dispatch` already takes a decoded
    request and returns a dict, so this is a thin front end over what exists.

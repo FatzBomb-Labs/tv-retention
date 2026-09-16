@@ -11,11 +11,15 @@ main imports this lazily, from its dispatch, so the dependency runs one way only
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
+import hashlib
 import os
+import secrets
 import sys
 from pathlib import Path
 
 import alerts
+import backup
 import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
@@ -43,6 +47,14 @@ def package_metadata(name, environment):
         except FileNotFoundError:
             continue
     return ''
+
+
+def status_payload(settings, health=None):
+    """Attach release metadata to the read-only operational status model."""
+    status = main.status_snapshot(settings, health)
+    status.update(build_number=package_metadata('BUILD', 'TVR_BUILD_NUMBER'),
+                  build_date=package_metadata('BUILD_DATE', 'TVR_BUILD_DATE'))
+    return status
 
 
 # ---------------------------------------------------------------------------
@@ -102,13 +114,7 @@ def plan_summary(settings: dict, health: dict) -> dict:
 def action_snapshot(settings, request):
     state = load_state(settings)
     health = load_health(settings)
-    # A page opening on a reading older than the interval syncs first, so "it is probably
-    # up to date" is true rather than hopeful.
-    if main.sync_is_due(settings):
-        with contextlib.suppress(Rejected, SonarrError):
-            with main.run_lock():
-                main.sync_from_sonarr(settings, reason='opened stale')
-        health = load_health(settings)
+    status, current_alerts, hidden_alerts = _status_bundle(settings, health)
     return {
         'version': VERSION,
         'build_number': package_metadata('BUILD', 'TVR_BUILD_NUMBER'),
@@ -123,32 +129,60 @@ def action_snapshot(settings, request):
         'health_stale': main.health_is_stale(settings, health),
         'stale_rules': main.stale_rule_ids(settings, health),
         'progress': read_progress(settings),
-        'alerts': visible_alerts(settings, health),
-        'alert_summary': alerts.summarise(visible_alerts(settings, health)),
+        'alerts': current_alerts,
+        'suppressed_alerts': hidden_alerts,
+        'alert_summary': alerts.summarise(current_alerts),
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
         'jobs': job_state(settings),
         'plan': plan_summary(settings, load_health(settings)),
         'sync': main.last_sync(settings),
+        'sync_due': main.sync_is_due(settings, main.PAGE_REFRESH_SECONDS),
         'test_mode': bool((settings.get('schedule') or {}).get('test_mode', True)),
+        'status': status,
     }
 
 
 def action_sync(settings, request):
-    """Read Sonarr now, because someone asked. The only unbounded wait in the interface."""
-    with main.run_lock():
-        report = main.sync_from_sonarr(settings, reason='asked for')
-    health = load_health(settings)
-    return {'report': report, 'health': trim_health(health), 'alerts': visible_alerts(settings, health),
+    """Coalesce manual, page-open, visible-page, scheduled, and multi-tab refreshes."""
+    reason = str(request.get('reason') or 'manual')
+    force = bool(request.get('force'))
+    page_refresh = reason in ('opened', 'visible')
+    report = None
+    try:
+        with main.run_lock():
+            # Re-check after winning the lock. Another tab may have completed the refresh
+            # between this request being dispatched and this line.
+            should_sync = force or main.sync_is_due(
+                settings, main.PAGE_REFRESH_SECONDS if page_refresh else main.SYNC_FRESH_SECONDS)
+            if should_sync:
+                report = main.sync_from_sonarr(settings, reason=reason)
+            # These paths also refresh reachability and recycle-bin state. This is
+            # read-only and never invokes retention or changes monitored flags.
+            health = main.refresh_instance_health(settings, force=False)
+    except Rejected as error:
+        if str(error) != 'A TV Retention run is already in progress.':
+            raise
+        health = load_health(settings)
+        return _sync_response(settings, health, report=None, busy=True)
+    return _sync_response(settings, health, report=report, busy=False)
+
+
+def _sync_response(settings, health, report, busy: bool) -> dict:
+    status, current_alerts, hidden_alerts = _status_bundle(settings, health)
+    return {'report': report, 'busy': busy, 'health': trim_health(health),
+            'alerts': current_alerts,
+            'suppressed_alerts': hidden_alerts,
             'plan': plan_summary(settings, health), 'sync': main.last_sync(settings),
-            'settings': redact(load_settings())}
+            'sync_due': main.sync_is_due(settings, main.PAGE_REFRESH_SECONDS),
+            'settings': redact(load_settings()), 'status': status}
 
 
 def action_watch(settings, request):
     """The open page's heartbeat. It never goes to Sonarr.
 
     Time alone moves a keep window, so the plans are re-decided from the stored reading
-    and the page follows. Anything that needs Sonarr waits for the daily sync, or for
-    someone to press the button.
+    and the page follows. Sonarr freshness is handled separately by the resident interval
+    and quiet page-open/visibility refreshes.
     """
     health = load_health(settings)
     # Free, and the reason the page can call this every fifteen seconds: the plan is
@@ -156,12 +190,15 @@ def action_watch(settings, request):
     if main.recompute_plans(settings, health):
         write_cache(settings, 'health.json', health)
         health = load_health(settings)
+    status, current_alerts, hidden_alerts = _status_bundle(settings, health)
     return {'progress': read_progress(settings),
             'health': trim_health(health),
-            'alerts': visible_alerts(settings, health),
+            'alerts': current_alerts,
+            'suppressed_alerts': hidden_alerts,
             'stale_rules': main.stale_rule_ids(settings, health),
             'sync': main.last_sync(settings),
-            'plan': plan_summary(settings, health)}
+            'sync_due': main.sync_is_due(settings, main.PAGE_REFRESH_SECONDS),
+            'plan': plan_summary(settings, health), 'status': status}
 
 
 def action_scope_pass(settings, request):
@@ -183,8 +220,20 @@ def action_scope_pass(settings, request):
 
 
 def visible_alerts(settings, health):
-    """Alerts as the interface should see them: muted ones gone, acknowledged ones marked."""
-    return alerts.annotate(health.get('alerts') or [], settings, health.get('acknowledged') or {})
+    """Alerts as the interface should see them: suppressed facts omitted."""
+    return alerts.annotate(health.get('alerts') or [], settings,
+                           health.get('acknowledged') or {}, health.get('suppressed') or {})
+
+
+def suppressed_alerts(health):
+    return alerts.suppressed(health.get('alerts') or [], health.get('suppressed') or {})
+
+
+def _status_bundle(settings, health):
+    """Return the status model and one alert view that includes its read-only checks."""
+    status = status_payload(settings, health)
+    combined = dict(health, alerts=list(health.get('alerts') or []) + status.get('alerts', []))
+    return status, visible_alerts(settings, combined), suppressed_alerts(health)
 
 
 def action_acknowledge(settings, request):
@@ -203,15 +252,39 @@ def action_acknowledge(settings, request):
     if request.get('undo'):
         acknowledged.pop(key, None)
     else:
-        if not alerts.may_acknowledge(found, settings):
+        if not alerts.may_acknowledge(found):
             raise Rejected('An error cannot be acknowledged while it is still true.')
         acknowledged[key] = alerts.fingerprint(found)
     health['acknowledged'] = acknowledged
     write_cache(settings, 'health.json', health)
     log_line(settings, 'info',
              f'{"un-" if request.get("undo") else ""}acknowledged: {found.get("title")}')
-    return {'alerts': visible_alerts(settings, health),
-            'summary': alerts.summarise(visible_alerts(settings, health))}
+    status, current_alerts, hidden_alerts = _status_bundle(settings, health)
+    return {'alerts': current_alerts,
+            'suppressed_alerts': hidden_alerts,
+            'summary': alerts.summarise(current_alerts), 'status': status}
+
+
+def action_suppress_alert(settings, request):
+    """Hide one recurring warning by exact alert key, never by global kind."""
+    key = str(request.get('key') or '')
+    health = load_health(settings)
+    found = next((alert for alert in (health.get('alerts') or []) if alert['key'] == key), None)
+    suppressed = dict(health.get('suppressed') or {})
+    if request.get('undo'):
+        suppressed.pop(key, None)
+    else:
+        if not found or found.get('kind') != 'no-recycle-bin':
+            raise Rejected('That alert cannot be hidden permanently.')
+        suppressed[key] = {'kind': found['kind'], 'instance_id': found.get('instance_id')}
+    health['suppressed'] = suppressed
+    write_cache(settings, 'health.json', health)
+    log_line(settings, 'info',
+             f'{"restored" if request.get("undo") else "suppressed"}: {key}')
+    status, current_alerts, hidden_alerts = _status_bundle(settings, health)
+    return {'alerts': current_alerts,
+            'suppressed_alerts': hidden_alerts,
+            'summary': alerts.summarise(current_alerts), 'status': status}
 
 
 def rule_with_draft(rule, draft):
@@ -538,9 +611,11 @@ def action_check_rule(settings, request):
     # The alerts come back with the check that produced them. Asking for them separately
     # meant a second PHP request and a second Python process for every series read.
     fresh = load_health(settings)
+    status, current_alerts, hidden_alerts = _status_bundle(settings, fresh)
     return {'busy': False, 'rule_id': rule['id'], 'state': summary,
-            'alerts': visible_alerts(settings, fresh),
-            'summary': alerts.summarise(visible_alerts(settings, fresh))}
+            'alerts': current_alerts,
+            'suppressed_alerts': hidden_alerts,
+            'summary': alerts.summarise(current_alerts), 'status': status}
 
 
 def stamp_reenable_watermarks(previous, updated) -> None:
@@ -568,13 +643,132 @@ def action_settings(settings, request):
     # timestamp would catch, so it is dropped rather than aged out.
     if canonical_json(settings.get('instances', [])) != canonical_json(updated.get('instances', [])):
         invalidate_catalogue(updated)
+        before = {item['id']: item for item in settings.get('instances', [])}
+        changed = [item['id'] for item in updated.get('instances', [])
+                   if canonical_json(before.get(item['id'])) != canonical_json(item)]
+        main.refresh_instance_health(updated, changed, force=True)
     # A rule that is gone must not leave its episodes behind; the store is keyed by rule.
     for gone in {rule['id'] for rule in settings.get('rules', [])} - {rule['id'] for rule in updated.get('rules', [])}:
         forget_episodes(updated, gone)
+    health = load_health(updated)
+    status, current_alerts, hidden_alerts = _status_bundle(updated, health)
     return {'settings': redact(updated),
             'schedule_active': bool((updated.get('schedule') or {}).get('enabled')),
             'schedule_text': schedules.describe(updated.get('schedule') or {}),
+            'health': trim_health(health),
+            'alerts': current_alerts,
+            'suppressed_alerts': hidden_alerts,
+            'status': status,
             }
+
+
+def _api_key_metadata(settings):
+    """Return lifecycle state without exposing the stored digest."""
+    value = dict(settings.get('api_key') or {})
+    value.pop('hash', None)
+    return value
+
+
+def _new_api_key(settings, reason='created'):
+    value = secrets.token_urlsafe(32)
+    stamp = dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
+    metadata = {'status': 'created',
+                'hash': hashlib.sha256(value.encode('utf-8')).hexdigest(),
+                'prefix': value[:8], 'created_at': stamp, 'revoked_at': ''}
+    settings['api_key'] = metadata
+    save_settings(settings)
+    log_line(settings, 'info', f'API key {reason}')
+    return value, metadata
+
+
+def action_api_key(settings, request):
+    """Create, regenerate, revoke, or inspect the future API credential."""
+    operation = str(request.get('operation') or 'status').lower()
+    if operation == 'status':
+        return {'api_key': _api_key_metadata(settings)}
+    if operation in ('create', 'regenerate'):
+        if operation == 'create' and (settings.get('api_key') or {}).get('status') == 'created':
+            raise Rejected('An API key already exists. Regenerate it to replace it.')
+        value, metadata = _new_api_key(settings, operation)
+        return {'api_key': _api_key_metadata({'api_key': metadata}), 'key': value,
+                'shown_once': True}
+    if operation == 'revoke':
+        current = dict(settings.get('api_key') or {})
+        if current.get('status') != 'created':
+            raise Rejected('There is no active API key to revoke.')
+        current.update(status='revoked', revoked_at=dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds'))
+        settings['api_key'] = current
+        save_settings(settings)
+        log_line(settings, 'warning', 'API key revoked')
+        return {'api_key': _api_key_metadata(settings)}
+    raise Rejected('Unknown API-key operation.')
+
+
+def action_test_connection(settings, request):
+    """Test one optional enrichment provider without persisting its secret."""
+    kind = str(request.get('kind') or '').lower()
+    if kind not in main.OPTIONAL_PROVIDER_KINDS:
+        raise Rejected('Unknown optional connection.')
+    connection = dict((settings.get('connections') or {}).get(kind) or {})
+    incoming = request.get('connection') or {}
+    if isinstance(incoming, dict):
+        connection.update(incoming)
+    credential_name = 'token' if kind == 'plex' else 'api_key'
+    if connection.get(credential_name) in ('********', '••••••••'):
+        stored = ((settings.get('connections') or {}).get(kind) or {}).get(credential_name, '')
+        if not stored and kind == 'tmdb':
+            stored = ((settings.get('tmdb') or {}).get('api_key') or '')
+        connection[credential_name] = stored
+    if kind == 'tmdb':
+        key = str(connection.get('api_key') or '')
+        if not key:
+            raise Rejected('Enter a TMDB API key first.')
+        TMDB(key).check()
+        return {'ok_message': 'TMDB accepted the key.'}
+    provider = main.optional_provider(kind, connection, settings)
+    if provider is None:
+        raise Rejected(f'{kind.title()} connection is not configured.')
+    provider.check()
+    return {'ok_message': f'{kind.title()} connection answered.'}
+
+
+def action_backup(settings, request):
+    def remember_error(message):
+        # The archive operation is the useful result; a failure to record its diagnostic
+        # must not replace it with a second, less actionable error (for example when a
+        # hand-edited settings file becomes read-only at the same time as the destination).
+        with contextlib.suppress(Exception):
+            updated = load_settings()
+            updated.setdefault('backup', {})['last_error'] = str(message)[:500]
+            save_settings(updated)
+
+    operation = str(request.get('operation') or 'list').lower()
+    if operation == 'list':
+        configured = (settings.get('backup') or {}).get('path')
+        backups = backup.list_backups(settings) if str(configured or '').strip() else []
+        return {'backups': backups,
+                'backup': dict(settings.get('backup') or {})}
+    if operation == 'create':
+        try:
+            result = backup.create(settings)
+        except Rejected as error:
+            remember_error(error)
+            raise
+        updated = load_settings()
+        updated.setdefault('backup', {}).update(last=result['created_at'], last_error='')
+        save_settings(updated)
+        return {'result': result, 'backups': backup.list_backups(updated)}
+    if operation == 'restore':
+        try:
+            result = backup.restore(settings, request.get('file'), request.get('confirm', ''))
+        except Rejected as error:
+            remember_error(error)
+            raise
+        updated = load_settings()
+        updated.setdefault('backup', {}).update(last_error='')
+        save_settings(updated)
+        return {'result': result}
+    raise Rejected('Unknown backup operation.')
 
 
 
@@ -632,47 +826,24 @@ def action_log(settings, request):
 def action_alerts(settings, request):
     """Everything currently wrong, split the way the interface shows it."""
     health = load_health(settings)
-    current = visible_alerts(settings, health)
+    status, current, hidden = _status_bundle(settings, health)
     return {
         'alerts': current,
+        'suppressed_alerts': hidden,
         'summary': alerts.summarise(current),
         'system': [alert for alert in current if alert.get('scope') == 'system'],
         'series_summary': {rule['id']: alerts.summarise(alerts.for_series(current, rule['id']))
                            for rule in settings.get('rules', [])},
+        'status': status,
     }
 
 
-def action_alert_action(settings, request):
-    """Carry out the fix an alert offers.
-
-    Every one of these is refused under Preview, because a fix that silently did nothing
-    would be worse than a fix that says it is not available.
-    """
-    kind = str(request.get('kind') or '')
-    rule_id = str(request.get('rule_id') or '')
-    rule = next((r for r in settings.get('rules', []) if r['id'] == rule_id), None)
-    if kind == 'rematch':
-        report = main.bind_rules(settings, force=True)
-        settings = load_settings()
-        if rule:
-            rule = next((r for r in settings.get('rules', []) if r['id'] == rule_id), rule)
-            main.check_one_rule(settings, rule)
-        return {'report': report, 'settings': redact(settings)}
-    # No mode gates these. Test Mode governs the scheduler, and a fix asked for by hand is
-    # always live — the check that stood here read a setting removed three versions ago,
-    # defaulted to "preview is on", and refused every quick action ever since.
-    if kind == 'remove-rule':
-        if not rule:
-            raise Rejected('That rule no longer exists.')
-        settings['rules'] = [r for r in settings.get('rules', []) if r['id'] != rule_id]
-        save_settings(settings)
-        health = load_health(settings)
-        health['rules'].pop(rule_id, None)
-        health['alerts'] = [a for a in (health.get('alerts') or []) if a.get('rule_id') != rule_id]
-        write_cache(settings, 'health.json', health)
-        log_line(settings, 'warning', f'rule removed for {rule.get("series_title") or rule["path"]}')
-        return {'settings': redact(load_settings())}
-    raise Rejected('That action is not available.')
+def action_status(settings, request):
+    """Return the read-only operational status page model."""
+    health = load_health(settings)
+    status, current, _ = _status_bundle(settings, health)
+    status['alerts'] = current
+    return status
 
 
 def _whole_or(value, fallback: int) -> int:
@@ -740,7 +911,7 @@ ACTIONS = {
     'progress': action_progress,
     'log': action_log,
     'alerts': action_alerts,
-    'alert-action': action_alert_action,
+    'status': action_status,
     'enable-recycle-bin': action_enable_recycle_bin,
     'check-rule': action_check_rule,
     'watch': action_watch,
@@ -748,6 +919,7 @@ ACTIONS = {
     'scope-pass': action_scope_pass,
     'stats': action_stats,
     'acknowledge': action_acknowledge,
+    'suppress-alert': action_suppress_alert,
     'scope-counts': action_scope_counts,
     'refresh-series': action_refresh_series,
     'episodes': action_episodes,
@@ -760,6 +932,9 @@ ACTIONS = {
     'preview': action_preview,
     'run': action_run,
     'test-tmdb': action_test_tmdb,
+    'test-connection': action_test_connection,
+    'api-key': action_api_key,
+    'backup': action_backup,
     'clear-history': action_clear_history,
 }
 

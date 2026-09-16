@@ -64,10 +64,10 @@ async function evaluateGraph(context) {
 
 const SECTIONS = {
   series: ['series-all', 'series-connected', 'series-unconnected'],
-  media: ['media-stats', 'media-presets', 'media-automation', 'media-schedule', 'media-radarr'],
-  settings: ['settings-alerts', 'settings-notifications', 'settings-connections',
-             'settings-api', 'settings-safety', 'settings-logging'],
-  system: ['system-about', 'system-backup', 'system-logs'],
+  media: ['media-stats', 'media-presets', 'media-automation', 'media-schedule'],
+  general: ['general-alerts', 'general-connections', 'general-air-dates',
+            'general-safety', 'general-logging', 'general-backup'],
+  system: ['system-logs'],
   help: ['help-adding', 'help-connecting', 'help-presets', 'help-monitoring',
          'help-rules', 'help-scheduling'],
 };
@@ -210,18 +210,22 @@ function snapshotFixture(overrides = {}) {
       rules,
       profiles: [],
       schedule: { enabled: false, test_mode: overrides.testMode === false ? false : true },
-      retention: {}, air_dates: {}, automation: {}, alerts: {}, notifications: {}, logging: {},
+      retention: {}, air_dates: {}, automation: {}, alerts: {}, logging: {},
+      connections: { tmdb: { api_key: overrides.tmdbKey === undefined ? '********' : overrides.tmdbKey,
+                             enabled: overrides.tmdbKey !== '' }, plex: {}, jellyfin: {} },
       // Arrives masked, exactly as `core.redact` sends it.
       tmdb: { api_key: overrides.tmdbKey === undefined ? '********' : overrides.tmdbKey },
       state_dir: '/tmp/tvr-test-state',
     },
     health: { rules: {}, instances: { 'inst-1': { reachable: true } } },
     alerts: overrides.alerts || [],
+    suppressed_alerts: overrides.suppressed_alerts || [],
     runs: [],
     plan: overrides.plan || { actionable: 0, trustworthy: false },
     progress: overrides.progress || { running: false },
     stale_rules: overrides.stale_rules || [],
     sync: { synced_at: new Date().toISOString() },
+    sync_due: false,
   };
 }
 
@@ -240,6 +244,17 @@ async function loadPage(setup) {
       : { rule_id: payload.rule_id, state: {}, alerts: [] }),
     progress: () => (fixtures.progress ? fixtures.progress() : { progress: { running: false } }),
     alerts: () => ({ alerts: (fixtures.alerts && fixtures.alerts()) || [] }),
+    sync: () => (fixtures.sync ? fixtures.sync() : {
+      busy: false,
+      report: null,
+      settings: fixtures.snapshot.settings,
+      health: fixtures.snapshot.health,
+      alerts: fixtures.snapshot.alerts || [],
+      suppressed_alerts: fixtures.snapshot.suppressed_alerts || [],
+      plan: fixtures.snapshot.plan,
+      sync: fixtures.snapshot.sync,
+      sync_due: false,
+    }),
     run: () => (fixtures.run ? fixtures.run()
       : { result: { dry_run: true, planned: 0, deleted: 0, rules: [], duration_seconds: 0, freed_bytes: 0 } }),
     // The worker answers a save with the stored document, redacted again.
@@ -332,11 +347,17 @@ test('queued background checks all complete, update the counts, and fetch nothin
   assert.equal(badge.hidden, false, 'the alert that arrived with the check is counted');
   assert.equal(String(badge.textContent), '1');
   assert.ok(badge.className.includes('warning'));
-  const total = page.$('tvr-alert-total');
-  assert.equal(total.hidden, false);
-  assert.equal(String(total.textContent), '1 alert');
 
   assert.equal(page.intervals.size, 1, 'only the heartbeat interval: checks do not start polling');
+});
+
+test('the cached snapshot renders before a quiet page-open freshness request', async () => {
+  const page = await loadPage(() => ({ snapshot: snapshotFixture() }));
+  await page.flush();
+  assert.equal(page.fetchLog[0].action, 'snapshot');
+  assert.equal(page.actions('sync'), 1);
+  assert.equal(page.sent('sync')[0].reason, 'opened');
+  assert.equal(page.$('tvr-busy').hidden, true, 'background freshness never raises the overlay');
 });
 
 test('sweep polling continues while the sweep runs and stops when it finishes', async () => {
@@ -552,8 +573,9 @@ test('a save posts the whole settings document, not the panel that was edited', 
   assert.equal(posted.rules.length, 2, 'the rules survive a schedule save');
   assert.deepEqual(posted.instances.map((i) => i.id), ['inst-1'],
     'the Sonarr connections survive a schedule save');
-  assert.ok('alerts' in posted && 'automation' in posted && 'notifications' in posted,
+  assert.ok('alerts' in posted && 'automation' in posted && 'connections' in posted,
     'every settings panel is represented in a save from any one of them');
+  assert.equal('notifications' in posted, false, 'legacy outbound notification settings are not posted');
 });
 
 test('an unedited masked API key is echoed back as its mask, never as a new key', async () => {
@@ -569,7 +591,7 @@ test('an unedited masked API key is echoed back as its mask, never as a new key'
   await page.flush();
 
   const posted = page.sent('settings')[0].settings;
-  assert.equal(posted.tmdb.api_key, '********',
+  assert.equal(posted.connections.tmdb.api_key, '********',
     'the mask goes back unchanged, which the worker reads as "keep the stored key"');
 });
 
@@ -583,7 +605,7 @@ test('an edited API key is posted as typed', async () => {
   await page.flush();
 
   const posted = page.sent('settings')[0].settings;
-  assert.equal(posted.tmdb.api_key, 'a-real-tmdb-key-value',
+  assert.equal(posted.connections.tmdb.api_key, 'a-real-tmdb-key-value',
     'a key someone actually typed is not mistaken for a mask');
 });
 

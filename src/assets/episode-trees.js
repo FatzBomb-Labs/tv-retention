@@ -17,6 +17,7 @@ const EXCLUDED_WHY = {
   season: (episode) => `excluded season ${episode.excluded_by}`,
   folder: (episode) => `folder matches “${episode.excluded_by}”`,
   episode: (episode) => `matches “${episode.excluded_by}”`,
+  'air-date': () => 'no air date could be resolved',
 };
 
 // Excluding is not monitoring, so this is its own tree rather than a mode of the other
@@ -98,7 +99,9 @@ function exclusionTree(seasons, current) {
           el('span', { textContent: `E${String(episode.episode).padStart(2, '0')} · ${episode.title || ''}` }),
         ]),
         el('span', { className: 'tvr-tree-note tvr-tree-aired',
-                     textContent: day(episode.air_date) || 'no air date' }),
+                     title: episode.air_source ? `Source: ${episode.air_source}` : '',
+                     textContent: `${day(episode.air_date) || 'no air date'}${episode.air_source && episode.air_source !== 'sonarr'
+                       ? ` · ${episode.air_source}` : ''}` }),
         el('span', { className: 'tvr-tree-note tvr-tree-why', textContent: why }),
         watchCell,
       ]));

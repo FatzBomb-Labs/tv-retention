@@ -18,10 +18,10 @@ import { remember, remembered } from './storage.js';
 // `alerts.js`, and sibling modules cannot import each other here. That is also why the
 // entry has to build `createAlerts` before this.
 export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, getLibrary,
-                               applySaved, applyHealth, applyAlerts, forgetLibrary,
+                               applySaved, applyHealth, applyAlerts, applySuppressed, forgetLibrary,
                                refresh, render, showResult, testMode, ruleFor, isBlocked,
                                worstSeverity, seriesAlertList, seriesAlertCard,
-                               systemAlertCard }) {
+                               systemAlertCard, getStatus }) {
   // Three states, because "follow the system" is a real answer rather than the absence of
   // one — and the two explicit ones have to win in both directions, or somebody on a dark
   // desktop can never choose light. The attribute goes on <html>: the body's background is
@@ -58,7 +58,11 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
   // reason to call the button disabled.
   function runState() {
     if (!(getSettings().instances || []).length) return 'blocked';
-    if (getSystemAlerts().some((alert) => alert.blocking)) return 'blocked';
+    const statusAlerts = (getStatus && getStatus().alerts) || [];
+    const seen = new Set();
+    const system = getSystemAlerts().concat(statusAlerts)
+      .filter((alert) => !seen.has(alert.key) && seen.add(alert.key));
+    if (system.some((alert) => alert.blocking)) return 'blocked';
     return testMode() ? 'test' : 'live';
   }
 
@@ -124,21 +128,23 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
   }
 
   function setBadge(badge, list) {
+    if (!badge) return;
     const live = (list || []).filter((alert) => !alert.acknowledged);
     badge.hidden = live.length === 0;
     badge.textContent = live.length || '';
     badge.className = `tvr-tab-badge ${worstSeverity(live) || 'notice'}`;
   }
 
-  // The sidebar carries the counts. Two badges for two audiences: a series problem belongs
-  // to Series, where it is fixed; an installation problem belongs to Alerts. Neither
-  // counts the other's.
-  // A badge next to the thing it is about, rather than one list of everything wrong. The
-  // total in the top bar is the one place that still answers "is anything wrong at all?".
+  // The sidebar carries the counts. A badge sits beside the thing it is about: a series
+  // problem belongs to Series, and an installation problem belongs to Connections. There
+  // is deliberately no second global total in the top bar.
   function renderCounts() {
     const rules = getSettings().rules || [];
     const connectedAlerts = seriesAlertList();
-    const instances = getSystemAlerts().filter((alert) => alert.kind !== 'run-aborted');
+    const seen = new Set();
+    const instances = getSystemAlerts().concat((getStatus && getStatus().alerts) || [])
+      .filter((alert) => alert.kind !== 'run-aborted')
+      .filter((alert) => !seen.has(alert.key) && seen.add(alert.key));
 
     $('tvr-count-connected').textContent = rules.length;
     $('tvr-count-all-series').textContent = getLibrary() ? getLibrary().length : rules.length;
@@ -149,30 +155,20 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
     setBadge($('tvr-badge-series-all'), connectedAlerts);
     setBadge($('tvr-badge-series-connected'), connectedAlerts);
     setBadge($('tvr-badge-series-unconnected'), []);
-    setBadge($('tvr-badge-media-connections'), instances);   // now under Settings
+    setBadge($('tvr-badge-general-connections'), instances);
     setBadge($('tvr-badge-media-schedule'), []);
     setBadge($('tvr-badge-media-presets'), []);
+    setBadge($('tvr-badge-system-status'), instances);
     const failed = (getSnapshot().runs || []).slice(0, 1).filter((run) => (run.errors || []).length);
     setBadge($('tvr-badge-system-history'), failed.map(() => ({ severity: 'warning' })));
 
-    // What the header counts is a setting; what the badges count is not. An acknowledged
-    // alert stops being counted anywhere, but is still there to be found.
-    const everything = connectedAlerts.concat(getSystemAlerts());
-    const wanted = ((getSettings() || {}).alerts || {}).header || 'all';
-    const ranked = { errors: ['error'], warnings: ['error', 'warning'] }[wanted]
-                   || ['error', 'warning', 'notice'];
-    const counted = everything.filter((alert) => ranked.includes(alert.severity) && !alert.acknowledged);
-    const total = $('tvr-alert-total');
-    total.hidden = counted.length === 0;
-    total.textContent = `${counted.length} ${counted.length === 1 ? 'alert' : 'alerts'}`;
-    total.className = `tvr-alert-total ${worstSeverity(counted) || 'notice'}`;
   }
 
   // The one overview left: what is wrong, and where to go and fix it. Two things open it —
   // the count, and the Run button when something is stopping every run — because "why can
   // I not run?" and "what is wrong?" are the same question.
   function showEverythingNeedingAttention() {
-    const everything = seriesAlertList().concat(getSystemAlerts());
+    const everything = seriesAlertList().concat(getSystemAlerts(), (getStatus && getStatus().alerts) || []);
     dialog('Everything needing attention', (body) => {
       if (!everything.length) { body.append(el('p', { textContent: 'Nothing.' })); return {}; }
       const byRule = new Map();
@@ -209,17 +205,21 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
       if (!event.target.closest('#tvr-changes')) $('tvr-changes-menu').hidden = true;
     });
 
-    $('tvr-alert-total').addEventListener('click', showEverythingNeedingAttention);
-
     // The one control that waits on Sonarr, and it says so. Everything else on this page is
     // answered from the stored reading, which is why nothing else makes you wait.
     $('tvr-refresh-all').addEventListener('click', () => guarded('Reading Sonarr…', async () => {
-      const data = await api('sync', {}, 'Reading Sonarr…');
+      const data = await api('sync', { reason: 'manual', force: true }, 'Reading Sonarr…');
+      if (data.busy) {
+        notice('A Sonarr read or retention run is already in progress.', 'ok');
+        return;
+      }
       applySaved(data);
       applyHealth(data.health);
       applyAlerts(data.alerts);
+      applySuppressed(data.suppressed_alerts || []);
       getSnapshot().plan = data.plan;
       getSnapshot().sync = data.sync;
+      getSnapshot().sync_due = !!data.sync_due;
       // Sonarr has just been read: what the page is holding is the reading before it.
       forgetLibrary();
       render();

@@ -154,11 +154,11 @@ class Reachability(unittest.TestCase):
         unraised = [kind for kind in self.kinds() if f"'{kind}'" not in self.sources]
         self.assertEqual(unraised, [], 'declared but never made')
 
-    def test_every_offered_action_has_a_handler(self):
-        actions = {spec['action'] for spec in self.kinds().values() if spec['action']}
-        handler = (WORKER / 'actions.py').read_text().split('def action_alert_action')[1]
-        missing = sorted(action for action in actions if f"'{action}'" not in handler)
-        self.assertEqual(missing, [], 'offered by an alert but not handled')
+    def test_series_alerts_offer_no_quick_actions(self):
+        offered = {kind: spec['action'] for kind, spec in self.kinds().items()
+                   if spec['scope'] == 'series' and spec['action']}
+        self.assertEqual(offered, {})
+        self.assertNotIn("'alert-action'", (WORKER / 'actions.py').read_text())
 
     def test_no_handler_reads_a_setting_that_no_longer_exists(self):
         """`settings.get('preview', True)` outlived the setting by three versions.
@@ -178,7 +178,7 @@ class Acknowledgement(unittest.TestCase):
     def setUp(self):
         import alerts
         self.alerts = alerts
-        self.settings = {'alerts': {'header': 'all', 'acknowledge': True, 'muted': []}}
+        self.settings = {'alerts': {}}
 
     def test_it_lapses_when_what_the_alert_says_changes(self):
         first = self.alerts.make('no-recycle-bin', instance_id='i1', detail='Sonarr deletes outright')
@@ -188,12 +188,13 @@ class Acknowledgement(unittest.TestCase):
         self.assertFalse(self.alerts.annotate([moved], self.settings, acknowledged)[0]['acknowledged'],
                          'a different fact is not the one that was acknowledged')
 
-    def test_a_muted_kind_is_not_shown_at_all(self):
-        settings = {'alerts': {'muted': ['ended-expired']}}
-        both = [self.alerts.make('ended-expired', rule_id='r1'),
-                self.alerts.make('no-recycle-bin', instance_id='i1')]
-        kinds = [alert['kind'] for alert in self.alerts.annotate(both, settings, {})]
-        self.assertEqual(kinds, ['no-recycle-bin'])
+    def test_suppression_is_scoped_to_one_exact_alert(self):
+        first = self.alerts.make('no-recycle-bin', instance_id='i1')
+        second = self.alerts.make('no-recycle-bin', instance_id='i2')
+        shown = self.alerts.annotate([first, second], self.settings, {}, {first['key']: {}})
+        self.assertEqual([alert['instance_id'] for alert in shown], ['i2'])
+        hidden = self.alerts.suppressed([first, second], {first['key']: {}})
+        self.assertEqual([alert['instance_id'] for alert in hidden], ['i1'])
 
     def test_a_series_that_is_switched_off_counts_for_nothing(self):
         """It is marked rather than dropped, and marked is what makes it count for nothing.
@@ -210,9 +211,7 @@ class Acknowledgement(unittest.TestCase):
         self.assertEqual(unmanaged, {'ended': True, 'unmatched': False,
                                      'no-recycle-bin': False},
                          'a rule about the instance is not about a series')
-        # Counted nowhere: not in the header, not in a badge.
-        self.assertEqual(self.alerts.header_worthy(shown, settings),
-                         [a for a in shown if not a['unmanaged']])
+        # Unmanaged series alerts are excluded from contextual badge totals.
         self.assertEqual(self.alerts.summarise(shown)['total'], 2)
 
     def test_switching_it_back_on_makes_its_alerts_count_again(self):
@@ -242,43 +241,15 @@ class Acknowledgement(unittest.TestCase):
     def test_the_surviving_notice_can_still_be_acknowledged(self):
         # It records something finished, so putting it away for good is the right end.
         did = self.alerts.make('ended-expired', rule_id='r1')
-        self.assertTrue(self.alerts.may_acknowledge(did, {'alerts': {'acknowledge': True}}))
+        self.assertTrue(self.alerts.may_acknowledge(did))
 
-    def test_muting_and_switching_off_are_not_the_same_question(self):
-        """Muting hides a kind across every series and leaves a blocker blocking.
-
-        Switching a series off is about that one series: its alerts still exist and can
-        still be looked at, they simply stop counting and stop blocking a run they are not
-        part of.
-        """
+    def test_switching_off_marks_but_does_not_delete_a_blocker(self):
         blocker = self.alerts.make('unmatched', rule_id='r1')
         self.assertTrue(blocker['blocking'])
-        muted = self.alerts.annotate([blocker], {'alerts': {'muted': ['unmatched']}}, {})
-        self.assertEqual(muted, [], 'a muted kind is not shown at all')
         off = self.alerts.annotate([blocker], {'rules': [{'id': 'r1', 'enabled': False}]}, {})
         self.assertEqual(len(off), 1, 'still there to be looked at')
         self.assertTrue(off[0]['unmanaged'])
         self.assertEqual(self.alerts.summarise(off)['blocking'], 0, 'and blocking nothing')
-
-    def test_the_header_counts_what_it_was_told_to(self):
-        found = [self.alerts.make('unmatched', rule_id='r1'),
-                 self.alerts.make('no-recycle-bin', instance_id='i1'),
-                 self.alerts.make('ended-expired', rule_id='r2')]
-        counts = {}
-        for wanted in ('errors', 'warnings', 'all'):
-            counts[wanted] = len(self.alerts.header_worthy(found, {'alerts': {'header': wanted}}))
-        # ended-expired is a notice: nothing is wrong, the rule was switched off because
-        # there is nothing left for it to do, and counting that as a problem is how a
-        # header stops being read.
-        self.assertEqual(counts, {'errors': 1, 'warnings': 2, 'all': 3})
-
-    def test_an_acknowledged_alert_is_never_counted(self):
-        found = self.alerts.annotate([self.alerts.make('no-recycle-bin', instance_id='i1')],
-                                     self.settings,
-                                     {'no-recycle-bin:i1': self.alerts.fingerprint(
-                                         self.alerts.make('no-recycle-bin', instance_id='i1'))})
-        self.assertEqual(self.alerts.header_worthy(found, self.settings), [])
-
 
 class AcrossModules(unittest.TestCase):
     """Every `main.something` the RPC surface reaches for actually exists.
