@@ -115,7 +115,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
   margin: 0; min-width: 0; white-space: normal; }
 #tv-retention button:hover:not([disabled]) { background: var(--tvr-soft); }
 #tv-retention button.tvr-plan, #tv-retention button.tvr-plan-total,
-#tv-retention button.tvr-rollup, #tv-retention button.tvr-side-item,
+#tv-retention button.tvr-side-item,
 #tv-retention button.tvr-tree-caret {
   text-transform: none; letter-spacing: normal; text-align: left; }
 #tv-retention button.tvr-primary { background: var(--tvr-action); border-color: var(--tvr-action);
@@ -353,10 +353,6 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-danger-box { border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-bad);
   border-radius: 6px; padding: 10px 12px; }
 
-/* Folder rows in the picker: a plain list of names, aligned, with no glyph in front. An
-   emoji renders at whatever size and baseline the platform chooses, which is why the
-   symbols that used to sit in these labels are gone. */
-#tv-retention button.tvr-folder { text-align: left; border-radius: 4px; }
 #tv-retention .tvr-result { font-size: 12px; opacity: .8; }
 #tv-retention .tvr-result.ok { color: var(--tvr-good); }
 #tv-retention .tvr-result.bad { color: var(--tvr-bad); }
@@ -397,16 +393,11 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention button.tvr-icon-button { padding: 4px 7px; border-radius: 4px; opacity: .65; line-height: 1; }
 #tv-retention button.tvr-icon-button:hover { opacity: 1; }
 #tv-retention button.tvr-icon-button:disabled { opacity: .3; cursor: progress; }
-#tv-retention button.tvr-rollup { display: block; width: 100%; text-align: left; padding: 6px 10px;
-  border-radius: 6px; border: 1px solid var(--tvr-line); border-left: 3px solid var(--tvr-warn);
-  margin-bottom: 12px; }
 .tvr-editor-foot { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--tvr-line); }
 @media (max-width: 700px) { .tvr-change { grid-template-columns: 1fr; } .tvr-retention { margin-left: 0; } }
 
 /* A series waiting to be removed. Red frame, its intent in three plain lines, and an undo
    that costs nothing — because nothing has happened yet. */
-.tvr-queued-mark { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 20px;
-  border-radius: 50%; background: var(--tvr-bad); color: var(--tvr-on-fill); font-weight: 700; font-size: 13px; line-height: 1; }
 .tvr-queued-lines { display: grid; gap: 2px; margin: 8px 0 4px; font-size: 12px; opacity: .85; }
 .tvr-queued-danger { color: var(--tvr-bad); font-weight: 600; }
 

@@ -145,7 +145,6 @@ export function createAlerts({ api, getSettings, getSnapshot, getMonitoring, get
       if (alert.action === 'enable-recycle-bin') {
         // Writes to Sonarr's own configuration, so it asks for the path and says plainly
         // that the change applies to everything Sonarr deletes.
-        const instance = (getSettings().instances || []).find((i) => i.id === alert.instance_id);
         dialog('Give Sonarr a recycle bin', (body) => {
           body.append(el('p', { textContent:
             'Sonarr will move deleted files here instead of removing them, and clean the folder '

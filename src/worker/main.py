@@ -198,7 +198,7 @@ def tmdb_provider(settings: dict):
     return TMDB(api_key, cache_path=state_dir(settings) / 'tmdb-cache.json')
 
 
-def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
+def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> list:
     """Sonarr's episode files for one rule.
 
     Everything the retention pass needs — sizes, air dates, import dates, monitoring —
@@ -211,7 +211,7 @@ def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
             fill_air_dates(episodes, tmdb, rule['tvdb_id'])
     if not interpolate_air_dates(episodes):
         fill_from_history(client, rule['series_id'], episodes)
-    return episodes, [], []
+    return episodes
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +459,7 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     outcome['preset'] = active.get('profile_name', '')
     client = client_for(settings, rule['instance_id'])
     try:
-        episodes, missing, unknown = collect_episodes(settings, rule, client, tmdb)
+        episodes = collect_episodes(settings, rule, client, tmdb)
     except SonarrError as error:
         outcome.update(ok=False, error=str(error))
         return outcome
@@ -509,10 +509,6 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
             outcome['unmonitored'] = len(deleted_ids)
         except SonarrError as error:
             outcome['error'] = f'Files removed, but unmonitoring failed: {error}'
-        if (settings.get('recycle') or {}).get('mode') == 'plugin':
-            # Moving files out of the library is invisible to Sonarr until it rescans.
-            with contextlib.suppress(SonarrError):
-                client.rescan(rule['series_id'])
 
     return outcome
 

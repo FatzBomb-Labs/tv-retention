@@ -277,9 +277,6 @@ class Sonarr:
             return
         self._request('POST', 'command', body={'name': 'EpisodeSearch', 'episodeIds': ids})
 
-    def rescan(self, series_id: int) -> None:
-        self._request('POST', 'command', body={'name': 'RescanSeries', 'seriesId': int(series_id)})
-
 
 def match_rule(rule: dict, catalogue: list) -> dict:
     """Bind a rule to exactly one Sonarr series, or explain why it cannot be bound.
