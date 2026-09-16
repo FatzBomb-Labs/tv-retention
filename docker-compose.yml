@@ -11,7 +11,10 @@ services:
       - ./config:/config
     environment:
       - TVR_USERNAME=admin
-      - TVR_PASSWORD=change-this-to-something-long
+      # Shorter than the eight characters TVR_PASSWORD requires, on purpose: the
+      # container refuses to start until this is replaced with a real password, rather
+      # than quietly running with a value anyone reading this file already knows.
+      - TVR_PASSWORD=EDIT-ME
       # Or, if nothing untrusted can reach the port — behind Tailscale or a VPN — and you
       # would rather have no login at all:
       # - TVR_AUTH=none

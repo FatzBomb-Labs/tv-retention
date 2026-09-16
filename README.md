@@ -18,7 +18,7 @@ services:
     volumes: ["./config:/config"]
     environment:
       - TVR_USERNAME=admin
-      - TVR_PASSWORD=something-long
+      - TVR_PASSWORD=EDIT-ME
 ```
 
 One volume. **No media mount**, no path mapping, no `PUID` juggling over a library: this

@@ -19,7 +19,8 @@ def load(**environment):
     import importlib
     import sys
     previous = {key: os.environ.get(key) for key in
-                ('TVR_USERNAME', 'TVR_PASSWORD', 'TVR_AUTH', 'TVR_PORT', 'TVR_SESSION_HOURS')}
+                ('TVR_USERNAME', 'TVR_PASSWORD', 'TVR_AUTH', 'TVR_PORT', 'TVR_SESSION_HOURS',
+                 'PUID', 'PGID', 'UMASK')}
     os.environ.update({key: '' for key in previous})
     os.environ.update(environment)
     try:
@@ -76,6 +77,48 @@ class Startup(unittest.TestCase):
         server = load(TVR_AUTH='none', TVR_PORT='', TVR_SESSION_HOURS='')
         self.assertEqual(server.PORT, 8787)
         self.assertEqual(server.SESSION_HOURS, 720)
+
+    def test_a_malformed_port_is_a_clear_startup_error_not_a_crash(self):
+        # int('abc') used to raise uncaught at import time, taking the whole process
+        # down with a traceback instead of the message every other bad setting gets.
+        server = load(TVR_AUTH='none', TVR_PORT='abc')
+        self.assertEqual(server.PORT, 8787, 'the fallback keeps the module importable')
+        problem = server.startup_error()
+        self.assertIn('TVR_PORT', problem)
+        self.assertIn('abc', problem)
+
+    def test_a_malformed_session_hours_is_a_clear_startup_error(self):
+        server = load(TVR_AUTH='none', TVR_SESSION_HOURS='forever')
+        self.assertEqual(server.SESSION_HOURS, 720)
+        self.assertIn('TVR_SESSION_HOURS', server.startup_error())
+
+    def test_a_malformed_puid_is_a_clear_startup_error(self):
+        server = load(TVR_AUTH='none', PUID='not-a-number')
+        self.assertEqual(server.PUID, 1000)
+        self.assertIn('PUID', server.startup_error())
+
+    def test_a_malformed_pgid_is_a_clear_startup_error(self):
+        server = load(TVR_AUTH='none', PGID='not-a-number')
+        self.assertEqual(server.PGID, 1000)
+        self.assertIn('PGID', server.startup_error())
+
+    def test_a_malformed_umask_is_a_clear_startup_error(self):
+        server = load(TVR_AUTH='none', UMASK='not-octal')
+        self.assertEqual(server.UMASK, 0o22)
+        self.assertIn('UMASK', server.startup_error())
+
+    def test_well_formed_puid_pgid_and_umask_still_work(self):
+        server = load(TVR_AUTH='none', PUID='99', PGID='100', UMASK='002')
+        self.assertEqual(server.PUID, 99)
+        self.assertEqual(server.PGID, 100)
+        self.assertEqual(server.UMASK, 0o002)
+        self.assertEqual(server.startup_error(), '')
+
+    def test_running_open_does_not_hide_a_malformed_integer(self):
+        # TVR_AUTH=none skips the login check; it must not also skip this one.
+        server = load(TVR_AUTH='none', TVR_PORT='not-a-port')
+        self.assertNotEqual(server.startup_error(), '')
+
 
 
 class Sessions(unittest.TestCase):
@@ -239,6 +282,46 @@ class Release(unittest.TestCase):
             (bare / 'app.js').write_text('one')
             self.assertEqual(self.server.build_release(bare)[0], digest,
                              'an unsupported file changed the digest')
+
+    def test_a_missing_assets_directory_is_a_clear_startup_error_not_a_crash(self):
+        # Path.iterdir() on a directory that does not exist used to raise uncaught at
+        # import time, taking the whole process down with a traceback instead of the
+        # message every other configuration problem gets.
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            missing = Path(base) / 'does-not-exist'
+            digest, files = self.server.build_release(missing)
+            self.assertEqual((digest, files), ('', {}))
+            problem = self.server.startup_error()
+            self.assertIn('assets directory', problem)
+            self.assertIn(str(missing), problem)
+
+    def test_an_assets_directory_with_nothing_shippable_is_a_clear_startup_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            directory = self.release(base)
+            (directory / 'notes.txt').write_text('nothing this server will serve')
+            digest, files = self.server.build_release(directory)
+            self.assertEqual(files, {})
+            self.assertIn('no assets found', self.server.startup_error())
+
+    def test_a_healthy_directory_after_a_broken_one_clears_the_startup_error(self):
+        # The error must describe the directory just checked, not the last one that
+        # happened to fail — a transient problem must not become a standing one.
+        import tempfile
+        with tempfile.TemporaryDirectory() as base:
+            self.server.build_release(Path(base) / 'does-not-exist')
+            self.assertNotEqual(self.server.startup_error(), '')
+            directory = self.release(base)
+            (directory / 'app.js').write_text('one')
+            self.server.build_release(directory)
+            self.assertEqual(self.server.startup_error(), '')
+
+    def test_the_real_shipped_assets_build_without_a_startup_error(self):
+        # The fix must not turn a healthy image into one that refuses to start.
+        digest, files = self.server.build_release(self.server.ASSETS)
+        self.assertTrue(files)
+        self.assertEqual(self.server.startup_error(), '')
 
 
 class Worker(unittest.TestCase):

@@ -46,7 +46,32 @@ def env(name: str, fallback: str = '') -> str:
     return (os.environ.get(name) or '').strip() or fallback
 
 
-PORT = int(env('TVR_PORT', '8787'))
+# Every environment variable env_int() could not parse, by name, with the raw value it
+# was given. Checked by startup_error() rather than left to crash the process: a typo in
+# PUID used to raise ValueError at import time, before the same clear "will not start"
+# message a short password gets ever had a chance to run.
+_bad_env: dict[str, str] = {}
+
+
+def env_int(name: str, fallback: int, base: int = 10) -> int:
+    """An integer environment variable, recorded and replaced rather than crashing.
+
+    The fallback keeps the module importable — PORT and the rest still have to be usable
+    numbers for everything below this to work — but the bad value is not silently
+    forgotten either: startup_error() reports exactly what was wrong, the same way it
+    already does for a missing password.
+    """
+    raw = env(name)
+    if not raw:
+        return fallback
+    try:
+        return int(raw, base)
+    except ValueError:
+        _bad_env[name] = raw
+        return fallback
+
+
+PORT = env_int('TVR_PORT', 8787)
 USERNAME = env('TVR_USERNAME')
 PASSWORD = env('TVR_PASSWORD')
 # The only way to run without a login, and it is a value nobody can forge. Sonarr kept a
@@ -55,7 +80,14 @@ PASSWORD = env('TVR_PASSWORD')
 # trusted to say where a request came from; an environment variable can be trusted to say
 # what the operator chose.
 OPEN = env('TVR_AUTH').lower() == 'none'
-SESSION_HOURS = int(env('TVR_SESSION_HOURS', '720'))
+SESSION_HOURS = env_int('TVR_SESSION_HOURS', 720)
+# Parsed here rather than where they are used, in take_the_volume(): every malformed
+# environment variable is reported by startup_error() the same way, before anything
+# tries to act on it — a container is not meant to learn from a traceback that PUID was
+# misspelled in the compose file.
+PUID = env_int('PUID', 1000)
+PGID = env_int('PGID', 1000)
+UMASK = env_int('UMASK', 0o22, base=8)
 
 MAX_BODY = 1024 * 1024
 COOKIE = 'tvr_session'
@@ -68,6 +100,11 @@ def startup_error() -> str:
     the half that deletes running unsupervised while the half that would notice is locked
     away, and the realistic way to reach it is a typo in a compose file six months from now.
     """
+    if _asset_error:
+        return f'TV Retention will not start: {_asset_error}.'
+    if _bad_env:
+        broken = ', '.join(f'{name}={value!r}' for name, value in sorted(_bad_env.items()))
+        return f'TV Retention will not start: not a whole number — {broken}.'
     if OPEN:
         return ''
     if not USERNAME or not PASSWORD:
@@ -157,10 +194,21 @@ def build_release(directory: Path = ASSETS) -> tuple[str, dict]:
     graph can reach outside the release it started from. That is also why the snapshot
     never reads the disk again: a browser holding half of an older graph must be refused
     the other half, not handed current bytes under a stale name.
+
+    A directory that cannot be read, or one with nothing shippable in it, used to raise
+    at import time — a raw traceback for what is really the same kind of problem as a
+    missing password, so it is recorded here and reported by startup_error() the same
+    way instead.
     """
+    global _asset_error
     files = {}
     digest = hashlib.sha256()
-    for path in sorted(directory.iterdir(), key=lambda item: item.name):
+    try:
+        entries = sorted(directory.iterdir(), key=lambda item: item.name)
+    except OSError as error:
+        _asset_error = f'could not read the assets directory ({directory}): {error}'
+        return '', {}
+    for path in entries:
         kind = PUBLIC_ASSETS.get(path.suffix.lower())
         if kind is None or not path.is_file():
             continue
@@ -170,9 +218,20 @@ def build_release(directory: Path = ASSETS) -> tuple[str, dict]:
         digest.update(b'\0')
         digest.update(data)
         digest.update(b'\0')
+    if not files:
+        _asset_error = f'no assets found in {directory}; the image may be built incorrectly'
+    else:
+        # Cleared, not just set on failure: a later, successful call — as when a test
+        # calls this directly more than once — must not leave a startup error standing
+        # from a directory that was checked before this one and no longer applies.
+        _asset_error = ''
     return digest.hexdigest()[:12], files
 
 
+# Set by build_release() below if the assets directory could not be read at all, or held
+# nothing shippable. Checked by startup_error() alongside every other configuration
+# problem, rather than left to crash the process before that check ever runs.
+_asset_error = ''
 RELEASE_DIGEST, RELEASE_FILES = build_release()
 RELEASE_BASE = f'/assets/{RELEASE_DIGEST}'
 
@@ -493,12 +552,18 @@ class Handler(BaseHTTPRequestHandler):
         password = (form.get('password') or [''])[0]
         if OPEN or not credentials_match(username, password):
             # A flat delay rather than a lockout: it makes guessing impractical without
-            # giving anyone a way to lock the operator out of their own tool.
-            _failures += 1
-            time.sleep(min(2.0, 0.25 * _failures))
+            # giving anyone a way to lock the operator out of their own tool. The counter
+            # is shared across every connection this threaded server handles, so it is
+            # guarded by the same lock _sessions already uses — the sleep itself happens
+            # outside it, so one slow attempt cannot serialise every other one.
+            with _lock:
+                _failures += 1
+                delay = min(2.0, 0.25 * _failures)
+            time.sleep(delay)
             return self.send(401, login_page('Wrong username or password.'),
                              'text/html; charset=utf-8', [('Cache-Control', 'no-store')])
-        _failures = 0
+        with _lock:
+            _failures = 0
         session = open_session()
         cookie = (f'{COOKIE}={session["token"]}; Path=/; HttpOnly; SameSite=Strict; '
                   f'Max-Age={SESSION_HOURS * 3600}')
@@ -561,8 +626,10 @@ def take_the_volume() -> None:
     # everything under /mnt/user — and its template sets that. It matters less here than
     # for its neighbours: this owns one config directory and never touches a library, so
     # there is no shared media ownership to get wrong.
-    uid, gid = int(env('PUID', '1000')), int(env('PGID', '1000'))
-    os.umask(int(env('UMASK', '022'), 8))
+    # Parsed at import, alongside PORT and SESSION_HOURS, and already checked by
+    # startup_error() — a malformed value never reaches here at all.
+    uid, gid = PUID, PGID
+    os.umask(UMASK)
     root = Path(env('TVR_CONFIG_DIR', '/config'))
     root.mkdir(parents=True, exist_ok=True)
     # Only what is not already right: a poster cache of three thousand files does not need

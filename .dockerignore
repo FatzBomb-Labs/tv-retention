@@ -1,0 +1,38 @@
+# Only src/, VERSION, BUILD and LICENSE ever enter the image (see the Dockerfile's COPY
+# lines); everything else here would still be sent to the Docker daemon, or a remote
+# builder, as part of the build context whether or not any instruction ever reads it.
+# `config/` in particular is runtime state that can hold real Sonarr API keys and
+# session data — it has no business leaving the host at all, build or otherwise.
+
+.git/
+.venv/
+.vscode/
+.idea/
+
+docs/
+tests/
+tools/
+
+# Runtime state: settings, sessions, journals, caches, posters, logs.
+config/
+data/
+state/
+runtime/
+*.log
+*.log.*
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+node_modules/
+
+*.bak
+*.backup
+*.tmp
+*.temp
+*.orig
+.DS_Store
+Thumbs.db

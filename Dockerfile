@@ -1,5 +1,12 @@
 # Standard library only, so there is nothing to install and nothing to audit for
 # vulnerabilities beyond the interpreter itself.
+#
+# The tag floats rather than pinning to a digest on purpose: `python:3.12-slim` still
+# receives Debian's own security patches on every rebuild, and nothing here automates
+# bumping a pinned digest when one ships. Pinned without that automation, this would
+# freeze in place and quietly stop receiving exactly the patches floating the tag gets
+# for free — a worse trade for a project this size than the reproducibility a pin buys.
+# Revisit this once a renewal process exists to keep a pin current.
 FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="TV Retention" \
