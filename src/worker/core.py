@@ -180,6 +180,16 @@ def _text(value, field, limit=512, required=False) -> str:
     return value
 
 
+def validate_text(value, field, limit=512, required=False) -> str:
+    """`_text`, named for callers outside this module.
+
+    Every other validator here is reached the same way, by a `validate_` name; a caller
+    in `actions.py` reaching for `_text` directly was the one exception, into a helper
+    this module never promised to keep in that exact shape.
+    """
+    return _text(value, field, limit, required)
+
+
 def _whole(value, field, low, high, allow_none=True):
     if value in (None, '', 'null'):
         if allow_none:

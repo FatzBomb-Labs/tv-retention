@@ -72,3 +72,47 @@ class MissingFolders(unittest.TestCase):
         not_created = [e for e in catalogue if e['episode_file_count'] == 0 and e['path'] not in present]
         self.assertEqual([e['path'] for e in broken], ['/mnt/user/media/TV/Has Files'])
         self.assertEqual([e['path'] for e in not_created], ['/mnt/user/media/TV/Never Imported'])
+
+
+class MediaManagement(unittest.TestCase):
+    """The recycle-bin configuration: read publicly, and written back only with the id
+    Sonarr itself returned — never a guessed one."""
+
+    def setUp(self):
+        from unittest import mock
+        from sonarr import Sonarr
+        self.instance = {'id': 'i1', 'name': 'Sonarr', 'url': 'http://sonarr:8989', 'api_key': 'a' * 32}
+        self.client = Sonarr(self.instance)
+        self.calls = []
+        self.patcher = mock.patch.object(Sonarr, '_request', autospec=True)
+        self.mock_request = self.patcher.start()
+
+    def tearDown(self):
+        self.patcher.stop()
+
+    def test_media_management_returns_the_document(self):
+        self.mock_request.return_value = {'id': 1, 'recycleBin': '/tv/.recycle'}
+        result = self.client.media_management()
+        self.assertEqual(result['recycleBin'], '/tv/.recycle')
+        self.mock_request.assert_called_once_with(self.client, 'GET', 'config/mediamanagement')
+
+    def test_an_unexpected_response_is_a_clear_error(self):
+        from sonarr import SonarrError
+        self.mock_request.return_value = ['not', 'a', 'document']
+        with self.assertRaises(SonarrError):
+            self.client.media_management()
+
+    def test_set_media_management_writes_with_the_ids_own_id(self):
+        media = {'id': 7, 'recycleBin': '/tv/.recycle'}
+        self.client.set_media_management(media)
+        self.mock_request.assert_called_once_with(
+            self.client, 'PUT', 'config/mediamanagement/7', body=media)
+
+    def test_a_missing_id_is_refused_rather_than_guessed(self):
+        # A hardcoded fallback here used to write to whatever document id 1 happened to
+        # name, silently, on the one Sonarr where the real id was not 1.
+        from sonarr import SonarrError
+        with self.assertRaises(SonarrError):
+            self.client.set_media_management({'recycleBin': '/tv/.recycle'})
+        self.mock_request.assert_not_called()
+

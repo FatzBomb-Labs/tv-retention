@@ -97,6 +97,26 @@ class Sonarr:
             raise SonarrError(f'{self.name}: that URL did not answer like Sonarr')
         return payload
 
+    def media_management(self) -> dict:
+        """Sonarr's media management configuration, including its recycle bin path."""
+        payload = self._request('GET', 'config/mediamanagement')
+        if not isinstance(payload, dict):
+            raise SonarrError(f'{self.name}: unexpected media management response')
+        return payload
+
+    def set_media_management(self, media: dict) -> None:
+        """Write Sonarr's media management configuration back, whole.
+
+        The id is Sonarr's own, for this one document, and it must be the one just read
+        rather than guessed: a wrong id is a write to whatever configuration that id
+        happens to name in this Sonarr, not a new document created under it.
+        """
+        media_id = media.get('id')
+        if not media_id:
+            raise SonarrError(f'{self.name}: Sonarr did not return an id for its media '
+                              'management configuration')
+        self._request('PUT', f'config/mediamanagement/{media_id}', body=media)
+
     def series(self) -> list:
         payload = self._request('GET', 'series')
         if not isinstance(payload, list):

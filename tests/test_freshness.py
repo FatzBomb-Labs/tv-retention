@@ -696,3 +696,35 @@ class SetMonitoredValidation(unittest.TestCase):
         self.assertEqual(actions._episode_ids(['1', 2, '3'], 'monitor'), [1, 2, 3])
         self.assertEqual(actions._episode_ids(None, 'monitor'), [])
         self.assertEqual(actions._episode_ids([], 'monitor'), [])
+
+
+class RecycleBinWiring(unittest.TestCase):
+    """`check_recycle_bin` and `action_enable_recycle_bin` through Sonarr's public
+    methods, end to end — `test_sonarr.MediaManagement` covers the methods themselves.
+    """
+
+    def setUp(self):
+        from unittest import mock
+        self.mock_request = mock.patch.object(Sonarr, '_request', autospec=True).start()
+        self.addCleanup(mock.patch.stopall)
+        self.settings = validate_settings({'instances': [INSTANCE]})
+        self.instance = self.settings['instances'][0]
+
+    def test_check_recycle_bin_reports_the_path_sonarr_holds(self):
+        self.mock_request.return_value = {'id': 1, 'recycleBin': '/tv/.recycle'}
+        self.assertEqual(main.check_recycle_bin(self.settings, self.instance), '/tv/.recycle')
+
+    def test_check_recycle_bin_is_blank_rather_than_raising_when_sonarr_cannot_answer(self):
+        from sonarr import SonarrError
+        self.mock_request.side_effect = SonarrError('unreachable')
+        self.assertEqual(main.check_recycle_bin(self.settings, self.instance), '')
+
+    def test_action_enable_recycle_bin_writes_with_sonarrs_own_id_not_a_guessed_one(self):
+        self.mock_request.return_value = {'id': 42, 'recycleBinCleanupDays': 7}
+        result = actions.action_enable_recycle_bin(
+            self.settings, {'instance_id': self.instance['id'], 'path': '/tv/.recycle'})
+        self.assertEqual(result['recycle_bin'], '/tv/.recycle')
+        put_calls = [call for call in self.mock_request.call_args_list if call.args[1] == 'PUT']
+        self.assertEqual(len(put_calls), 1)
+        self.assertEqual(put_calls[0].args[2], 'config/mediamanagement/42')
+

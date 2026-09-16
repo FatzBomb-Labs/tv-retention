@@ -1433,7 +1433,7 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
 def check_recycle_bin(settings: dict, instance: dict) -> str:
     """Sonarr's recycle bin path, or '' when it has none. Cached with the instance state."""
     try:
-        media = Sonarr(instance)._request('GET', 'config/mediamanagement') or {}
+        media = Sonarr(instance).media_management()
         return str(media.get('recycleBin') or '')
     except (SonarrError, Rejected):
         return ''

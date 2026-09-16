@@ -20,7 +20,8 @@ import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   describe_selectability, effective_rule, exclusion_summary, excluded_causes,
-                  new_id, next_episode, normalise, redact, validate_conditions, validate_settings)
+                  new_id, next_episode, normalise, redact, validate_conditions, validate_settings,
+                  validate_text)
 from sonarr import Sonarr, SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
@@ -693,11 +694,11 @@ def action_enable_recycle_bin(settings, request):
     from core import validate_path
     path = validate_path(request.get('path'), 'Recycle bin path')
     client = Sonarr(instance)
-    media = client._request('GET', 'config/mediamanagement') or {}
+    media = client.media_management()
     media['recycleBin'] = path
     if not media.get('recycleBinCleanupDays'):
         media['recycleBinCleanupDays'] = 7
-    client._request('PUT', f'config/mediamanagement/{media.get("id", 1)}', body=media)
+    client.set_media_management(media)
     log_line(settings, 'warning', f'{instance["name"]}: recycle bin set to {path}')
     return {'recycle_bin': path, 'ok_message': f'Sonarr will now move deleted files to {path}.'}
 
@@ -717,8 +718,7 @@ def action_run(settings, request):
 
 
 def action_test_tmdb(settings, request):
-    from core import _text
-    key = _text((request.get('tmdb') or {}).get('api_key'), 'TMDB API key', 128)
+    key = validate_text((request.get('tmdb') or {}).get('api_key'), 'TMDB API key', 128)
     if key in ('', '********'):
         key = (settings.get('tmdb') or {}).get('api_key', '')
     if not key:
