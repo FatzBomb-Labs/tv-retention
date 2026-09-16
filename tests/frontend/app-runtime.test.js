@@ -408,6 +408,39 @@ test('an actionable Run states the actual plan, and accepting it sends exactly o
   assert.equal(page.$('tvr-dialog').shown, 1, 'the run report opened');
 });
 
+test('a run that only removes queued series reports the removal, not "0 files deleted"', async () => {
+  // Removals are a separate list from the retention pass's own deleted/freed_bytes
+  // counters. A run with nothing to delete under retention but real series removed used
+  // to headline "0 files deleted" even though whole series, files and all, had just gone.
+  const page = await loadPage(() => ({
+    snapshot: snapshotFixture({
+      testMode: false,
+      plan: { actionable: 3, trustworthy: true, removals_by_action: { 'delete-series-files': 3 } },
+    }),
+    confirm: () => true,
+    run: () => ({ result: {
+      dry_run: false, planned: 0, deleted: 0, freed_bytes: 0, duration_seconds: 2, rules: [],
+      removals: [
+        { rule_id: 'r1', series_title: 'Below Deck Sailing Yacht', action: 'delete-series-files',
+          label: 'Ask Sonarr to delete the series and its files', ok: true, dry_run: false, error: '' },
+        { rule_id: 'r2', series_title: "That's My Jam", action: 'delete-series-files',
+          label: 'Ask Sonarr to delete the series and its files', ok: true, dry_run: false, error: '' },
+        { rule_id: 'r3', series_title: 'Weakest Link', action: 'delete-series-files',
+          label: 'Ask Sonarr to delete the series and its files', ok: true, dry_run: false, error: '' },
+      ],
+    } }),
+  }));
+  await page.flush();
+
+  page.click('tvr-run');
+  await page.flush();
+
+  const text = collectText(page.$('tvr-dialog-body'));
+  assert.ok(text.includes('3 series removed'), 'the headline must say what actually happened');
+  assert.ok(!text.includes('0 files deleted'),
+    'must not report "0 files deleted" when the retention pass never had anything to consider');
+});
+
 test('cancelling the Run confirmation sends no run request', async () => {
   const page = await loadPage(() => ({
     snapshot: snapshotFixture({

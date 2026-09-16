@@ -73,11 +73,22 @@ function createActivity({ api, refresh, getSnapshot, getSettings }) {
 
   // -- run results and history -------------------------------------------
   function showResult(result, title) {
-    dialog(`${title}: ${result.dry_run ? 'nothing was changed' : `${result.deleted} files deleted`}`, (body) => {
+    // Removals are a separate list from the retention pass's own deleted/freed_bytes
+    // counters, and the two never spoke to each other: a run that only removed queued
+    // series reported "0 files deleted" as its headline even though whole series, files
+    // and all, had just been asked of Sonarr — the removal cards further down said so,
+    // but the headline read as if nothing had happened.
+    const removed = (result.removals || []).filter((record) => record.ok && !record.dry_run).length;
+    const parts = [];
+    if (result.deleted) parts.push(`${plural(result.deleted, 'file')} deleted`);
+    if (removed) parts.push(`${plural(removed, 'series')} removed`);
+    const headline = result.dry_run ? 'nothing was changed' : (parts.join(', ') || 'nothing was deleted');
+    dialog(`${title}: ${headline}`, (body) => {
       (result.blocked || []).forEach((message) => body.append(el('div', { className: 'tvr-warning', textContent: message })));
       body.append(el('p', { textContent:
         `${result.planned} file(s) across ${result.rules.length} series in ${result.duration_seconds}s.`
-        + (result.dry_run ? ' Nothing was changed.' : ` ${bytes(result.freed_bytes)} reclaimed.`) }));
+        + (result.dry_run ? ' Nothing was changed.'
+           : ` ${bytes(result.freed_bytes)} reclaimed.` + (removed ? ` ${plural(removed, 'series')} removed.` : '')) }));
       (result.removals || []).forEach((record) => {
         body.append(el('div', { className: 'tvr-change-series' }, [
           el('strong', { textContent: record.series_title }),
