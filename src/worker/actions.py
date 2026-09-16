@@ -322,6 +322,24 @@ def action_exclusions(settings, request):
 
 
 
+def _episode_ids(value, field: str) -> list:
+    """A list of Sonarr episode ids from the request, or a clear rejection.
+
+    `int()` on a malformed entry raised uncaught before this, so a bad payload — a
+    non-numeric string, `null` mixed into the list, the field sent as something other
+    than a list — surfaced as "Unexpected backend error" instead of saying what was
+    actually wrong with the request.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise Rejected(f'{field} must be a list of episode ids.')
+    try:
+        return [int(item) for item in value]
+    except (TypeError, ValueError):
+        raise Rejected(f'{field} must be a list of episode ids.') from None
+
+
 def action_set_monitored(settings, request):
     """Set exactly the monitored flags the tree was left showing.
 
@@ -332,8 +350,8 @@ def action_set_monitored(settings, request):
     rule = next((r for r in settings.get('rules', []) if r['id'] == str(request.get('rule_id') or '')), None)
     if not rule:
         raise Rejected('That series is no longer here.')
-    monitor = [int(value) for value in (request.get('monitor') or [])]
-    unmonitor = [int(value) for value in (request.get('unmonitor') or [])]
+    monitor = _episode_ids(request.get('monitor'), 'monitor')
+    unmonitor = _episode_ids(request.get('unmonitor'), 'unmonitor')
     if not monitor and not unmonitor:
         return {'monitored': 0, 'unmonitored': 0}
     client = main.client_for(settings, rule['instance_id'])

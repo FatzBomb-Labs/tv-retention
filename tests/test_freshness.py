@@ -653,3 +653,46 @@ class TMDBGate(unittest.TestCase):
         # from an old build, the key alone must decide it either way.
         self.settings['tmdb'] = {'api_key': 'd' * 32, 'enabled': False}
         self.assertIsNotNone(main.tmdb_provider(self.settings))
+
+
+class SetMonitoredValidation(unittest.TestCase):
+    """`action_set_monitored`'s guard against a malformed request.
+
+    `int(value) for value in request.get('monitor')` raised uncaught on anything that
+    was not cleanly numeric, so a stray string, a `null` mixed into the list, or the
+    field arriving as something other than a list surfaced as "Unexpected backend
+    error" from `dispatch`'s broad catch, rather than a message that says what was
+    actually wrong with the request. None of these reach Sonarr, so no client mock is
+    needed here.
+    """
+
+    def setUp(self):
+        self.settings = validate_settings({
+            'instances': [INSTANCE],
+            'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
+                      'series_title': 'A', 'keep_days': 30}],
+        })
+
+    def test_a_non_numeric_id_is_rejected_with_a_clear_message(self):
+        with self.assertRaises(Rejected) as caught:
+            actions.action_set_monitored(self.settings, {'rule_id': 'r1', 'monitor': ['not-a-number']})
+        self.assertIn('monitor', str(caught.exception))
+
+    def test_a_field_sent_as_something_other_than_a_list_is_rejected(self):
+        with self.assertRaises(Rejected):
+            actions.action_set_monitored(self.settings, {'rule_id': 'r1', 'monitor': 'r1'})
+
+    def test_a_null_mixed_into_the_list_is_rejected(self):
+        with self.assertRaises(Rejected):
+            actions.action_set_monitored(self.settings, {'rule_id': 'r1', 'unmonitor': [1, None, 3]})
+
+    def test_a_missing_field_is_no_change_not_an_error(self):
+        result = actions.action_set_monitored(self.settings, {'rule_id': 'r1'})
+        self.assertEqual(result, {'monitored': 0, 'unmonitored': 0})
+
+    def test_well_formed_ids_are_still_accepted(self):
+        # Numeric strings arrive from JSON just as often as real ints; the guard must
+        # not start rejecting what already worked.
+        self.assertEqual(actions._episode_ids(['1', 2, '3'], 'monitor'), [1, 2, 3])
+        self.assertEqual(actions._episode_ids(None, 'monitor'), [])
+        self.assertEqual(actions._episode_ids([], 'monitor'), [])
