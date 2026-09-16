@@ -464,3 +464,90 @@ class KeepAlive(Serves):
         source = (context.ROOT / 'src' / 'worker' / 'server.py').read_text()
         block = source.split('def read_form')[1].split('def ')[0]
         self.assertIn('self.close_connection = True', block)
+
+
+class Posters(unittest.TestCase):
+    """The poster cache: bounded per response, and pruned of what Sonarr no longer holds."""
+
+    def setUp(self):
+        import tempfile
+        self.server = load(TVR_AUTH='none')
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = {'state_dir': str(Path(self.temp.name) / 'state'),
+                         'instances': [{'id': 'aaaaaaaaaaaa', 'name': 'Sonarr',
+                                       'url': 'http://sonarr.test', 'api_key': 'k'}]}
+        self.original_load_settings = self.server.load_settings
+        self.server.load_settings = lambda: self.settings
+        self.posters = Path(self.settings['state_dir']) / 'posters'
+        self.posters.mkdir(parents=True)
+
+    def tearDown(self):
+        self.server.load_settings = self.original_load_settings
+        self.temp.cleanup()
+
+    def poster_file(self, instance_id, series_id, stamp='abc'):
+        path = self.posters / f'{instance_id}-{series_id}-{stamp}.jpg'
+        path.write_bytes(b'fake poster bytes')
+        return path
+
+    def test_a_poster_for_a_removed_instance_is_pruned(self):
+        gone = self.poster_file('bbbbbbbbbbbb', 1)
+        self.server.prune_orphaned_posters(self.settings)
+        self.assertFalse(gone.exists())
+
+    def test_a_poster_for_a_series_no_longer_in_the_cached_catalogue_is_pruned(self):
+        gone = self.poster_file('aaaaaaaaaaaa', 999)
+        self.server.main.write_cache(
+            self.settings, 'catalogue.json',
+            {'aaaaaaaaaaaa': {'schema': self.server.main.SCHEMA,
+                              'series': [{'series_id': 1}, {'series_id': 2}]}})
+        self.server.prune_orphaned_posters(self.settings)
+        self.assertFalse(gone.exists())
+
+    def test_a_poster_for_a_series_still_in_the_catalogue_survives(self):
+        kept = self.poster_file('aaaaaaaaaaaa', 1)
+        self.server.main.write_cache(
+            self.settings, 'catalogue.json',
+            {'aaaaaaaaaaaa': {'schema': self.server.main.SCHEMA, 'series': [{'series_id': 1}]}})
+        self.server.prune_orphaned_posters(self.settings)
+        self.assertTrue(kept.exists())
+
+    def test_an_instance_with_no_cached_catalogue_yet_is_left_alone(self):
+        # A sync that has simply not run yet must not look like every series was deleted.
+        kept = self.poster_file('aaaaaaaaaaaa', 1)
+        self.server.prune_orphaned_posters(self.settings)
+        self.assertTrue(kept.exists())
+
+    def test_poster_bytes_rejects_a_response_larger_than_the_cap(self):
+        from unittest import mock
+
+        class Oversized:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, limit):
+                return b'x' * limit   # exactly at the cap-plus-one the code asks for
+        with mock.patch('server.urllib.request.urlopen', return_value=Oversized()):
+            status, body = self.server.poster_bytes(
+                {'series': ['1'], 'instance': ['aaaaaaaaaaaa'], 'stamp': ['s']})
+        self.assertEqual(status, 404)
+        self.assertEqual(body, b'')
+        self.assertFalse(list(self.posters.glob('*.jpg')), 'an oversized response is never written to disk')
+
+    def test_poster_bytes_accepts_a_response_within_the_cap(self):
+        from unittest import mock
+
+        class Fits:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, limit):
+                return b'x' * 100
+        with mock.patch('server.urllib.request.urlopen', return_value=Fits()):
+            status, body = self.server.poster_bytes(
+                {'series': ['1'], 'instance': ['aaaaaaaaaaaa'], 'stamp': ['s']})
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'x' * 100)
+

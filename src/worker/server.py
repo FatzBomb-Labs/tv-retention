@@ -241,6 +241,52 @@ def login_page(error: str) -> bytes:
 
 # -- the poster proxy -------------------------------------------------------
 
+# Ten times the 250px size the comment below expects. Sonarr answering with something far
+# larger than a poster — a misconfigured URL, a proxy's error page, anything that is not
+# actually mediacover — must not be buffered into memory just because it arrived with a
+# 200 status.
+MAX_POSTER_BYTES = 2 * 1024 * 1024
+
+# How long a poster cache is trusted before its instance and series are checked against
+# what Sonarr currently holds. A series removed from Sonarr — or a whole instance removed
+# from settings — otherwise left its posters on disk forever, since nothing ever asks for
+# them again to trigger the per-series cleanup below. Bounded to once a day and run from
+# an ordinary request rather than a scan on every one: artwork for a series that is gone
+# is not urgent to reclaim, and a browser never waits on it either way.
+POSTER_PRUNE_SECONDS = 24 * 3600
+_last_poster_prune = 0.0
+
+
+def prune_orphaned_posters(settings: dict) -> None:
+    """Remove cached posters whose instance or series no longer exists.
+
+    Conservative by design: an instance with no cached catalogue yet is left alone rather
+    than guessed at, so a sync that has simply not run yet can never look like every one
+    of its series was deleted.
+    """
+    directory = Path(state_dir(settings)) / 'posters'
+    if not directory.is_dir():
+        return
+    instances = {i['id'] for i in settings.get('instances') or []}
+    catalogue = main.read_cache(settings, 'catalogue.json')
+    known_series = {}
+    for path in directory.glob('*.jpg'):
+        parts = path.stem.split('-')
+        if len(parts) != 3:
+            continue
+        instance_id, series_id, _stamp = parts
+        if instance_id not in instances:
+            path.unlink(missing_ok=True)
+            continue
+        if instance_id not in known_series:
+            entry = catalogue.get(instance_id) or {}
+            known_series[instance_id] = ({str(s.get('series_id')) for s in entry.get('series') or []}
+                                         if entry.get('schema') == main.SCHEMA else None)
+        known = known_series[instance_id]
+        if known is not None and series_id not in known:
+            path.unlink(missing_ok=True)
+
+
 def poster_bytes(query: dict) -> tuple[int, bytes]:
     """One poster, through the plugin rather than from it.
 
@@ -263,6 +309,13 @@ def poster_bytes(query: dict) -> tuple[int, bytes]:
     if not instance:
         return 404, b'No such Sonarr instance'
 
+    global _last_poster_prune
+    now = time.monotonic()
+    if now - _last_poster_prune > POSTER_PRUNE_SECONDS:
+        _last_poster_prune = now
+        with contextlib.suppress(OSError):
+            prune_orphaned_posters(settings)
+
     # Sonarr's own artwork path carries its last-write marker, so a new picture is a new
     # file. Keyed on the series alone, the first poster ever fetched was served for good.
     stamp = hashlib.md5(query.get('stamp', [''])[0].encode('utf-8')).hexdigest()[:12]
@@ -280,10 +333,12 @@ def poster_bytes(query: dict) -> tuple[int, bytes]:
     request.add_header('X-Api-Key', instance['api_key'])
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
-            body = response.read()
+            # One byte past the cap is enough to know it is oversized, without reading an
+            # unbounded body into memory to find out.
+            body = response.read(MAX_POSTER_BYTES + 1)
     except (urllib.error.URLError, OSError, ValueError):
         return 404, b''
-    if not body:
+    if not body or len(body) > MAX_POSTER_BYTES:
         return 404, b''
     # Whatever this series looked like before. Left behind, every artwork change would add
     # a file and remove none.
