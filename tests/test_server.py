@@ -634,3 +634,27 @@ class Posters(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, b'x' * 100)
 
+    def test_a_pruning_failure_never_breaks_the_poster_request_it_rode_in_on(self):
+        # contextlib.suppress(OSError) used to be the only guard here; a malformed
+        # catalogue entry — not written by this app's own code, but not impossible —
+        # raises AttributeError instead, which was not suppressed and would have taken
+        # the whole request down with it.
+        from unittest import mock
+        self.poster_file('aaaaaaaaaaaa', 1)
+        self.server.main.write_cache(
+            self.settings, 'catalogue.json',
+            {'aaaaaaaaaaaa': {'schema': self.server.main.SCHEMA, 'series': ['not-a-dict']}})
+
+        class Fits:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, limit):
+                return b'freshly fetched'
+        with mock.patch('server.urllib.request.urlopen', return_value=Fits()):
+            status, body = self.server.poster_bytes(
+                {'series': ['2'], 'instance': ['aaaaaaaaaaaa'], 'stamp': ['s']})
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'freshly fetched')
+

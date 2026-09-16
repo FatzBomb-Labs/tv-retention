@@ -372,7 +372,10 @@ def poster_bytes(query: dict) -> tuple[int, bytes]:
     now = time.monotonic()
     if now - _last_poster_prune > POSTER_PRUNE_SECONDS:
         _last_poster_prune = now
-        with contextlib.suppress(OSError):
+        # Best effort, never fatal: a malformed catalogue cache — hand-edited, or from a
+        # schema this code has never seen — must not turn a background cleanup pass into
+        # a failed poster request. Whatever it misses this time is tried again tomorrow.
+        with contextlib.suppress(Exception):
             prune_orphaned_posters(settings)
 
     # Sonarr's own artwork path carries its last-write marker, so a new picture is a new

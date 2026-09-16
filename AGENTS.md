@@ -12,7 +12,7 @@ throughout would churn the file that records why they exist.
 There is no usable Python in the development environment. Run `./tools/check-on-host.sh`,
 or `tools\check-on-host.ps1` from Windows, which stages the source under `/tmp` on
 fatzserver-host, runs `python3 -m unittest discover -s tests`, imports every worker module, and
-syntax-checks every shipped module. The suite is 507 Python tests plus 13 frontend runtime
+syntax-checks every shipped module. The suite is 576 Python tests plus 20 frontend runtime
 tests, with no expected failures. Both entry points send the same remote script — the
 PowerShell one reads it out of the shell script rather than restating it — and both honour
 `TVR_HOST` for the ssh target, defaulting to `fatzserver-host`.
@@ -23,11 +23,12 @@ every test reaching `server.py` errors out, and `core.normalise` calls `os.path.
 which rewrites `/tv/x` to `\tv\x` and fails a mapping assertion that is correct in the
 container. Both are artifacts of the platform, not faults. What *does* run locally, and is
 worth using for a fast inner loop before the real gate, is the frontend suite
-(`node --experimental-vm-modules --test tests/frontend/*.test.js`) and the two pure
-source-reading modules, with UTF-8 mode forced so `app.js` decodes:
-`$env:PYTHONUTF8=1; python -m unittest discover -s tests -p test_build.py` (142 tests) and
-the same for `test_migration.py` (33). Those cover most of what the interface refactor
-touches; everything else waits for the host.
+(`node --experimental-vm-modules --test tests/frontend/*.test.js`) and the pure
+source-reading and filesystem-only modules, with UTF-8 mode forced so `app.js` decodes:
+`$env:PYTHONUTF8=1; python -m unittest discover -s tests -p test_build.py` (156 tests) and
+the same for `test_migration.py` (45) and `test_store.py` (12, `store.py` needs no `fcntl`
+either). Those cover most of what the interface refactor touches; everything else waits
+for the host.
 
 To see it actually running, build the image on the host and point it at a *copy* of the
 settings with the schedule forced off. Never the original, and never a container that could
@@ -88,7 +89,6 @@ fact that there is currently nothing to audit but the interpreter.
   typed confirmation rather than by a mode.
 - The Run button may only be hidden on a complete, current plan. A stale or partial
   reading must never be presented as "nothing to do".
-- Media files Sonarr does not know about are reported, never deleted.
 - An exclusion outranks every rule, including the series' own. It is decided before
   anything else and it is the one answer never weighed against another, which is what
   makes it worth having: a keep window is a policy, and an exclusion is an exception to

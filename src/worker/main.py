@@ -713,6 +713,16 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     holds — `process_rule`'s own fetch for the same rule, moments earlier in the same
     run — so this stores it and returns it exactly as a fetch here would, without asking
     Sonarr for the same series twice.
+
+    One difference is worth knowing rather than fixing: `preloaded` comes from
+    `collect_episodes`, which fills air dates from TMDB when a key is configured; the
+    fetch below never does. A `process_rule` run therefore stores a TMDB-filled reading,
+    which a later, unrelated `monitoring_for(force=True)` call — the post-run refresh, or
+    `apply_removals`'s `monitor-in-frame` action, neither of which has a preloaded reading
+    to hand in — then overwrites with a plain one. Nothing acts on the stale write: the
+    run that produced it already used the richer data in memory for its own decisions,
+    and the next `process_rule` pass fills the cache in again. What can flicker is only
+    what the interface shows from the cache in between, never what gets deleted.
     """
     if preloaded is not None:
         series = series_record(settings, rule)

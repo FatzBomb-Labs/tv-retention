@@ -1,7 +1,13 @@
 # Validation record
 
-Last run: 2026-09-11, from Windows via `tools\check-on-host.ps1` against fatzserver-host
-(Unraid 7.3.2, Python 3.11.15, Node 22.18.0).
+Last run: 2026-09-16, from Windows via `tools\check-on-host.ps1` against fatzserver-host
+(Unraid 7.3.2, Python 3.11.15, Node 22.18.0), plus a manual image build and container
+smoke test on the same host (Docker 29.5.3). This run follows the audit fix pass covering
+the TMDB provider gate, the season exclusion picker, three async settings-lookup guards,
+the duplicate per-rule Sonarr read, the log offset drift, the `state_dir` probe cost,
+monitoring-id validation, poster bounds and pruning, and the container/startup hardening
+in [AGENTS.md](../AGENTS.md). Every fix carries a regression test verified failing against
+its pre-fix source and passing against the fix, in addition to the full run below.
 
 ## Automated
 
@@ -11,33 +17,34 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 507 tests, all pass |
+| `python3 -m unittest discover -s tests` | 577 tests, all pass |
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors, checked as ES modules — nineteen files now: the entry plus `format`, `dom`, `storage`, `episode-trees`, `changes`, `transport`, `feedback`, `activity`, `settings`, `checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`, `connections`, `library` |
-| `node --test tests/frontend/*.test.js` | 13 tests, all pass — 8 runtime flows, 4 settings-contract tests, plus module-import purity |
-| `docker build` | 128 MB image — built 2026-09-11 from the v0.3.0 build 5 release |
+| `node --test tests/frontend/*.test.js` | 20 tests, all pass — 15 runtime flows (four new: the exclusion picker, a failed library read, and the two async-guard races), 4 settings-contract tests, plus module-import purity |
+| `docker build` | builds clean from the staged tree; see "The image, built and started" below |
 | Container, end to end | refuses to start unconfigured; 303 to /login without a session; 401 on a bad password; 403 on a good session with a wrong CSRF token; the deployed copy migrated settings v10 to v11; a percent-encoded traversal 404s; /config written as the requested uid with no chown asked |
 
 ### Coverage by area
 
 | File | Tests | What it holds |
 |---|---|---|
-| `test_build.py` | 150 | The interface, checked statically |
-| `test_monitoring.py` | 34 | The two modes, the keep frame, and what each one asks Sonarr to do |
-| `test_freshness.py` | 42 | Reading ages, staleness, what may be shown as current |
-| `test_migration.py` | 36 | Settings v1 → v11, each step and the whole chain |
+| `test_build.py` | 156 | The interface, checked statically |
+| `test_monitoring.py` | 36 | The two modes, the keep frame, and what each one asks Sonarr to do |
+| `test_freshness.py` | 60 | Reading ages, staleness, what may be shown as current, the TMDB gate, the one-read-per-rule guarantee (planning and execution both), and the recycle-bin wiring |
+| `test_migration.py` | 45 | Settings v1 → v11, each step and the whole chain |
 | `test_schedules.py` | 26 | When a job is due, including what cron cannot express |
 | `test_retention.py` | 45 | Every condition, every keep mode, air-date precedence, the guards |
 | `test_mapping.py` | 19 | The Sonarr payload as it actually arrives, through the real client |
 | `test_cache.py` | 16 | Cache keys derived from the mapping's shape |
 | `test_queue.py` | 15 | Queued removals and the check queue |
-| `test_settings.py` | 38 | Validation, redaction, injection and traversal rejection, one rule per series |
-| `test_names.py` | 20 | Names each module can reach, names nothing uses, alert display rules |
+| `test_settings.py` | 37 | Validation, redaction, injection and traversal rejection, one rule per series |
+| `test_names.py` | 22 | Names each module can reach, names nothing uses, alert display rules |
 | `test_presets.py` | 10 | Shared values, and what a preset may not do |
 | `test_progress.py` | 12 | The progress marker, the banner over it, and what the header totals |
-| `test_sonarr.py` | 9 | Rule-to-series matching, and ambiguity refused rather than guessed |
+| `test_sonarr.py` | 13 | Rule-to-series matching, ambiguity refused rather than guessed, and the media-management methods a recycle-bin write goes through |
 | `test_unaired.py` | 9 | Unaired seasons, and the next episode due |
-| `test_server.py` | 26 | What the front door refuses, guards and lets through — and the release namespace on the wire |
+| `test_server.py` | 44 | What the front door refuses, guards and lets through, the release namespace on the wire, malformed startup configuration, and the poster cache's bounds and pruning |
+| `test_store.py` | 12 | `read_log`'s byte-offset tracking and `state_dir`'s writability cache — new this run, both run locally, no `fcntl` needed |
 
 `test_build.py` is the largest because the interface is checked statically: it is the file
 with no runtime under test, so the guards that would otherwise be a browser sit here.
@@ -49,6 +56,33 @@ authentication and a CSRF token by emhttp and never had to be right about either
 its tests found that `TVR_PORT=` — set but empty, a realistic way to write a compose file —
 would have taken the container down at startup, because `os.environ.get`'s default applies
 to a variable that is absent rather than one set to nothing.
+
+## The image, built and started
+
+Built 2026-09-16 on fatzserver-host from the same tree this validation run tested, tagged
+`tv-retention:smoketest-build10` and removed afterwards — the host's own `tv-retention-demo`
+container (build 9, a separate, longer-running instance) was never touched, stopped, or
+read from. `docker build` completed clean, eight steps, no cache misses beyond the source
+copy.
+
+| Check | Result |
+|---|---|
+| No `TVR_USERNAME`/`TVR_PASSWORD` | exits immediately, code 1, the same two-paragraph message `startup_error()` returns — no traceback |
+| `TVR_USERNAME`/`TVR_PASSWORD` set | starts, healthy within 3s, one clean log line (`TV Retention listening on :8787`) |
+| `GET /` with no session | 303 to `/login` |
+| `GET /health` | 200 |
+| `/login` page | carries a release digest (`/assets/<12 hex>/icon-32.png`); fetching that exact asset through it returns 200 |
+| `POST /login`, wrong password | 401 |
+| `POST /login`, correct password | 303, session cookie set |
+| `/config` after start | owned by uid/gid 1000 (the `PUID`/`PGID` default), no `chown` asked of the operator |
+| Container logs across the whole session | the one startup line — no error, traceback, or 500 |
+
+This exercises the container/startup hardening directly: `env_int`'s parsing (a real,
+unmalformed `TVR_USERNAME`/`TVR_PASSWORD` through the whole path), `build_release()`
+succeeding against the real shipped assets, and `_failures`' lock guarding a real wrong
+password followed by a real correct one. It does not exercise Sonarr, TMDB, or a deletion —
+none of those need a container to test and none were in scope for this pass. See "Not yet
+exercised" below for what still is.
 
 ## Live, read-only, against 3022 series and 36 rules
 

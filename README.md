@@ -404,7 +404,6 @@ rests on an estimate rather than a real air date.
 - **Deleting always unmonitors** — not a setting, so no configuration can build a
   fetch-and-delete loop.
 - **Specials** — season 0 is excluded unless you opt in.
-- **Unknown files** — media Sonarr does not know about is reported, never deleted.
 - **Journal** — every run appends a full record to `journal.jsonl`, including the reason for
   each file.
 - **Two-pass execution** — the plan is re-derived immediately before deleting, so a file
