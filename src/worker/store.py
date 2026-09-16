@@ -18,6 +18,7 @@ import datetime as dt
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from core import CACHE_SCHEMA, DEFAULTS, Rejected, atomic_json, validate_settings
@@ -84,16 +85,32 @@ def save_settings(settings: dict) -> None:
     atomic_json(CONFIG, settings)
 
 
+# How long a directory that just proved writable is trusted without probing again. This
+# function runs on every cache read, cache write, log line and journal append, so writing
+# and unlinking a probe file on every single call was steady churn worth avoiding on
+# flash-backed storage — but the reason the probe exists at all is to notice the array
+# going down, so it is a cache with a short lifetime rather than a fact learned once and
+# believed forever.
+WRITABLE_RECHECK_SECONDS = 60
+_writable_since: dict[str, float] = {}
+
+
 def state_dir(settings: dict) -> Path:
     """Where journals and caches live. Falls back to the flash config if the array is down."""
     directory = Path(settings.get('state_dir') or DEFAULTS['state_dir'])
+    key = str(directory)
+    now = time.monotonic()
+    if now - _writable_since.get(key, -WRITABLE_RECHECK_SECONDS) < WRITABLE_RECHECK_SECONDS:
+        return directory
     try:
         directory.mkdir(parents=True, exist_ok=True)
         probe = directory / '.writable'
         probe.write_text('')
         probe.unlink()
+        _writable_since[key] = now
         return directory
     except OSError:
+        _writable_since.pop(key, None)
         fallback = CONFIG.parent / 'state'
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
@@ -296,13 +313,21 @@ def read_log(settings: dict, offset: int = 0, limit: int = 65536) -> dict:
         offset = 0
     if offset <= 0:
         offset = max(0, size - limit)
+    # Read as bytes and decode afterwards, rather than seeking and reading a text stream:
+    # `read(limit)` on a text file reads `limit` *characters*, and re-encoding what came
+    # back to count the bytes consumed only agrees with what was actually read as long as
+    # every byte decoded cleanly. A malformed byte under `errors='replace'` becomes one
+    # replacement character that re-encodes to three bytes while consuming as few as one,
+    # so the offset drifted and the next poll could skip text or repeat it. A byte offset
+    # computed from bytes read cannot drift, whatever is in them.
     try:
-        with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+        with open(path, 'rb') as handle:
             handle.seek(offset)
-            text = handle.read(limit)
+            raw = handle.read(limit)
     except OSError:
         return {'offset': 0, 'size': size, 'text': ''}
-    return {'offset': offset + len(text.encode('utf-8')), 'size': size, 'text': text}
+    return {'offset': offset + len(raw), 'size': size, 'text': raw.decode('utf-8', errors='replace')}
+
 
 
 
