@@ -132,6 +132,25 @@ class Freshness(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
         self.assertIn('ended', state)
 
+    def test_a_run_reads_each_matched_series_once(self):
+        # process_rule used to fetch the series' episodes for the deletion decision, then
+        # ask monitoring_for(force=True) to fetch the same series again for the same run —
+        # doubling the one call Sonarr's episode list actually costs.
+        outcome = main.process_rule(self.settings, self.rule, None, dry_run=True)
+        self.assertTrue(outcome['ok'], outcome.get('error'))
+        episode_calls = [call for call in self.client.calls if call[0] == 'episodes']
+        self.assertEqual(episode_calls, [('episodes', 1)],
+                         'one Sonarr episode read for the whole rule, not two')
+
+    def test_a_run_still_reconciles_monitoring_from_the_one_read(self):
+        # The optimisation must not cost the reconciliation its own data: fileless
+        # episodes still need to be there for monitoring even though evaluate() never
+        # sees them, and the store still ends up with the full reading.
+        main.process_rule(self.settings, self.rule, None, dry_run=True)
+        stored, series, stamp = main.episode_cache(self.settings, self.rule)
+        self.assertEqual(len(stored), 5)
+        self.assertTrue(stamp)
+
     def test_each_rule_is_stored_on_its_own(self):
         # One file for everything would mean a single series check rewriting them all.
         main.episodes_for(self.settings, self.rule)

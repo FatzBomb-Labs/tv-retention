@@ -204,8 +204,14 @@ def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> list:
     Everything the retention pass needs — sizes, air dates, import dates, monitoring —
     arrives with the episodes. Sonarr owns the filesystem; the plugin only asks it what it
     has and tells it what to remove.
+
+    Fetched with `files_only=False`: the request to Sonarr is identical either way — the
+    flag only filters the mapped result — and a run also reconciles monitoring for
+    episodes with no file, which `files_only=True` would silently drop. Callers that only
+    want what could actually be deleted filter to `has_file` themselves, the same way
+    `monitoring_for` already does.
     """
-    episodes = client.episodes(rule['series_id'])
+    episodes = client.episodes(rule['series_id'], files_only=False)
     if tmdb and rule.get('tvdb_id'):
         with contextlib.suppress(TMDBError):
             fill_air_dates(episodes, tmdb, rule['tvdb_id'])
@@ -467,9 +473,12 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     # Phase one: bring monitoring in line with the keep window, before anything is
     # removed. Doing it first means the run leaves Sonarr consistent even if the deletion
     # pass is stopped by a guard.
-    # A run reads Sonarr for itself. Everything it is about to change is decided here, and
-    # a stored reading is the one thing that must not stand behind a write.
-    reconciled = reconcile_monitoring(settings, rule, monitoring_for(settings, rule, force=True), dry_run)
+    # A run reads Sonarr for itself, but only once: `episodes` above is that reading, full
+    # and fresh, so it is handed in here rather than asked for a second time. A stored
+    # reading is still the one thing that must not stand behind a write, which is what
+    # `preloaded` preserves — it is stored exactly as a fetch here would be.
+    reconciled = reconcile_monitoring(
+        settings, rule, monitoring_for(settings, rule, force=True, preloaded=episodes), dry_run)
     outcome['monitored'] = reconciled['monitored']
     outcome['unmonitored_frame'] = reconciled['unmonitored']
     outcome['searched'] = reconciled['searched']
@@ -481,7 +490,11 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool) -> dict:
     if reconciled['error']:
         outcome['error'] = reconciled['error']
 
-    decision = evaluate(episodes, active, settings)
+    # Deletion only ever looks at what is actually on disk: `episodes` above also carries
+    # the fileless ones monitoring needed, and each of those has a synthetic path
+    # (`sonarr:episode:<id>`) that would otherwise be a real, if empty, delete candidate.
+    present = [episode for episode in episodes if episode.get('has_file')]
+    decision = evaluate(present, active, settings)
     outcome['considered'] = decision['considered']
     outcome['kept'] = len(decision['keep'])
     outcome['protected'] = len(decision['protected'])
@@ -685,7 +698,8 @@ def series_record(settings: dict, rule: dict) -> dict:
         return {}
 
 
-def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool = False) -> tuple:
+def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool = False,
+                 preloaded: list = None) -> tuple:
     """One rule's reading of Sonarr: its episodes, its series record, and when it was read.
 
     Fetches when asked to, when nothing is stored, or when what is stored has aged past
@@ -694,7 +708,15 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
 
     The series record is stored with the episodes rather than read separately, or serving
     a cached reading would still cost a call — a small one, but one per series per check.
+
+    `preloaded`, when given, is a fresh full reading of the same series the caller already
+    holds — `process_rule`'s own fetch for the same rule, moments earlier in the same
+    run — so this stores it and returns it exactly as a fetch here would, without asking
+    Sonarr for the same series twice.
     """
+    if preloaded is not None:
+        series = series_record(settings, rule)
+        return preloaded, series, store_episodes(settings, rule, preloaded, series), False
     cached, series, fetched_at = episode_cache(settings, rule)
     ttl = int((settings.get('health') or {}).get('ttl_hours', 24)) * 3600
     age = age_seconds(fetched_at)
@@ -1353,7 +1375,8 @@ def tick() -> int:
 
 
 
-def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: bool = False) -> dict:
+def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: bool = False,
+                   preloaded: list = None) -> dict:
     """Everything one check knows about a series: monitoring, lifecycle, and the plan.
 
     Entirely from Sonarr. Sizes, air dates, import dates, monitoring and season numbers all
@@ -1362,6 +1385,8 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
     The episodes come from the store unless `force` is set or they have aged out, so
     re-deciding what a rule would do costs nothing. Everything below the fetch is
     arithmetic, and it is redone every time.
+
+    `preloaded` passes a fresh reading straight through to `episodes_for`; see there.
     """
     base = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'], 'ok': True}
     if rule.get('match_status') != 'matched':
@@ -1369,7 +1394,8 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
                     status='unmatched', label='Not matched to Sonarr')
     try:
         active = effective_rule(rule, settings.get('profiles'))
-        episodes, series, read_at, from_cache = episodes_for(settings, rule, force=force, offline=offline)
+        episodes, series, read_at, from_cache = episodes_for(settings, rule, force=force, offline=offline,
+                                                              preloaded=preloaded)
     except Rejected as error:
         return dict(base, ok=False, error=str(error), status='unmatched', label='Could not read Sonarr')
 
