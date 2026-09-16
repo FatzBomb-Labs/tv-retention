@@ -50,6 +50,15 @@ class Counter:
         self.calls.append(('series_one', series_id))
         return dict(self._series)
 
+    def set_monitored(self, episode_ids, monitored):
+        self.calls.append(('set_monitored', tuple(episode_ids), monitored))
+
+    def unmonitor(self, episode_ids):
+        self.calls.append(('unmonitor', tuple(episode_ids)))
+
+    def delete_episode_file(self, file_id):
+        self.calls.append(('delete_episode_file', file_id))
+
 
 class Freshness(unittest.TestCase):
     def setUp(self):
@@ -141,6 +150,29 @@ class Freshness(unittest.TestCase):
         episode_calls = [call for call in self.client.calls if call[0] == 'episodes']
         self.assertEqual(episode_calls, [('episodes', 1)],
                          'one Sonarr episode read for the whole rule, not two')
+
+    def test_a_real_run_still_reads_once_and_deletes_and_unmonitors_correctly(self):
+        # The dry-run test above proves the read count; this proves the consolidation
+        # did not disturb what actually gets written to Sonarr once dry_run is False —
+        # every episode here is 395+ days old against a 30-day keep window, so all five
+        # are expected to be deleted and unmonitored.
+        outcome = main.process_rule(self.settings, self.rule, None, dry_run=False)
+        self.assertTrue(outcome['ok'], outcome.get('error'))
+        episode_calls = [call for call in self.client.calls if call[0] == 'episodes']
+        self.assertEqual(episode_calls, [('episodes', 1)],
+                         'one Sonarr episode read even on the path that actually deletes')
+
+        deletes = [call for call in self.client.calls if call[0] == 'delete_episode_file']
+        self.assertEqual(len(deletes), 5, 'every episode outside the keep window is deleted')
+        self.assertEqual({action['ok'] for action in outcome['deleted']}, {True})
+
+        unmonitor_calls = [call for call in self.client.calls if call[0] == 'unmonitor']
+        self.assertTrue(unmonitor_calls, 'deleting a file must still unmonitor it — never optional')
+        unmonitored_ids = set()
+        for call in unmonitor_calls:
+            unmonitored_ids.update(call[1])
+        self.assertEqual(unmonitored_ids, {1, 2, 3, 4, 5},
+                         'every deleted episode is unmonitored, whichever call did it')
 
     def test_a_run_still_reconciles_monitoring_from_the_one_read(self):
         # The optimisation must not cost the reconciliation its own data: fileless
