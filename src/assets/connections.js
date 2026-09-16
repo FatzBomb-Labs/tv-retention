@@ -40,6 +40,10 @@ export function createConnections({ api, getSettings, getSnapshot, saveSettings,
         control.input.disabled = true;
         guarded('', async () => {
           const target = (getSettings().instances || []).find((other) => other.id === instance.id);
+          // The card can outlive the instance it names if a concurrent refresh removed
+          // it between the click and this line; writing to it anyway would silently
+          // invent the instance back into the settings just saved.
+          if (!target) { renderInstances(); throw new Error('That Sonarr instance is no longer here.'); }
           target.enabled = wanted;
           try {
             await saveSettings(null, true);

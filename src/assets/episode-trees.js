@@ -102,14 +102,27 @@ function exclusionTree(seasons, current) {
         el('span', { className: 'tvr-tree-note tvr-tree-why', textContent: why }),
         watchCell,
       ]));
-      if (!isAuto) ticks.push({ tick, episode });
+      // The entry created here, not looked up later: pushing it before the listener
+      // closes over it means the listener updates the one true record of this tick's
+      // hand-picked state rather than searching for it on every change.
+      const entry = isAuto ? null : { tick, episode, picked: tick.checked };
+      if (entry) ticks.push(entry);
       watched.push({ watch, episode, was: !!episode.monitored });
-      tick.addEventListener('change', refresh);
+      // While the season box is checked every tick here is disabled and forced on, and a
+      // disabled control cannot fire 'change', so this only ever runs from an actual
+      // click — which is exactly when there is a new hand-pick worth remembering.
+      tick.addEventListener('change', () => {
+        if (entry) entry.picked = tick.checked;
+        refresh();
+      });
     });
     box.addEventListener('change', () => {
       wholeSeason = box.checked;
+      // Turning the season off restores what was hand-picked before it went on, rather
+      // than leaving every box checked with nothing left to turn it off: the box existed
+      // so unticking it could mean something again.
       ticks.forEach((entry) => { entry.tick.disabled = wholeSeason;
-                                 if (wholeSeason) entry.tick.checked = true; });
+                                 entry.tick.checked = wholeSeason ? true : entry.picked; });
       refresh();
     });
     ticks.forEach((entry) => { entry.tick.disabled = wholeSeason; });

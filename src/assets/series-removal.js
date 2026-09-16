@@ -60,6 +60,9 @@ function queuedBanner(rule) {
   const undo = el('button', { type: 'button', className: 'tvr-action', textContent: 'Undo' });
   undo.addEventListener('click', () => guarded('', async () => {
     const target = (getSettings().rules || []).find((other) => other.id === rule.id);
+    // A concurrent refresh can replace the whole settings document while this waits on
+    // the operator, and silently doing nothing would look identical to success.
+    if (!target) throw new Error('That series is no longer in the library. Nothing was changed.');
     target.queue = Object.assign({}, target.queue, { removal: null });
     await saveSettings('Removal cancelled.');
     renderDetails();
@@ -138,6 +141,11 @@ function deleteSeries(rule) {
       done = parts.length ? ` ${parts.join(', ')} in Sonarr.` : '';
     }
     const target = (getSettings().rules || []).find((other) => other.id === rule.id);
+    // The Sonarr write above can take up to ninety seconds; a concurrent refresh can
+    // have replaced the settings document by the time it returns. Silently doing nothing
+    // here would tell the operator the removal queued when it did not — worse, after a
+    // monitoring change that really did happen.
+    if (!target) throw new Error(`That series is no longer in the library. Nothing was queued.${done}`);
     target.queue = Object.assign({}, target.queue,
                                  { removal: { action: context.action.value, created_at: new Date().toISOString() } });
     await saveSettings('Queued. It will be applied at the next run, and can be undone until then.' + done);

@@ -182,6 +182,22 @@ def fill_from_history(client, series_id: int, episodes) -> int:
     return filled
 
 
+def tmdb_provider(settings: dict):
+    """The TMDB client for a run, or None when no key is configured.
+
+    An API key is the switch: nobody enters one they do not want used. There is no
+    `enabled` flag to check here — `validate_settings` never keeps one (migration
+    deletes it, and `test_migration.py` asserts it is gone) — so a run that gated on it
+    could never build a client no matter what key was entered, while "Test TMDB" kept
+    reporting success because it builds its own client directly from the key alone.
+    """
+    tmdb_cfg = settings.get('tmdb') or {}
+    api_key = tmdb_cfg.get('api_key')
+    if not api_key:
+        return None
+    return TMDB(api_key, cache_path=state_dir(settings) / 'tmdb-cache.json')
+
+
 def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb) -> tuple:
     """Sonarr's episode files for one rule.
 
@@ -518,10 +534,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     clock = time.monotonic()
 
     bind_rules(settings)
-    tmdb = None
-    tmdb_cfg = settings.get('tmdb') or {}
-    if tmdb_cfg.get('enabled') and tmdb_cfg.get('api_key'):
-        tmdb = TMDB(tmdb_cfg['api_key'], cache_path=state_dir(settings) / 'tmdb-cache.json')
+    tmdb = tmdb_provider(settings)
 
     selected = [r for r in settings.get('rules', []) if r.get('enabled')]
     if rule_ids:

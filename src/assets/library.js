@@ -84,6 +84,7 @@ export function createLibrary({
 
   let library = null;          // every series Sonarr holds, from the stored reading
   let libraryLoading = false;
+  let libraryError = null;     // set on a failed read; cleared by a retry or a fresh load
   // Loaded from the store, and reloaded whenever something makes the copy in hand wrong —
   // a sync, or a rule that has just been added. Opening a view is never a reason to ask
   // Sonarr anything: the sync already did, and its age is stated at the top of the page.
@@ -97,6 +98,12 @@ export function createLibrary({
         gathered.push(...await seriesFor(instance.id, ''));
       }
       library = gathered;
+      libraryError = null;
+    } catch (error) {
+      // Recorded, not swallowed: a pane stuck on "Reading the stored library…" forever,
+      // silently re-asking Sonarr on every render, said nothing had gone wrong when it had.
+      libraryError = error;
+      throw error;
     } finally {
       libraryLoading = false;
     }
@@ -108,8 +115,9 @@ export function createLibrary({
   // library" until something else happened to navigate.
   function forgetLibrary() {
     library = null;
+    libraryError = null;
     seriesCache = {};
-    if (isLibraryView()) loadLibrary().catch(() => { libraryLoading = false; });
+    if (isLibraryView()) loadLibrary().catch(() => renderLibrary());
   }
 
   const ruleFor = (series) => (getSettings().rules || []).find(
@@ -302,8 +310,20 @@ export function createLibrary({
     applyScale(container);
     if (library === null) {
       $('tvr-rules-empty').hidden = true;
+      if (libraryError) {
+        // Shown, not retried silently: a failed read that kept asking again on every
+        // render was indistinguishable from one still in progress, and never said why
+        // nothing was arriving. One more attempt is a click away instead of automatic,
+        // so a Sonarr outage does not turn into a request sent on every navigation.
+        container.append(el('p', { className: 'tvr-empty',
+                                   textContent: `Could not read the library: ${libraryError.message}` }));
+        const retry = el('button', { type: 'button', className: 'tvr-action', textContent: 'Try again' });
+        retry.addEventListener('click', () => { libraryError = null; renderLibrary(); });
+        container.append(retry);
+        return;
+      }
       container.append(el('p', { className: 'tvr-empty', textContent: 'Reading the stored library…' }));
-      if (!libraryLoading) loadLibrary().catch(() => { libraryLoading = false; });
+      if (!libraryLoading) loadLibrary().catch(() => renderLibrary());
       return;
     }
     if (bulkChecking()) {
