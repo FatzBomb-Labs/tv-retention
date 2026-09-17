@@ -12,14 +12,15 @@ plugin-era surfaces.
 
 The sidebar is organised as follows:
 
-- **Series** — All, Watching, and Not watching.
-- **Media management** — Stats, Presets, Automation, and Schedule.
-- **General** — Alerts, Connections, Safety, Logging, and Backup.
-- **System** — Status and Logs.
+- **Series** — All, Watching, Not watching, Presets, and Exclusion Rules.
+- **Settings** — General, Connections, Air dates, and Schedule.
+- **System** — Status, Stats, Backup, and Logs.
 - **Help** — About and the existing guidance pages.
 
-Notifications and Radarr Specials are removed. General owns optional connections, the
-API-key lifecycle, safety, logging, and Backup; System owns Status and Logs.
+Notifications and Radarr Specials are removed. Settings owns optional connections, the
+API-key lifecycle, air-date configuration, logging, and Schedule; System owns runtime
+Status, Stats, Backup, and Logs. Alert reporting and safety enforcement remain available
+in context, but neither has a standalone navigation page.
 
 ## Phase 1 — remaining workflow improvements
 

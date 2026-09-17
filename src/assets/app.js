@@ -154,7 +154,7 @@ function start(root) {
       renderLibrary();
     },
     openInstance: (instanceId) => {
-      showView('general-connections');
+      showView('settings-connections');
       const instance = (settings.instances || []).find((i) => i.id === instanceId);
       if (instance) editInstance(instance);
     },
@@ -357,6 +357,10 @@ function start(root) {
   presets.wire();
   connections.wire();
   libraryView.wire();
+  // The details pane is part of the list layout even before a series is selected. Render
+  // its idle state immediately so the initial list load has the same stable two-column shape
+  // as every later selection.
+  renderDetails();
 
   // Whatever happens, the page must end up interactive with a readable message.
   refresh().catch((error) => {

@@ -115,9 +115,9 @@ anybody is logged in, the same way Sonarr downloads with nobody watching.
 
 The page is a sidebar and a content pane. **Series** is the library — one list of
 everything Sonarr holds, filtered to **All**, **Connected** (has a retention rule) or
-**Not connected**. **Media management** holds the schedule, presets and retention
-automation. **General** holds alerts, connections, air-date settings, safety, logging and
-backup. **System** holds Status and Logs, while **Help** holds the about page and guidance.
+**Not connected**. **Series** also holds Presets and Exclusion Rules. **Settings** holds
+General, Connections, Air dates and Schedule. **System** holds Status, Stats, Backup and
+Logs, while **Help** holds the about page and guidance.
 
 There is no separate "add" screen: a series with a rule and a series without are the same
 row in the same list. Clicking either opens its details in the pane beside it; an
@@ -125,7 +125,7 @@ unconnected series shows **Add to Retention** before exposing the rule editor.
 
 ## First run
 
-1. **General → Connections** → add each Sonarr with its URL and API key. Press
+1. **Settings → Connections** → add each Sonarr with its URL and API key. Press
    **Test & save**: it reports the Sonarr version, how many series it holds, and whether
    Sonarr has a recycle bin configured.
 2. **Series → Not connected**, click the show you want, then choose **Add to Retention**.
@@ -133,7 +133,7 @@ unconnected series shows **Add to Retention** before exposing the rule editor.
    off until you say otherwise.
 3. Open **Show scheduled changes** in the header. Read what the next run would delete, and
    why, before anything is scheduled.
-4. When that looks right, set a schedule under **Media management → Schedule**. **Test
+4. When that looks right, set a schedule under **Settings → Schedule**. **Test
    Mode** is on for a new install, so the first scheduled runs report exactly what they
    would do and change nothing. Turn it off once you have watched one go through.
 
@@ -229,7 +229,7 @@ them.
 ## Retention presets
 
 Rather than typing the same numbers onto every show, create a named preset — *Keep 30
-days*, *Keep 2 seasons* — under **Media management → Presets**. A show's retention is then
+days*, *Keep 2 seasons* — under **Series → Presets**. A show's retention is then
 a dropdown: **Custom** is first and is what a new series starts on, because sharing values
 with other shows is a decision, not a default. A show using a preset shows it as a single
 blue pill; only a custom rule spells its numbers out.
@@ -346,10 +346,10 @@ A run always reads Sonarr for itself. A stored reading never stands behind a wri
 
 Problems with a **series** live in the library, because that is where they are fixed: a
 badge on the card, and a roll-up above the list that filters to just those shows. Problems
-with the **installation** — Sonarr unreachable, no recycle bin — live under **General →
+with the **installation** — Sonarr unreachable, no recycle bin — live under **Settings →
 Connections**. Neither counts the other's; contextual badges identify the area that needs
-attention. **General → Alerts** also lists recurring warnings hidden for one specific
-Sonarr instance, so they can be restored without changing any other connection.
+attention. **System → Status** also lists recurring warnings hidden for one specific Sonarr
+instance, so they can be restored without changing any other connection.
 
 **A series that is switched off raises nothing.** It is not being managed, so nothing about
 it is a problem to report — no badge or roll-up line. Nothing is deleted:
@@ -366,7 +366,7 @@ changes. A Sonarr that has been unreachable since Tuesday is not news again on W
 
 ## Sonarr instances
 
-Add each Sonarr under **General → Connections** with its URL and API key. **Test & save** confirms the version, counts the
+Add each Sonarr under **Settings → Connections** with its URL and API key. **Test & save** confirms the version, counts the
 series, and reports whether Sonarr has a recycle bin. An instance can be disabled without
 deleting it, which leaves its rules in place and stops them being processed.
 
@@ -377,7 +377,7 @@ Sonarr deletes, not only to TV Retention.
 ## Air dates and optional providers
 
 Sonarr remains the primary source. When it leaves a date blank, the enabled providers under
-**General → Air date resolution** are asked in the order shown: TMDB (when its key is set),
+**Settings → Air date resolution** are asked in the order shown: TMDB (when its key is set),
 TVMaze, AniList, and a configured Plex or Jellyfin endpoint. Results are cached with the
 episode reading. Missing dates can then be estimated from neighbouring episodes; when an
 entire series has no dated episode, Sonarr history is the last estimate available.
@@ -389,13 +389,13 @@ No unresolved file is silently judged by its import date.
 
 ## API key lifecycle
 
-**General → Connections** can create a key reserved for future API operations. The full
+**Settings → Connections** can create a key reserved for future API operations. The full
 value is shown once and can be copied; the settings file stores only a hash, prefix and
 creation/revocation metadata. Regenerate replaces the active key, and Revoke disables it.
 
 ## Backups and Status
 
-**General → Backup** writes timestamped ZIP archives of TV Retention's `/config` data —
+**System → Backup** writes timestamped ZIP archives of TV Retention's `/config` data —
 settings, state, journal and caches — to a separate absolute destination. The destination
 is never included in itself, archives are atomic, and old archives are pruned to the
 configured count. Backups contain credentials. Restore requires typing `RESTORE` and then
@@ -426,7 +426,7 @@ state, and current warnings/errors. Its refresh is read-only.
 
 ## Scheduling
 
-**Media management → Schedule** offers hourly, daily, weekly, monthly by date, monthly by
+**Settings → Schedule** offers hourly, daily, weekly, monthly by date, monthly by
 weekday (*the first Monday*, *the last Friday*), or a custom five-field cron expression.
 The resident worker decides what is due, catches up a missed run, and holds one pending run
 until Sonarr answers. A page does not need to be open.
@@ -460,7 +460,7 @@ Then remove the plugin. The caches are rebuilt on the first sync and are not wor
 | `/config/state/tmdb-cache.json` | Cached TMDB air dates. |
 | `/config/state/tvmaze-air-date-cache.json`, `/config/state/anilist-air-date-cache.json` | Cached optional-provider dates. |
 
-Backups are written to the separate destination configured under **General → Backup** and
+Backups are written to the separate destination configured under **System → Backup** and
 contain the settings, state, journal and these caches, including credentials.
 
 The state folder can be moved under **System → Storage** if you would rather it sat

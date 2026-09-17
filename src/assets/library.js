@@ -519,19 +519,20 @@ export function createLibrary({
     const state = rule ? (getMonitoring()[rule.id] || {}) : {};
     const plan = state.plan || {};
     const art = posterNode(series, 'tvr-poster tvr-poster-row', rule);
-    // The poster carries the same scheduled-change badges as grid view.  A list row no
-    // longer needs a second, wordier plan column or an unrelated rule-status square.
-    if (rule && plan && (plan.delete || plan.monitor || plan.unmonitor)) {
-      art.append(changeMarks(rule, plan));
-    }
+    // The list carries the same scheduled-change badges as grid view, but places them in
+    // the identity column above the title so they sit to the right of the poster.
+    const changes = rule && plan && (plan.delete || plan.monitor || plan.unmonitor)
+      ? changeMarks(rule, plan) : null;
+    const main = el('div', { className: 'tvr-rule-main' }, [
+      ...(changes ? [changes] : []),
+      el('div', { className: 'tvr-rule-head' }, [
+        el('span', { className: 'tvr-rule-title', textContent: series.title, title: series.title }),
+      ]),
+      el('div', { className: 'tvr-row-sub', textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
+    ]);
     const identity = el('div', { className: 'tvr-row-cell tvr-row-identity' }, [
       art,
-      el('div', { className: 'tvr-rule-main' }, [
-        el('div', { className: 'tvr-rule-head' }, [
-          el('span', { className: 'tvr-rule-title', textContent: series.title, title: series.title }),
-        ]),
-        el('div', { className: 'tvr-row-sub', textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
-      ]),
+      main,
     ]);
     const stateLabel = rule ? (rule.enabled ? 'Watching' : 'Not watching') : 'Not connected';
     const stateCell = el('div', { className: `tvr-row-cell tvr-row-state${rule?.enabled ? ' active' : ''}` }, [

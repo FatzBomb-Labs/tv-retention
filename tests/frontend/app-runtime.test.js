@@ -63,11 +63,9 @@ async function evaluateGraph(context) {
 }
 
 const SECTIONS = {
-  series: ['series-all', 'series-connected', 'series-unconnected'],
-  media: ['media-stats', 'media-presets', 'media-automation', 'media-schedule'],
-  general: ['general-alerts', 'general-connections', 'general-air-dates',
-            'general-safety', 'general-logging', 'general-backup'],
-  system: ['system-logs'],
+  series: ['series-all', 'series-connected', 'series-unconnected', 'series-presets', 'series-exclusions'],
+  settings: ['settings-general', 'settings-connections', 'settings-air-dates', 'settings-schedule'],
+  system: ['system-status', 'system-stats', 'system-backup', 'system-logs'],
   help: ['help-adding', 'help-connecting', 'help-presets', 'help-monitoring',
          'help-rules', 'help-scheduling'],
 };

@@ -430,11 +430,6 @@ def scope_pass(settings: dict, rule: dict, monitor_new: bool = False,
         ids = [row['episode_id'] for row in result[key] if row.get('episode_id')]
         if ids:
             client.set_monitored(ids, wanted)
-    if result['monitored'] and (settings.get('automation') or {}).get('search_after_monitor'):
-        missing = [row['episode_id'] for row in result['monitored'] if not row.get('has_file')]
-        if missing:
-            with contextlib.suppress(SonarrError):
-                client.search_episodes(missing)
     log_line(settings, 'info',
              f'{rule.get("series_title") or rule["path"]}: one-time pass monitored '
              f'{len(result["monitored"])}, unmonitored {len(result["unmonitored"])}')
@@ -531,14 +526,6 @@ def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool)
             client.set_monitored(targets['unmonitor'], False)
         if monitor:
             client.set_monitored(monitor, True)
-            if (settings.get('automation') or {}).get('search_after_monitor'):
-                # Only the episodes that have no file: searching one already on disk would
-                # ask Sonarr to look for an upgrade nobody requested.
-                missing = [row['episode_id'] for row in monitor_list
-                           if not row.get('has_file') and row.get('episode_id')]
-                if missing:
-                    client.search_episodes(missing)
-                    result['searched'] = len(missing)
     except SonarrError as error:
         result['error'] = str(error)
     return result

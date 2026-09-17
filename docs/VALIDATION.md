@@ -20,6 +20,14 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors across all 19 shipped ES modules |
 | `node --test tests/frontend/*.test.js` | 22 tests, all pass |
 
+### Current navigation/Test Mode pass (local, 2026-09-16)
+
+The source now presents Series (including Presets and Exclusion Rules), Settings
+(including Schedule), System (including Stats and Backup), and Help. Test Mode is a
+separate prominent card above the Schedule controls. The focused local checks for this
+pass are `test_build.py` (162 tests) and the frontend runtime suite (22 tests), both
+passing. Re-run the host gate before publishing the next build.
+
 ### Coverage by area
 
 | File | Tests | What it holds |

@@ -11,7 +11,7 @@ import { el } from './dom.js';
 import { day } from './format.js';
 
 // Every reason core can give, said in the picker's own words. A reason with no entry
-// here falls back to naming Automation rather than to a template with a hole in it.
+// here falls back to naming Exclusion Rules rather than to a template with a hole in it.
 const EXCLUDED_WHY = {
   specials: () => 'specials',
   season: (episode) => `excluded season ${episode.excluded_by}`,
@@ -41,7 +41,7 @@ function exclusionTree(seasons, current) {
   (seasons || []).forEach((season) => {
     const rows = season.episodes || [];
     if (!rows.length) return;
-    // An episode excluded by Automation is shown and not offered. The rule that put it
+    // An episode excluded by Exclusion Rules is shown and not offered. The rule that put it
     // there is global, so unticking it here would be an override with nowhere to live —
     // and saying that out loud is more use than a box that springs back.
     const auto = rows.filter((episode) => episode.excluded && episode.excluded !== 'manual');
@@ -63,7 +63,7 @@ function exclusionTree(seasons, current) {
       caret.firstChild.className = `fa fa-caret-${list.hidden ? 'right' : 'down'}`;
     });
     const header = el('label', { className: 'tvr-tree-row tvr-tree-season',
-                                 title: locked ? 'Every episode of this season is excluded by Automation'
+                                 title: locked ? 'Every episode of this season is excluded by Exclusion Rules'
                                                : 'Exclude the whole season, including episodes not yet aired' }, [
       box, el('span', { textContent: season.season === 0 ? 'Specials' : `Season ${season.season}` }), count,
     ]);
@@ -76,7 +76,7 @@ function exclusionTree(seasons, current) {
       // Named, not inferred. "Anything that is not a season is a pattern" renders a
       // reason nobody taught this about as `matches “undefined”`, which is worse than
       // saying less.
-      const why = !isAuto ? '' : (EXCLUDED_WHY[episode.excluded] || (() => 'excluded by Automation'))(episode);
+      const why = !isAuto ? '' : (EXCLUDED_WHY[episode.excluded] || (() => 'excluded by Exclusion Rules'))(episode);
       // Sonarr's own flag, offered beside the exclusion because excluding is the moment
       // the decision is made. Nothing here ever changes it on an excluded episode, so
       // this is the one place it can be set without a run undoing it. Pre-filled from
@@ -153,7 +153,7 @@ function exclusionTree(seasons, current) {
   return {
     node,
     empty: !seasonRows.length,
-    // Only the hand-picked half. What Automation excludes is not stored per series, so
+    // Only the hand-picked half. What Exclusion Rules excludes is not stored per series, so
     // reading the ticked boxes back wholesale would bake a global rule into this one
     // series and leave it there after the rule changed.
     picked: () => {

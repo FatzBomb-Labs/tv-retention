@@ -664,9 +664,9 @@ class Interface(unittest.TestCase):
         # A badge next to the thing it is about: series problems on the series items,
         # connection problems on Connections. Neither counts the other's.
         self.assertIn("setBadge($('tvr-badge-series-connected'), connectedAlerts)", self.js)
-        self.assertIn("setBadge($('tvr-badge-general-connections'), instances)", self.js)
+        self.assertIn("setBadge($('tvr-badge-settings-connections'), instances)", self.js)
         for identifier in ('tvr-badge-series-all', 'tvr-badge-series-connected',
-                           'tvr-badge-general-connections'):
+                           'tvr-badge-settings-connections'):
             self.assertIn(f'id="{identifier}"', self.html)
         self.assertNotIn('tvr-alert-total', self.html)
         self.assertNotIn('alerts.header', self.js)
@@ -735,9 +735,9 @@ class Interface(unittest.TestCase):
         wired = set(re.findall(r"'(tvr-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
                                r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
                                r"match-hour|match-minute|connectivity))'", self.js))
-        panel = self.html.split('id="tvr-view-media-schedule"')[1].split('</section>')[0]
+        panel = self.html.split('id="tvr-view-settings-schedule"')[1].split('</section>')[0]
         for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
-            if identifier in ('tvr-schedule-summary', 'tvr-match-summary') or 'field' in identifier:
+            if identifier in ('tvr-schedule-summary', 'tvr-match-summary', 'tvr-test-mode-label') or 'field' in identifier:
                 continue
             self.assertIn(identifier, wired, f'{identifier} is on the schedule panel but never saved')
 
@@ -757,7 +757,7 @@ class Interface(unittest.TestCase):
         """
         collect = self.js.split('function collectSettings()')[1].split('\n  }')[0]
         render = self.js.split('function renderSettings()')[1].split('\n  }\n')[0]
-        for view in ('media-automation', 'general-safety', 'general-air-dates'):
+        for view in ('series-exclusions', 'settings-air-dates'):
             for identifier in re.findall(r'id="(tvr-[a-z-]+)"', self._panel(view)):
                 if 'help' in identifier or 'field' in identifier:
                     continue
@@ -778,7 +778,6 @@ class Interface(unittest.TestCase):
     MOUNTS = {
         'tvr-auto-monitoring': "questionInputs['monitoring.",
         'tvr-auto-persistence': "questionInputs['persistence.",
-        'tvr-auto-search': "questionInputs['search.after_monitor']",
         'tvr-air-unresolved': "questionInputs['air.unresolved']",
         'tvr-air-still': "questionInputs['air.still_unresolved']",
         'tvr-air-providers': 'providers: airOrder',
@@ -799,7 +798,6 @@ class Interface(unittest.TestCase):
         for group, _ in groups:
             block = self.js.split(f"['{group}', 'tvr-auto-")[1].split('\n    ]],')[0]
             asked |= {f'{group}.{name}' for name in re.findall(r"^      \['([a-z_]+)',", block, re.M)}
-        asked.add('search.after_monitor')
         asked |= {f'air.{name}' for name in re.findall(r"^    \['([a-z_]+)', 'tvr-air-", self.js, re.M)}
         self.assertTrue(asked, 'the question tables were not found at all')
         for key in sorted(asked):
@@ -943,14 +941,20 @@ class Interface(unittest.TestCase):
         """
         self.assertRegex(self.js, r"const VIEWS = \[\.\.\.document\.querySelectorAll\('\.tvr-side \[data-view\]'\)\]")
 
-    def test_the_old_plugin_surfaces_are_gone_and_general_owns_the_settings(self):
-        self.assertIn('data-section="general"', self.html)
-        self.assertIn('data-view="general-connections"', self.html)
-        self.assertIn('data-view="general-backup"', self.html)
-        self.assertIn('data-view="general-air-dates"', self.html)
+    def test_the_navigation_owns_policy_settings_and_runtime_views(self):
+        self.assertIn('data-section="settings"', self.html)
+        self.assertIn('data-view="settings-general"', self.html)
+        self.assertIn('data-view="settings-connections"', self.html)
+        self.assertIn('data-view="settings-air-dates"', self.html)
+        self.assertIn('data-view="settings-schedule"', self.html)
+        self.assertIn('data-view="series-presets"', self.html)
+        self.assertIn('data-view="series-exclusions"', self.html)
+        self.assertIn('data-view="system-stats"', self.html)
+        self.assertIn('data-view="system-backup"', self.html)
+        self.assertNotIn('data-view="general-alerts"', self.html)
+        self.assertNotIn('data-view="general-safety"', self.html)
         self.assertNotIn('Notifications', self.html)
         self.assertNotIn('Radarr specials', self.html)
-        self.assertNotIn('data-view="settings-', self.html)
         self.assertNotIn('data-view="media-radarr"', self.html)
         self.assertNotIn('id="tvr-alerts-system-empty"', self.html)
 
@@ -1802,12 +1806,13 @@ class OperationalList(unittest.TestCase):
         block = library.split('function listCard(row)')[1].split('\n  const applyLayout')[0]
         self.assertIn("stateCell.append(el('span', { className: 'tvr-chip", block)
         self.assertNotIn('tvr-connected', block)
-        self.assertIn('art.append(changeMarks(rule, plan))', block)
+        self.assertIn('changeMarks(rule, plan)', block)
+        self.assertIn('const main = el(\'div\', { className: \'tvr-rule-main\' }', block)
 
     def test_series_automation_is_one_box_with_inheritance_named(self):
         editor = (ROOT / 'src' / 'assets' / 'series-editor.js').read_text(encoding='utf-8')
         css = (ROOT / 'src' / 'assets' / 'app.css').read_text(encoding='utf-8')
         self.assertIn('tvr-automation-box', editor)
-        self.assertIn('inherited from global Automation', editor)
+        self.assertIn('inherited from global Exclusion Rules', editor)
         self.assertIn("automationBox, scopeRow", editor)
         self.assertIn('.tvr-automation-box', css)

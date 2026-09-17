@@ -155,9 +155,7 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
     setBadge($('tvr-badge-series-all'), connectedAlerts);
     setBadge($('tvr-badge-series-connected'), connectedAlerts);
     setBadge($('tvr-badge-series-unconnected'), []);
-    setBadge($('tvr-badge-general-connections'), instances);
-    setBadge($('tvr-badge-media-schedule'), []);
-    setBadge($('tvr-badge-media-presets'), []);
+    setBadge($('tvr-badge-settings-connections'), instances);
     setBadge($('tvr-badge-system-status'), instances);
     const failed = (getSnapshot().runs || []).slice(0, 1).filter((run) => (run.errors || []).length);
     setBadge($('tvr-badge-system-history'), failed.map(() => ({ severity: 'warning' })));

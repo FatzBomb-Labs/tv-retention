@@ -371,7 +371,7 @@ export function createSeriesEditor({
 
         // Everything being done to this series that nobody asked for on this screen. The
         // getMonitoring() mode and the specials setting have controls below, and the exclusions
-        // come from Automation and from this series' own list — which is exactly why they
+        // come from Exclusion Rules and from this series' own list — which is exactly why they
         // are worth stating together. "Why is this episode never deleted" should be
         // answerable here rather than by opening another page and matching in your head.
         const autoLines = el('div', { className: 'tvr-auto-lines' });
@@ -379,7 +379,7 @@ export function createSeriesEditor({
                                         textContent: 'Edit…' });
         const autoRow = el('div', { className: 'tvr-once', hidden: true }, [
           el('div', { className: 'tvr-once-title' },
-             [text('Automation'), el('span', { className: 'tvr-spacer' }), autoEdit]),
+             [text('Exclusion Rules'), el('span', { className: 'tvr-spacer' }), autoEdit]),
           autoLines,
         ]);
         // Kept here rather than read back off `rule` each time, so the pane shows what was
@@ -392,11 +392,11 @@ export function createSeriesEditor({
                                       (data && data.exclusions) || {});
           const line = (className, label) => el('div', { className: `tvr-auto-line ${className}`,
                                                          textContent: label });
-          const from = (n) => `${plural(n, 'episode')}, from Automation`;
+          const from = (n) => `${plural(n, 'episode')}, from Exclusion Rules`;
           const lines = [];
           lines.push(line(data.specials_default ? 'tvr-auto-inherited' : 'tvr-auto-plain',
             `Specials: ${data.specials ? 'kept' : 'excluded'} — `
-            + (data.specials_default ? 'inherited from global Automation' : 'set on this series')));
+            + (data.specials_default ? 'inherited from global Exclusion Rules' : 'set on this series')));
           if (found.specials) lines.push(line('tvr-auto-rule', `Specials excluded — ${from(found.specials)}`));
           found.seasons.forEach((entry) => lines.push(line('tvr-auto-rule',
             `Season ${entry.season} excluded — ${from(entry.episodes)}`)));
@@ -431,7 +431,7 @@ export function createSeriesEditor({
               + 'series’ rule says. Nothing is restored or removed by saving: an exclusion '
               + 'decides what a run may touch, and a run is still the only thing that acts.' }));
             box.append(el('p', { className: 'tvr-lede', textContent:
-              'Greyed episodes are excluded by Automation, which applies to every series and '
+              'Greyed episodes are excluded by Exclusion Rules, which apply to every series and '
               + 'changes there. A season’s own box excludes the whole season, including '
               + 'episodes that have not aired yet.' }));
             box.append(el('p', { className: 'tvr-lede', textContent:
@@ -532,7 +532,7 @@ export function createSeriesEditor({
           if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
         }
         const automationBox = el('div', { className: 'tvr-automation-box' }, [
-          el('div', { className: 'tvr-automation-title', textContent: 'Automation' }),
+          el('div', { className: 'tvr-automation-title', textContent: 'Exclusion Rules' }),
           el('p', { className: 'tvr-lede', textContent:
             'Global exclusions apply to every series. The value below is this series’ override; '
             + 'episode exclusions are shown for context and edited in their own picker.' }),
@@ -540,7 +540,7 @@ export function createSeriesEditor({
         ]);
         body.append(
           field('Retention', presetSelect, (getSettings().profiles || []).length
-            ? 'Presets are managed under Media management.' : 'No presets yet — create one to reuse values.'),
+            ? 'Presets are managed under Series.' : 'No presets yet — create one to reuse values.'),
           conditions.node,
           autoReenable.node,
           automationBox, scopeRow, unmonitorNote);

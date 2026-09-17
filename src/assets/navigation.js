@@ -8,9 +8,8 @@ import { remember, remembered } from './storage.js';
 // The view list comes from the markup rather than from a constant here, so the two cannot
 // disagree -- disagreeing is the failure that blanked four tabs. A remembered view name is
 // checked against that list before it is honoured, because a name outlives the view it
-// named: renaming `media-rules` to `media-automation` left every existing browser asking
-// for a view that no longer existed, and the fallback landed in another section, so
-// clicking the heading appeared to do nothing at all.
+// named. Rehomed views are resolved through an explicit legacy map so an upgrade never
+// makes a section heading appear dead.
 //
 // The library's three sidebar items are one panel with a different filter, which is why
 // `isLibraryView` and `getLibraryFilter` are exported: the editor asks the first whether a
@@ -33,9 +32,24 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
   const TITLES = { all: 'All series', connected: 'Connected series', unconnected: 'Not connected' };
   let libraryFilter = 'all';
 
+  // View names are persisted in the browser, so a renamed or rehomed page needs an
+  // explicit landing place rather than silently falling back to the library.
+  const LEGACY_VIEWS = {
+    'media-stats': 'system-stats',
+    'media-presets': 'series-presets',
+    'media-automation': 'series-exclusions',
+    'media-schedule': 'settings-schedule',
+    'general-alerts': 'system-status',
+    'general-connections': 'settings-connections',
+    'general-air-dates': 'settings-air-dates',
+    'general-safety': 'system-status',
+    'general-logging': 'settings-general',
+    'general-backup': 'system-backup',
+  };
+
   // -- sections ----------------------------------------------------------
-  // One open at a time. Nineteen items in five groups is a wall; four collapsed headings
-  // and the group you are working in is a list.
+  // One open at a time. Purpose-built groups keep policy, configuration, and runtime
+  // state separate without making every tab a top-level destination.
   const sectionOf = (view) => {
     const button = document.querySelector(`.tvr-side [data-view="${view}"]`);
     return button ? button.closest('[data-section]').dataset.section : null;
@@ -62,6 +76,7 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
   }
 
   function showView(name) {
+    name = LEGACY_VIEWS[name] || name;
     if (!VIEWS.includes(name)) name = 'series-all';
     // Unsaved edits belong to the library. Leaving it closes the pane, and a draft kept
     // past that would be a second copy of the settings, invisible until it reappeared
@@ -85,9 +100,9 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
       $('tvr-library-title').textContent = TITLES[libraryFilter];
       renderLibrary();          // it fetches itself if what it needs is not in hand
     }
-    if (name === 'media-stats') guarded('', renderStatsView);
+    if (name === 'system-stats') guarded('', renderStatsView);
     if (name === 'system-status') guarded('', renderStatusView);
-    if (name === 'general-backup') guarded('', renderBackupView);
+    if (name === 'system-backup') guarded('', renderBackupView);
     if (name === 'system-logs') startLog(); else stopLog();
   }
 
@@ -103,11 +118,8 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
         // Clicking the section you are already in collapses nothing: there would be no open
         // section and no view to show. It just returns you to where you were.
         //
-        // Where you were is in the browser, and it outlives the view it names. Renaming
-        // `media-rules` to `media-automation` left every existing browser remembering a view
-        // that no longer exists: `showView` fell back to `series-all`, which is in another
-        // section, so clicking Media management appeared to do nothing at all. A remembered
-        // name is only worth having if it still names something.
+        // Where you were is in the browser, and it outlives the view it names. The legacy map
+        // resolves rehomed pages before the current view list is checked.
         const last = remembered(`last.${section}`, '');
         showView(VIEWS.includes(last) ? last : sectionDefault(section));
       });

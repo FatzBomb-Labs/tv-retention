@@ -178,6 +178,9 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 #tv-retention .tvr-seg button.active { background: var(--tvr-soft); opacity: 1; }
 
 .tvr-card { border: 1px solid var(--tvr-line); border-radius: 6px; padding: 10px 11px; display: grid; gap: 7px; margin-bottom: 8px; }
+.tvr-test-mode-card { border-color: var(--tvr-accent); background: color-mix(in srgb, var(--tvr-accent) 8%, var(--tvr-bg)); }
+.tvr-test-mode-card .tvr-card-title { font-size: 14px; }
+.tvr-test-mode-card .tvr-switch-text { font-weight: 600; }
 .tvr-card-head { display: flex; align-items: center; gap: 10px; }
 .tvr-card-head .tvr-card-title { margin: 0; flex: 1; }
 .tvr-field { display: grid; gap: 2px; }
@@ -944,7 +947,7 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-tree-episode { padding-left: 34px; font-weight: normal; }
 .tvr-tree-count { margin-left: auto; font-size: 11px; opacity: .55; font-weight: normal; }
 .tvr-tree-note { font-size: 10px; opacity: .5; }
-/* Excluded by Automation: shown, explained, and not offered. Dimming it without saying
+/* Excluded by Exclusion Rules: shown, explained, and not offered. Dimming it without saying
    why is how a disabled checkbox becomes a bug report. */
 .tvr-tree-auto { opacity: .55; }
 .tvr-tree-why { opacity: 1; color: var(--tvr-bad); }
@@ -1003,6 +1006,11 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 
 .tvr-card-changes { position: absolute; top: 4px; left: 4px; display: grid; gap: 3px; z-index: 2;
   justify-items: start; }
+/* In list view the badges belong to the identity column, above the title and clear of
+   the poster. Grid view keeps the compact overlay treatment above. */
+.tvr-list-card .tvr-rule-main > .tvr-card-changes { position: static; display: flex; justify-content: flex-end;
+  gap: 4px; min-height: 20px; margin: 0 0 1px; }
+.tvr-list-card .tvr-rule-main > .tvr-card-changes:empty { display: none; }
 #tv-retention button.tvr-card-mark { display: flex; align-items: center; gap: 3px; padding: 1px 5px;
   border: none; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 1.4;
   background: rgba(0,0,0,.66); box-shadow: 0 1px 3px rgba(0,0,0,.5); }

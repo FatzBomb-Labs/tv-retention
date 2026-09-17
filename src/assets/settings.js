@@ -32,6 +32,8 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     const schedule = settings().schedule || {};
     $('tvr-schedule-enabled').checked = !!schedule.enabled;
     $('tvr-test-mode').checked = schedule.test_mode !== false;
+    $('tvr-test-mode-label').textContent = $('tvr-test-mode').checked
+      ? 'On — nothing writes' : 'Off — runs can make changes';
     options($('tvr-weekday'), WEEKDAYS, schedule.weekday ?? 0);
     options($('tvr-monthly-day'), range(1, 28, true), schedule.monthly_day ?? 1);
     options($('tvr-monthly-weekday'), [['', 'Day of the month']].concat(WEEKDAYS),
@@ -89,14 +91,8 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   }
 
   // -- automation --------------------------------------------------------
-  // Stored as a flag rather than a word, because it only ever had two answers. Shown as
-  // two answers anyway: "off" is not a thing anybody decided, and "wait for the RSS pass"
-  // is.
-  const SEARCH_QUESTION = [
-    'When TV Retention has marked a previously unmonitored episode to monitor in Sonarr', [
-      ['wait', 'Wait for the Sonarr RSS pass to search for the newly monitored episode'],
-      ['search', 'Tell Sonarr to immediately begin a search on that series'],
-    ]];
+  // Retention owns exclusions. Sonarr owns RSS/search behavior, so there is no second
+  // search policy here for the two systems to disagree about.
   const questionInputs = {};
 
   function questionNode(group, name, label, answers, chosen) {
@@ -223,9 +219,6 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
       $(target).replaceChildren(questionNode('air', name, label, answers, air[name]));
     });
     const automation = settings().automation || {};
-    $('tvr-auto-search').replaceChildren(
-      questionNode('search', 'after_monitor', SEARCH_QUESTION[0], SEARCH_QUESTION[1],
-                   automation.search_after_monitor ? 'search' : 'wait'));
     $('tvr-exclude-specials').checked = automation.exclude_specials !== false;
     $('tvr-exclude-seasons').value = (automation.exclude_seasons || []).join(', ');
     folderPhrases = phraseList($('tvr-exclude-folders'), automation.exclude_folders);
@@ -326,13 +319,12 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
         unresolved: questionInputs['air.unresolved'](),
         still_unresolved: questionInputs['air.still_unresolved'](),
       },
-      automation: {
-        search_after_monitor: questionInputs['search.after_monitor']() === 'search',
+      automation: Object.assign({}, settings().automation || {}, {
         exclude_specials: $('tvr-exclude-specials').checked,
         exclude_seasons: typedList($('tvr-exclude-seasons').value, ','),
         exclude_folders: folderPhrases(),
         exclude_episodes: episodePhrases(),
-      },
+      }),
       tmdb: { api_key: $('tvr-tmdb-key').value },
       connections,
       backup: {

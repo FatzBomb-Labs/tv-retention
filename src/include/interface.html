@@ -48,34 +48,21 @@
         <button type="button" class="tvr-side-item" data-view="series-unconnected">Not watching
           <span class="tvr-side-count" id="tvr-count-unconnected">0</span>
           <span class="tvr-tab-badge" id="tvr-badge-series-unconnected" hidden></span></button>
+        <button type="button" class="tvr-side-item" data-view="series-presets">Presets
+          <span class="tvr-side-count" id="tvr-count-presets">0</span></button>
+        <button type="button" class="tvr-side-item" data-view="series-exclusions">Exclusion Rules</button>
       </div>
     </div>
 
-    <div class="tvr-side-group" data-section="media">
-      <button type="button" class="tvr-side-head" data-section-head="media" aria-expanded="false">
-        <i class="fa fa-caret-right" aria-hidden="true"></i><span>Media management</span></button>
+    <div class="tvr-side-group" data-section="settings">
+      <button type="button" class="tvr-side-head" data-section-head="settings" aria-expanded="false">
+        <i class="fa fa-caret-right" aria-hidden="true"></i><span>Settings</span></button>
       <div class="tvr-side-items">
-        <button type="button" class="tvr-side-item" data-view="media-stats">Stats</button>
-        <button type="button" class="tvr-side-item" data-view="media-presets">Presets
-          <span class="tvr-side-count" id="tvr-count-presets">0</span>
-          <span class="tvr-tab-badge" id="tvr-badge-media-presets" hidden></span></button>
-        <button type="button" class="tvr-side-item" data-view="media-automation">Automation</button>
-        <button type="button" class="tvr-side-item" data-view="media-schedule">Schedule
-          <span class="tvr-tab-badge" id="tvr-badge-media-schedule" hidden></span></button>
-      </div>
-    </div>
-
-    <div class="tvr-side-group" data-section="general">
-      <button type="button" class="tvr-side-head" data-section-head="general" aria-expanded="false">
-        <i class="fa fa-caret-right" aria-hidden="true"></i><span>General</span></button>
-      <div class="tvr-side-items">
-        <button type="button" class="tvr-side-item" data-view="general-alerts">Alerts</button>
-        <button type="button" class="tvr-side-item" data-view="general-connections">Connections
-          <span class="tvr-tab-badge" id="tvr-badge-general-connections" hidden></span></button>
-        <button type="button" class="tvr-side-item" data-view="general-air-dates">Air dates</button>
-        <button type="button" class="tvr-side-item" data-view="general-safety">Safety</button>
-        <button type="button" class="tvr-side-item" data-view="general-logging">Logging</button>
-        <button type="button" class="tvr-side-item" data-view="general-backup">Backup</button>
+        <button type="button" class="tvr-side-item" data-view="settings-general">General</button>
+        <button type="button" class="tvr-side-item" data-view="settings-connections">Connections
+          <span class="tvr-tab-badge" id="tvr-badge-settings-connections" hidden></span></button>
+        <button type="button" class="tvr-side-item" data-view="settings-air-dates">Air dates</button>
+        <button type="button" class="tvr-side-item" data-view="settings-schedule">Schedule</button>
       </div>
     </div>
 
@@ -85,6 +72,8 @@
       <div class="tvr-side-items">
         <button type="button" class="tvr-side-item" data-view="system-status">Status
           <span class="tvr-tab-badge" id="tvr-badge-system-status" hidden></span></button>
+        <button type="button" class="tvr-side-item" data-view="system-stats">Stats</button>
+        <button type="button" class="tvr-side-item" data-view="system-backup">Backup</button>
         <button type="button" class="tvr-side-item" data-view="system-logs">Logs
           <span class="tvr-tab-badge" id="tvr-badge-system-history" hidden></span></button>
       </div>
@@ -145,7 +134,7 @@
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-<section id="tvr-view-general-connections" class="tvr-view" hidden>
+<section id="tvr-view-settings-connections" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Connections</h2></div>
     <div id="tvr-alerts-system" class="tvr-rules"></div>
     <div class="tvr-actions"><button type="button" id="tvr-recheck-all" class="tvr-secondary">Re-check everything</button></div>
@@ -175,9 +164,16 @@
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-<section id="tvr-view-media-schedule" class="tvr-view" hidden>
+<section id="tvr-view-settings-schedule" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Schedule</h2></div>
     <p class="tvr-lede">Changes here save as you make them.</p>
+    <div class="tvr-card tvr-test-mode-card">
+      <div class="tvr-card-head">
+        <h3 class="tvr-card-title">Test Mode</h3>
+        <label class="tvr-switch"><input type="checkbox" id="tvr-test-mode"><span class="tvr-slider"></span><span class="tvr-switch-text" id="tvr-test-mode-label">On — nothing writes</span></label>
+      </div>
+      <small>Everything happens as it would on a real run: matching, evaluation, and history. Nothing is written to Sonarr, and every line of the output is marked <span class="tvr-mono">[TEST MODE]</span>. This applies to every run, scheduled or manual. Turn it off only when you are ready to delete.</small>
+    </div>
     <div class="tvr-card">
       <div class="tvr-card-head">
         <h3 class="tvr-card-title">Scheduled run</h3>
@@ -208,14 +204,12 @@
         <label class="tvr-field" id="tvr-field-minute"><span>Minute</span><select id="tvr-minute"></select></label>
       </div>
       <label class="tvr-field" id="tvr-field-cron"><span>Cron expression</span><input type="text" id="tvr-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
-      <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-test-mode"><span class="tvr-slider"></span><span class="tvr-switch-text">Test mode — run the schedule without making changes</span></label>
-      <small>Everything happens as it would on a real run: matching, evaluation, and history. Nothing is written to Sonarr, and every line of the output is marked <span class="tvr-mono">[TEST MODE]</span>. This applies to every run, scheduled or manual — to delete anything, turn Test mode off.</small>
       <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity. Sonarr is read again immediately before a run, so nothing acts on a stale reading.</small></p>
     </div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-<section id="tvr-view-media-presets" class="tvr-view" hidden>
+<section id="tvr-view-series-presets" class="tvr-view" hidden>
     <div class="tvr-view-head">
       <h2>Presets</h2>
       <span class="tvr-spacer"></span>
@@ -227,23 +221,11 @@
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-<section id="tvr-view-media-automation" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Automation</h2></div>
-    <p class="tvr-lede">What happens without anybody asking for it. These apply to every series, and a series can opt out of the specials rule from its own editor.</p>
+<section id="tvr-view-series-exclusions" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Exclusion Rules</h2></div>
+    <p class="tvr-lede">Global exceptions to retention. These apply to every series, and a series can opt out of the specials rule from its own editor.</p>
 
-    <h3 class="tvr-h3">Monitoring</h3>
-    <div class="tvr-card">
-      <small>A run never asks Sonarr to fetch anything. It unmonitors what it deletes, and everything that falls outside the keep window — including episodes with no file, which are never deleted, so nothing else would reach them and Sonarr would go on fetching what the next run removes.</small>
-      <small>Monitoring is only ever set once, when you save a series whose keep window has grown, and only for the episodes that growth brought in.</small>
-      <small><strong>Keeping an episode outside the keep window:</strong> add it to the exclusion list first. An excluded episode's monitored flag is never touched, so whatever you set in Sonarr afterwards stays set. Without the exclusion, the next run unmonitors it.</small>
-    </div>
-
-    <h3 class="tvr-h3">Automatic search</h3>
-    <div class="tvr-card">
-      <div id="tvr-auto-search" class="tvr-questions"></div>
-    </div>
-
-    <h3 class="tvr-h3">Exclusions</h3>
+    <h3 class="tvr-h3">Global exclusions</h3>
     <div class="tvr-card">
       <small>An excluded episode is never deleted and never unmonitored, whatever a rule says. These are applied on every run, so changing a line here changes every series at once.</small>
       <label class="tvr-switch tvr-row-switch"><input type="checkbox" id="tvr-exclude-specials"><span class="tvr-slider"></span><span class="tvr-switch-text">Automatically exclude specials</span></label>
@@ -268,6 +250,8 @@
       <button type="button" id="tvr-status-refresh" class="tvr-secondary">Refresh status</button></div>
     <div id="tvr-status-summary" class="tvr-stats"></div>
     <div id="tvr-status-alerts" class="tvr-rules"></div>
+    <h3 class="tvr-h3" id="tvr-suppressed-title" hidden>Hidden recurring alerts</h3>
+    <div id="tvr-alerts-suppressed"></div>
     <h3 class="tvr-h3">Recent alerts</h3>
     <div id="tvr-status-recent" class="tvr-rules"></div>
     <h3 class="tvr-h3">Connections</h3>
@@ -336,7 +320,7 @@
 
 <section id="tvr-view-help-connecting" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Connecting apps</h2></div>
-    <p class="tvr-lede">Sonarr is the only connection this needs. Add it under <em>General → Connections</em> with its URL and API key, and press <strong>Test &amp; save</strong>: it reports the version, counts the series, and says whether Sonarr has a recycle bin configured.</p>
+    <p class="tvr-lede">Sonarr is the only connection this needs. Add it under <em>Settings → Connections</em> with its URL and API key, and press <strong>Test &amp; save</strong>: it reports the version, counts the series, and says whether Sonarr has a recycle bin configured.</p>
     <p class="tvr-lede">If Sonarr has <strong>no recycle bin</strong>, everything it deletes is permanent — including what is asked for here. That raises a warning with a one-click fix.</p>
     <p class="tvr-lede">More than one Sonarr is supported, and each series belongs to exactly one of them. An instance can be disabled without deleting it, which leaves its rules in place and stops them being processed.</p>
       <p class="tvr-lede">Everything on screen is answered from the stored reading, so the page never waits on Sonarr. The worker refreshes it regularly, opening or returning to the page starts a quiet refresh when appropriate, and the age remains visible beside scheduled changes. A run always reads Sonarr again before it acts.</p>
@@ -382,25 +366,14 @@
 
 <section id="tvr-view-help-scheduling" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Scheduling</h2></div>
-    <p class="tvr-lede">Set when runs happen under <em>Media management → Schedule</em>. The worker keeps its own time: it decides what is due, sleeps, and decides again, so a run missed while the container was stopped is caught up rather than skipped, and one held back because Sonarr was unreachable goes as soon as it answers. Exactly one is ever queued.</p>
+    <p class="tvr-lede">Set when runs happen under <em>Settings → Schedule</em>. The worker keeps its own time: it decides what is due, sleeps, and decides again, so a run missed while the container was stopped is caught up rather than skipped, and one held back because Sonarr was unreachable goes as soon as it answers. Exactly one is ever queued.</p>
     <p class="tvr-lede"><strong>Test Mode</strong> is on for a new install and means nothing writes — scheduled or manual, no exceptions. A run does everything except write and marks its output <span class="tvr-mono">[TEST MODE]</span>. The Run button says which of the two it is about to do: orange reports, blue deletes.</p>
     <p class="tvr-lede">Set <span class="tvr-mono">TZ</span> in your compose file, or "daily at 4am" will mean 4am somewhere else.</p>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
-  <section id="tvr-view-general-alerts" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Alerts</h2></div>
-    <p class="tvr-lede">An alert is a fact about the present: it appears when its condition becomes true and clears itself when the condition clears.</p>
-    <div class="tvr-card">
-      <p class="tvr-lede">Warnings and notices can be acknowledged until what they say changes. Errors stay visible while they are true because they block work.</p>
-    </div>
-
-    <h3 class="tvr-h3" id="tvr-suppressed-title" hidden>Hidden recurring alerts</h3>
-    <div id="tvr-alerts-suppressed"></div>
-  </section>
-
   <!-- ---------------------------------------------------------------- -->
-  <section id="tvr-view-media-stats" class="tvr-view" hidden>
+  <section id="tvr-view-system-stats" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Stats</h2><span class="tvr-spacer"></span>
       <span class="tvr-chip" id="tvr-stats-age">—</span></div>
     <div id="tvr-stats-summary" class="tvr-stats"></div>
@@ -419,8 +392,9 @@
 
   <!-- ---------------------------------------------------------------- -->
 
-<section id="tvr-view-general-logging" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Logging</h2></div>
+<section id="tvr-view-settings-general" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>General</h2></div>
+    <p class="tvr-lede">Application-wide logging and history settings.</p>
     <div class="tvr-card">
       <div class="tvr-inline-row">
         <span class="tvr-inline-label">Detail</span>
@@ -446,16 +420,7 @@
 
   <!-- ---------------------------------------------------------------- -->
 
-<section id="tvr-view-general-safety" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Safety</h2></div>
-    <p class="tvr-lede">What stands between a rule and a mistake.</p>
-    <div class="tvr-card"><p class="tvr-lede">What already protects you, and cannot be switched off: Test Mode, which is on for a new install and means nothing writes; queued removals, which only a run applies and which stay undoable until it does; a typed confirmation before a series is removed; deleting a file always unmonitoring it, so nothing can build a fetch-and-delete loop; and unaired episodes never being deleted whatever a rule says about the old ones.</p></div>
-
-  </section>
-
-  <!-- ---------------------------------------------------------------- -->
-
-<section id="tvr-view-general-air-dates" class="tvr-view" hidden>
+<section id="tvr-view-settings-air-dates" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Air date resolution</h2></div>
     <p class="tvr-lede">A rule that keeps by age needs a date for every episode it judges. Sonarr supplies one for almost everything with a broadcast slot, so this is rare — but when a series has no dates, a keep-by-age rule quietly finds nothing to act on.</p>
     <div class="tvr-card">
@@ -471,7 +436,7 @@
 
   <!-- ---------------------------------------------------------------- -->
 
-<section id="tvr-view-general-backup" class="tvr-view" hidden>
+<section id="tvr-view-system-backup" class="tvr-view" hidden>
     <div class="tvr-view-head"><h2>Backup</h2></div>
     <p class="tvr-lede">Back up TV Retention's own <span class="tvr-mono">/config</span> data only. Media is never inspected or copied. Archives contain API keys and must be protected.</p>
     <div class="tvr-card">

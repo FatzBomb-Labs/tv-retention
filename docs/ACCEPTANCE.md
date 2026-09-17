@@ -39,7 +39,7 @@ gets turned off, and it is the first thing here that can delete anything.
 
 ## 2. Sonarr instances
 
-- [ ] **Media management → Connections** → add `Sonarr-Series` (`http://<server>:8989`).
+- [ ] **Settings → Connections** → add `Sonarr-Series` (`http://<server>:8989`).
       **Test & save** reports the Sonarr version and how many series it holds.
 - [ ] Add `Sonarr-Anime` (port 8990) and test it.
 - [ ] Note whether either Sonarr has a recycle bin configured — the test reports it. If
@@ -55,22 +55,24 @@ gets turned off, and it is the first thing here that can delete anything.
 - [ ] Switch between **All**, **Connected** and **Not connected** and confirm the counts
       add up.
 - [ ] Confirm the default list is an operational row with title/state, retention,
-      episodes/storage, next airing or ended state, planned changes and alerts.
+      episodes/storage, next airing or ended state, scheduled-change badges and alerts.
 - [ ] Switch to poster view and back. Confirm the selected series stays selected and the
       column header is hidden only in poster mode.
 - [ ] Narrow the browser to a phone-width viewport. Confirm rows collapse into a readable
-      two-column record without clipping the title or planned changes.
+      two-column record without clipping the title or scheduled-change badges.
 - [ ] **Hide ended** removes finished series with no rule, and keeps a finished series
       that has one. Confirm a finished series with an alert stays visible either way.
 - [ ] Search for a series by part of its name; confirm the sort orders behave.
 
 ## 4. Presets and rules
 
-- [ ] Create a preset, for example *Keep 180 days*. Point two shows at it, and confirm
+- [ ] Open **Series → Presets** and create a preset, for example *Keep 180 days*. Point two shows at it, and confirm
       both cards show the preset name.
 - [ ] Edit the preset. Confirm the editor lists the shows that will change, and that both
       cards update after saving.
 - [ ] Confirm a preset in use cannot be removed.
+- [ ] Open **Series → Exclusion Rules** and confirm the global exclusion controls are present,
+      while the one-time monitoring pass remains in the series editor.
 - [ ] Add one show with **Custom** retention and confirm the preset has no effect on it.
 - [ ] Confirm **Custom** is the first option and the one a new series starts on.
 - [ ] Open a series with no rule, set a keep window, and press **Save** (not *Save and
@@ -100,7 +102,7 @@ gets turned off, and it is the first thing here that can delete anything.
 - [ ] Verify in Sonarr that exactly the listed episodes now show no file, and that they are
       unmonitored. Deleting always unmonitors; that is an invariant, not a setting.
 - [ ] Verify on disk that Sonarr's recycle bin caught the files, if one is configured.
-- [ ] Check the run appears in **System → Job history**, and that `journal.jsonl` in the
+- [ ] Check the run appears in **System → Logs → Runs**, and that `journal.jsonl` in the
       state folder has a matching record.
 - [ ] Switch the other rules back on.
 
@@ -149,6 +151,9 @@ gets turned off, and it is the first thing here that can delete anything.
 
 ## 9. Schedule
 
+- [ ] Open **Settings → Schedule** and confirm the prominent **Test Mode** card is above
+      the schedule controls, clearly states whether writes are allowed, and saves its
+      toggle immediately.
 - [ ] Enable a daily schedule a few minutes ahead. Confirm the run happens without anyone
       being logged in — close the browser and check the history afterwards. The worker is
       the point; authentication guards the interface, never the work.
@@ -176,11 +181,11 @@ gets turned off, and it is the first thing here that can delete anything.
 
 ## 12. Connections, API key, backup and status
 
-- [ ] Under **General → Connections**, configure an optional provider, test it, and confirm
+- [ ] Under **Settings → Connections**, configure an optional provider, test it, and confirm
       its URL/credential is masked after saving. Saving an unchanged mask keeps the secret.
 - [ ] Create the TV Retention API key, copy it, and confirm the full value is not shown after
       refresh. Regenerate replaces it; Revoke changes the state without exposing a secret.
-- [ ] Configure a separate writable backup destination and press **Back up now**. Confirm
+- [ ] Under **System → Backup**, configure a separate writable destination and press **Back up now**. Confirm
       the timestamped ZIP contains settings, state, journal and caches, excludes the backup
       directory itself, and is pruned to the configured count. Treat the archive as a
       credential-bearing file.
