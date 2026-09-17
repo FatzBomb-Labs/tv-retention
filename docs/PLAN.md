@@ -31,8 +31,8 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest implementation checkpoint: (4/4 complete)** — removal request identity,
-committed as `a07587b`. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
+**Latest implementation checkpoint: (4/4 complete)** — fresh ordinary planning after
+completed, locally finalized removals. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
 partially complete; no complete phase exit gate has been met. This is not zero work
 completed or a production-readiness percentage. The former 0/94 counter is retired:
 it counted only remaining work, excluding fixes already delivered.
@@ -43,7 +43,8 @@ Delivered and verified (evidence and limits in VALIDATION):
 - Failed/unattempted work is reported as incomplete rather than successful.
 - Recovery uses structured HTTP status and stops on failed reads.
 - Ordinary-only retries archive the old intent and re-plan from current settings and
-  fresh readings rather than replaying old deletion decisions.
+  fresh readings rather than replaying old deletion decisions. This now also covers mixed
+  intents whose removals completed and no longer await local queue finalization.
 - Removal request IDs prevent same-action cancel/requeue from authorizing old operations,
   reject stale saves carrying canceled IDs, and are checked again before dispatch.
 
@@ -143,9 +144,13 @@ that exact ID and action, and a stale settings save cannot restore a canceled ID
 Ordinary-only unfinished intents now follow that policy: exact checkpoints are archived
 under `state/run-history/` before replacement, and retries refresh the catalogue and
 re-evaluate current rules. Archive failure stops replacement/writes. VALIDATION records
-the bounded coverage. Mixed/removal intents still use the legacy recovery path above;
-they can still block ordinary work and are not evidence of the full accepted policy.
-Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
+the bounded coverage. Mixed intents now also re-plan ordinary work when all removal
+records have successful operation checkpoints and none still awaits local queue
+finalization. The exact old mixed intent is archived, preserving completed removal history.
+Unresolved removals and completed requests still awaiting local finalization retain the
+legacy recovery path; they can still block ordinary work or replay its old decisions.
+This is not full mixed-run separation. Archive lifecycle, crash-history finalization and
+durability remain Phase 2 work.
 
 - [ ] Restrict execution to currently eligible operations. Separate mixed-run removal
       recovery from newly planned ordinary retention so failed/canceled explicit work

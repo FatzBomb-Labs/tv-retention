@@ -3,8 +3,9 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **618 Python tests in 4.996s**, all
-passing, plus **22 frontend tests**, all passing. The preceding legacy-retirement checkpoint
+`tools/check-on-host.ps1` on `fatzserver-host` ran **620 Python tests in 5.514s**, all
+passing, plus **22 frontend tests**, all passing. The preceding identity checkpoint passed
+**618 Python tests in 4.996s** and **22 frontend tests**. The preceding legacy-retirement checkpoint
 passed **610 Python tests in 5.420s** and **22 frontend tests**. The preceding recovery-error checkpoint
 passed **610 Python tests in 5.937s** and **22 frontend tests**. The canceled-removal checkpoint
 also passed (**606 Python tests in 5.913s**, repeated in **5.912s**). Earlier gates for
@@ -20,6 +21,20 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
+- Mixed-run recovery now distinguishes completed/finalized removal history from unresolved
+  one-time work. A public-run regression completed queued unmonitoring for one series,
+  lost the ordinary deletion reply for a second, then added an exclusion. Before the fix,
+  the regression failed (**1 in 0.031s**) recording an attempted
+  `DELETE /api/v3/episodefile/199` despite that exclusion. After the fix it passes with no
+  further mutation, a new run ID, zero deleted/bytes, and an exact archived old intent.
+  The related focused suites passed **21 tests in 0.056s**. A second test injects an
+  interruption at local removal finalization after an acknowledged write: the next public
+  call finalizes without repeating the external action. That test was added after the
+  initial patch and passes in the full gate; it is not process-crash evidence. Completed
+  requests still present in the queue stay on the legacy finalization path to avoid
+  freshly staging them again. Unresolved removals, missing completion records, and local
+  finalization cases still need separate ledgers; they may block or replay ordinary work.
+  No claim of complete mixed-run recovery, target authorization or concurrent safety.
 - Queued removals now carry a persisted `request_id` (validated, 64 chars, generated when
   absent). `action_settings` refuses a submitted ID that does not match the current queue
   request or action, so a stale document cannot restore canceled work; a new queue entry

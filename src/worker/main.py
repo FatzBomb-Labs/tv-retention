@@ -810,11 +810,25 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
 
     stored = load_intent(settings)
     unfinished = stored and stored.get('status') != 'complete'
-    # Explicit removals remain one-time intent, not ordinary retention permission.
-    # Mixed/removal recovery still needs its own queue-identity migration; do not drop it.
-    has_removals = stored and (stored.get('removals') or any(
-        op.get('removal_action') for op in stored.get('operations') or []))
-    if unfinished and has_removals:
+    # Completed removals are historical outcomes, not permission to replay ordinary
+    # work. Unfinished operations and removal records without confirmed completion
+    # still require the guarded recovery path until separate request ledgers land.
+    removal_operations = [op for op in (stored or {}).get('operations') or []
+                          if op.get('removal_action')]
+    completed_removals = {(op.get('rule_id'), op['removal_action'])
+                          for op in removal_operations if op.get('status') == 'done'}
+    unresolved_removals = any(op.get('status') != 'done' for op in removal_operations) or any(
+        not record.get('ok') or (record.get('rule_id'), record.get('action')) not in completed_removals
+        for record in (stored or {}).get('removals') or [])
+    # An acknowledged operation whose queue is still present needs local finalization,
+    # not a freshly staged copy of the same external action (e.g. crash before cleanup).
+    current_requests = {(rule['id'], removal.get('request_id'), removal.get('action'))
+                        for rule in settings.get('rules') or []
+                        if (removal := (rule.get('queue') or {}).get('removal'))}
+    awaiting_finalization = any(
+        (op.get('rule_id'), op.get('request_id'), op.get('removal_action')) in current_requests
+        for op in removal_operations if op.get('status') == 'done')
+    if unfinished and (unresolved_removals or awaiting_finalization):
         intent = stored
         _resume_intent(settings, intent)
     else:
