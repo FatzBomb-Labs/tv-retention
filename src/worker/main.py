@@ -793,34 +793,40 @@ def _resume_intent(settings: dict, intent: dict) -> None:
 def _intent_summary(intent: dict, preview: bool, test_mode: bool, scheduled: bool, started: str) -> dict:
     """Render the durable decision as the established run-result contract."""
     rules = json.loads(json.dumps(intent.get('rules') or []))
+    removals = json.loads(json.dumps(intent.get('removals') or []))
     by_rule = {row.get('rule_id'): row for row in rules}
+    dry_run = preview or test_mode
     for operation in intent.get('operations') or []:
+        # Pending is expected in a preview, but never counts as applied work in a run.
+        unfinished = not dry_run and operation.get('status') != 'done'
+        error = (operation.get('error') or 'A staged operation was not completed') if unfinished else ''
+        if operation.get('removal_action') and unfinished:
+            for record in removals:
+                if record.get('rule_id') == operation.get('rule_id'):
+                    record.update(ok=False, error=error)
         outcome = by_rule.get(operation.get('rule_id'))
         if not outcome:
             continue
-        if operation.get('status') == 'failed':
+        if unfinished:
             outcome['ok'] = False
-            outcome['error'] = operation.get('error') or 'A staged write failed'
+            outcome['error'] = outcome.get('error') or error
         if operation.get('kind') == 'delete-episode-file':
             index = operation.get('outcome_index')
-            if isinstance(index, int) and index < len(outcome.get('deleted') or []):
-                outcome['deleted'][index].update(ok=operation.get('status') == 'done', dry_run=False,
-                                                  error=operation.get('error') or '')
-        if operation.get('removal_action') and operation.get('status') == 'failed':
-            for record in intent.get('removals') or []:
-                if record.get('rule_id') == operation.get('rule_id'):
-                    record.update(ok=False, error=operation.get('error') or 'A staged write failed')
+            if isinstance(index, int) and 0 <= index < len(outcome.get('deleted') or []):
+                outcome['deleted'][index].update(ok=not dry_run and operation.get('status') == 'done',
+                                                  dry_run=dry_run, error=error)
     for outcome in rules:
         outcome['freed_bytes'] = sum(int(row.get('size') or 0) for row in outcome.get('deleted') or []
                                       if row.get('ok'))
     deleted = sum(len([row for row in outcome.get('deleted') or [] if row.get('ok')]) for outcome in rules)
     return {'id': intent['id'], 'started': started, 'finished': now_iso(), 'scheduled': scheduled,
-            'preview': preview, 'test_mode': test_mode, 'dry_run': preview or test_mode,
+            'preview': preview, 'test_mode': test_mode, 'dry_run': dry_run,
+            'status': 'preview' if dry_run else intent.get('status', 'incomplete'),
             'rules': rules, 'planned': sum(len(row.get('deleted') or []) for row in rules),
-            'removals': intent.get('removals') or [], 'deleted': deleted,
+            'removals': removals, 'deleted': deleted,
             'freed_bytes': sum(row.get('freed_bytes') or 0 for row in rules),
             'errors': [row['error'] for row in rules if row.get('error')]
-            + [row['error'] for row in intent.get('removals') or [] if row.get('error')],
+            + [row['error'] for row in removals if row.get('error')],
             'blocked': [row['blocked'] for row in rules if row.get('blocked')], 'duration_seconds': 0}
 
 

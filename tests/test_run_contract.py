@@ -79,6 +79,33 @@ class PublicRunContract(unittest.TestCase):
                 self.assertEqual(intent['operations'][0]['status'], 'done')
                 self.assertEqual(fixture.store.load_settings()['rules'], [])
 
+    def test_failed_first_write_stops_next_operation_and_reports_incomplete(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False)
+            settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
+                                          path='/tv/Second', series_title='Second'))
+            fixture.store.save_settings(settings)
+            fixture.sonarr.expect('GET', 'series', [SERIES, dict(
+                SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)])
+            for series_id in (1, 2):
+                fixture.sonarr.expect('GET', 'episode', [episode_payload(100 + series_id)],
+                    query={'seriesId': [str(series_id)], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('PUT', 'episode/monitor',
+                urllib.error.URLError('fixture write failed'),
+                body={'episodeIds': [101], 'monitored': False})
+            result = fixture.main.run()
+            fixture.sonarr.assert_finished()
+            self.assertEqual(len(fixture.sonarr.mutations), 1)
+            intent = fixture.store.load_intent(settings)
+            self.assertEqual(intent['status'], 'incomplete')
+            self.assertEqual([op['status'] for op in intent['operations']], ['failed', 'pending'])
+            self.assertEqual([op['attempts'] for op in intent['operations']], [1, 0])
+            self.assertEqual(len(fixture.store.load_settings()['rules']), 2)
+            self.assertTrue(result['errors'])
+            self.assertFalse(result['removals'][0]['ok'])
+            self.assertFalse(result['removals'][1]['ok'])
+            self.assertEqual(result['status'], 'incomplete')
+
 
 if __name__ == '__main__':
     unittest.main()
