@@ -140,6 +140,28 @@ class PublicRunContract(unittest.TestCase):
             self.assertEqual([op['attempts'] for op in intent['operations']], [2, 1])
             self.assertEqual(fixture.store.load_settings()['rules'], [])
 
+    def test_canceled_removal_is_not_revived_by_recovery(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False)
+            fixture.sonarr.expect('GET', 'series', [SERIES])
+            fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('PUT', 'episode/monitor',
+                urllib.error.URLError('fixture write failed'),
+                body={'episodeIds': [101], 'monitored': False})
+            fixture.main.run()
+            before = fixture.store.load_intent(settings)
+            current = fixture.store.load_settings()
+            current['rules'][0]['queue'] = {}
+            fixture.store.save_settings(current)
+            with self.assertRaisesRegex(fixture.main.Rejected, 'removal.*changed|removal.*canceled'):
+                fixture.main.run()
+            fixture.sonarr.assert_finished()
+            self.assertEqual(len(fixture.sonarr.mutations), 1)
+            self.assertEqual(fixture.store.load_intent(settings), before)
+            self.assertEqual(len(fixture.store.load_settings()['rules']), 1)
+            self.assertFalse(fixture.store.load_settings()['rules'][0]['queue'].get('removal'))
+
 
 if __name__ == '__main__':
     unittest.main()

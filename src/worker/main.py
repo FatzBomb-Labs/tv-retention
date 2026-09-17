@@ -747,6 +747,16 @@ def _resume_intent(settings: dict, intent: dict) -> None:
     that request without looking is exactly what the ledger prevents: a fresh read lets us
     retire a delete that already happened and trim monitoring work that is already true.
     """
+    # A saved removal is not permission to resurrect an operator's canceled queue.
+    # Check the whole unfinished removal set before reconciliation changes the ledger.
+    rules = {rule['id']: rule for rule in settings.get('rules') or []}
+    for operation in intent.get('operations') or []:
+        if operation.get('status') == 'done' or not operation.get('removal_action'):
+            continue
+        rule = rules.get(operation.get('rule_id')) or {}
+        queued = (rule.get('queue') or {}).get('removal') or {}
+        if queued.get('action') != operation['removal_action']:
+            raise Rejected('Saved removal was changed or canceled; recovery requires review.')
     fresh = {}
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done' or operation.get('kind') == 'remove-rule':

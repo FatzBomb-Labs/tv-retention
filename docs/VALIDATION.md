@@ -3,9 +3,10 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **605 Python tests in 5.406s**, all
-passing, plus **22 frontend tests**, all passing. The preceding reporting-fix gate
-also passed: **604 Python tests in 5.398s** and **22 frontend tests**.
+`tools/check-on-host.ps1` on `fatzserver-host` ran **606 Python tests in 5.913s**, all
+passing, plus **22 frontend tests**, all passing. Preceding gates also passed: persisted-intent
+retry coverage (**605 Python tests in 5.406s**) and reporting fixes (**604 in 5.398s**),
+each with **22 frontend tests**.
 Every shipped worker module was
 separately imported and syntax-checked; every shipped JavaScript module was syntax-checked.
 No deployment, live Sonarr request, or media access occurred; staging was disposable.
@@ -35,6 +36,12 @@ Evidence:
   public-run/transport tests passed in 0.022s**. This is not a process-restart or crash test,
   nor evidence of recovery permission revalidation; settings remain unchanged. The initial
   expected request order was corrected to match read-only reconciliation before dispatch.
+- Recovery now rejects unfinished removals whose current queue action is missing or changed,
+  before reconciliation alters the saved intent. The canceled-queue public-run regression
+  first failed at an unexpected recovery GET; after the guard, **1 test passed in 0.013s**,
+  with no further request, unchanged intent and the rule retained. This does not prove
+  cancel-and-requeue identity, current target/exclusion/scope checks or mid-run cancellation.
+  Rejection preserves the unresolved intent; an operator recovery workflow remains open.
 - `tests/fake_sonarr.py` records exact method/path/query/body, rejects unexpected requests,
   blocks socket access, and supports changed/shared/fileless payloads and lost responses.
   Its first run exposed an invalid synthetic key; that fixture error was corrected before

@@ -92,7 +92,10 @@ Dispatch/completion now belongs to the executor, with explicit intent and read-o
 recovery reconciliation. Failed operations stop the current run conservatively. Run
 summaries now expose incomplete operations and failed/unattempted removals. Persisted-intent
 retry is covered through a second public run with unchanged settings, not a process restart
-or recovery-authorization test; evidence is in VALIDATION.
+or recovery-authorization test; evidence is in VALIDATION. Recovery now refuses unfinished
+removals when the current queue action is missing or changed, preserving the intent for
+review. Same-action cancel-and-requeue, mid-run cancellation and the wider permission
+checks below remain open; no operator recovery-resolution workflow exists yet.
 
 - [ ] Restrict execution to pending, currently eligible operations; revalidate recovery
       permission rather than assuming the saved intent remains authorized.
