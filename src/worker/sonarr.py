@@ -41,7 +41,11 @@ MAPPING_SCHEMA = hashlib.sha256(
 
 
 class SonarrError(Rejected):
-    """A Sonarr call failed. The message is written for the person reading the UI."""
+    """A failed call, with optional HTTP status separate from the UI message."""
+
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class Sonarr:
@@ -74,10 +78,13 @@ class Sonarr:
                 payload = response.read()
         except urllib.error.HTTPError as error:
             if error.code in (401, 403):
-                raise SonarrError(f'{self.name}: Sonarr rejected the API key')
+                raise SonarrError(f'{self.name}: Sonarr rejected the API key',
+                                  status_code=error.code) from error
             if error.code == 404:
-                raise SonarrError(f'{self.name}: Sonarr returned "not found" for {path}')
-            raise SonarrError(f'{self.name}: Sonarr returned HTTP {error.code} for {path}')
+                raise SonarrError(f'{self.name}: Sonarr returned "not found" for {path}',
+                                  status_code=error.code) from error
+            raise SonarrError(f'{self.name}: Sonarr returned HTTP {error.code} for {path}',
+                              status_code=error.code) from error
         except urllib.error.URLError as error:
             raise SonarrError(f'{self.name}: cannot reach {self.url} ({error.reason})')
         except (TimeoutError, OSError) as error:

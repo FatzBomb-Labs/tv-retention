@@ -764,20 +764,17 @@ def _resume_intent(settings: dict, intent: dict) -> None:
         if operation.get('kind') == 'delete-series':
             try:
                 client_for(settings, operation['instance_id']).series_one(operation['series_id'])
-            except (Rejected, SonarrError) as error:
-                if 'not found' in str(error).lower():
+            except SonarrError as error:
+                if error.status_code == 404:
                     operation.update(status='done', error='', recovered_at=now_iso())
                 else:
-                    operation['resume_error'] = str(error)
+                    raise
             continue
         key = (operation['instance_id'], operation['series_id'])
         if key in fresh:
             continue
-        try:
-            fresh[key] = client_for(settings, key[0]).episodes(key[1], files_only=False)
-        except (Rejected, SonarrError) as error:
-            fresh[key] = None
-            operation['resume_error'] = str(error)
+        # Uncertain reads must abort recovery, not fall through to replaying writes.
+        fresh[key] = client_for(settings, key[0]).episodes(key[1], files_only=False)
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done':
             continue

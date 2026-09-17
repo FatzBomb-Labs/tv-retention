@@ -3,9 +3,10 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **606 Python tests in 5.913s**, all
-passing, plus **22 frontend tests**, all passing. Preceding gates also passed: persisted-intent
-retry coverage (**605 Python tests in 5.406s**) and reporting fixes (**604 in 5.398s**),
+`tools/check-on-host.ps1` on `fatzserver-host` ran **610 Python tests in 5.937s**, all
+passing, plus **22 frontend tests**, all passing. The preceding canceled-removal checkpoint
+also passed (**606 Python tests in 5.913s**, repeated in **5.912s**). Earlier gates for
+persisted-intent retry (**605 in 5.406s**) and reporting fixes (**604 in 5.398s**) also passed,
 each with **22 frontend tests**.
 Every shipped worker module was
 separately imported and syntax-checked; every shipped JavaScript module was syntax-checked.
@@ -42,6 +43,13 @@ Evidence:
   with no further request, unchanged intent and the rule retained. This does not prove
   cancel-and-requeue identity, current target/exclusion/scope checks or mid-run cancellation.
   Rejection preserves the unresolved intent; an operator recovery workflow remains open.
+- `tests/test_recovery_errors.py`: **4 tests passed in 0.023s**. A connection error saying
+  `host not found` first reproduced false completion (the expected exception was not raised).
+  `SonarrError` now preserves HTTP status; series recovery recognizes only HTTP 404 as
+  absent and propagates other failures. Tests cover 401/403/404/500/503 via the real client.
+  A public retry with an unavailable or malformed episode-list response sends no further
+  mutation and leaves its persisted intent and queued rule intact. Malformed individual
+  rows, target identity, proxy-generated 404s and actual process restart remain unproven.
 - `tests/fake_sonarr.py` records exact method/path/query/body, rejects unexpected requests,
   blocks socket access, and supports changed/shared/fileless payloads and lost responses.
   Its first run exposed an invalid synthetic key; that fixture error was corrected before

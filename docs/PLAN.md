@@ -95,7 +95,9 @@ retry is covered through a second public run with unchanged settings, not a proc
 or recovery-authorization test; evidence is in VALIDATION. Recovery now refuses unfinished
 removals when the current queue action is missing or changed, preserving the intent for
 review. Same-action cancel-and-requeue, mid-run cancellation and the wider permission
-checks below remain open; no operator recovery-resolution workflow exists yet.
+checks below remain open; no operator recovery-resolution workflow exists yet. Recovery
+uses structured HTTP status for absent series and stops on failed reads rather than
+replaying writes after an unavailable or malformed episode-list response.
 
 - [ ] Restrict execution to pending, currently eligible operations; revalidate recovery
       permission rather than assuming the saved intent remains authorized.
@@ -112,9 +114,9 @@ checks below remain open; no operator recovery-resolution workflow exists yet.
       changed instance URLs or a different requested run scope must not silently revive
       old work. Freeze the original decision for audit, but require re-planning or explicit
       resolution when it no longer matches current permission.
-- [ ] Treat a missing/replaced file as recovered/no-op only after a successful authoritative
-      read; distinguish that from an unavailable or malformed response. Use structured
-      status/error information rather than matching human-readable 'not found' text.
+- [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
+      including malformed individual rows and changed file membership. HTTP status is now
+      structured, but a proxy-generated 404 must not substitute for verified target identity.
 - [ ] Retire duplicate legacy execution paths after checking callers, or route them through
       the same guarded executor so tests cannot validate an obsolete path instead.
 
