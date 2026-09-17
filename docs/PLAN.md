@@ -24,15 +24,22 @@ Priority meanings:
 Evidence baseline and latest implementation results are in [VALIDATION.md](VALIDATION.md).
 The executor dispatch regression is fixed, including explicit intent and read-only recovery
 reconciliation. The current passing gate does not establish the remaining safety contracts.
-Review checks confirmed exclusion-field loss, a shared file appearing in protected and
-delete lists, and AniList overwriting a Sonarr date; those remain open. Other findings are
+Review checks confirmed exclusion-field loss and shared protected/delete files; the
+bounded editor and shared-file fixes are now delivered below. AniList overwriting a
+Sonarr date remains open. Other findings are
 source-inspected; concurrency, DST, container permissions and browser timing consequences
 need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest implementation checkpoint: (4/4 complete)** — unified removal-only recovery
-and guarded retry of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
+**Latest delivered changes:** simple latest-episode shared-file retention (`5c19739`),
+followed by protection for unknown/future shared members and editor saves that preserve
+current exclusions, Undo and rule identity. The final gate passed **644 Python and 28
+frontend tests**. Shared-file cutoff and the first five editor regressions were observed
+failing before their fixes; additional coverage was added afterward. See VALIDATION.
+
+**Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
+of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
 **OVERALL PLAN: (0/8 phase exit gates complete)** — Phases 0 and 1 are partially complete.
 This release-gate count is not an implementation-progress measure or a readiness percentage.
 The former 0/94 counter is retired: it excluded fixes already delivered.
@@ -76,9 +83,10 @@ Remaining phase status:
 - **Phase 1 — partial, with substantial executor/retry work delivered:** dispatch,
   incomplete-result reporting, fresh ordinary replanning, separate scoped removal ownership,
   request-aware finalization and guarded record-only retry are verified in bounded fixtures.
-  Remaining blockers include remote target authorization, shared-file protection,
-  exclusion/queue preservation, all-entry-point mode guards, operation-backed recovery
-  resolution and remaining interruption evidence. Concurrency/durability also needs Phase 2.
+  Latest additions cover simple shared-file protection and frontend exclusion/queue
+  preservation. Remaining blockers include remote target authorization, cross-tab settings
+  conflicts, all-entry-point mode guards, operation-backed recovery resolution and remaining
+  interruption evidence. Concurrency/durability also needs Phase 2.
 - **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
   interface correctness, container/HTTP operation and release acceptance gates remain.
 
@@ -228,13 +236,15 @@ empty/global intent corruption or duplicate success reporting is acceptable.
 
 Primary areas: `series-editor.js`, `series-removal.js`, `actions.py`, `core.py`.
 
-- [ ] Merge retention edits into the latest authoritative rule by ID, preserving manual
-      exclusions and independently owned metadata. Do not infer the saved rule from its
-      position at the end of an array.
-- [ ] Remove queue ownership from retention drafts. Read the current queue on render/save;
-      Undo must remain undone after editing, switching shows, background refresh and save.
+Delivered: retention edits merge into the latest frontend rule by ID, preserving manual
+exclusions, the current queue and independent metadata. Removed rules are rejected and
+follow-up actions use stable identity rather than array position. Tests cover Undo with
+the editor open, redraw/save/reopen, replaced settings, whole-season markers and
+watermarks. See VALIDATION for the bounded frontend evidence.
+
 - [ ] Add backend revision/conflict protection in Phase 2 so multiple tabs cannot restore
-      removed protection or canceled queues with a stale whole-document save.
+      removed protection or canceled queues with a stale whole-document save. Frontend
+      lookups do not protect concurrent whole-document writes or stale responses in flight.
 
 **Tests:** exclusion -> edit -> save -> reload; whole-season exclusions including future
 members; Undo -> edit -> save; rule removed during an in-flight operation; reordered rule
@@ -244,19 +254,14 @@ list; existing auto-reenable metadata preserved.
 
 Primary areas: `core.py`, `sonarr.py`, `main.py`, mapping and retention tests.
 
-- [x] Keep condition votes episode-specific rather than sharing votes by path.
-- [x] Group physical file actions by `(instance_id, file_id)` after episode decisions.
-      A shared file expires with its latest member episode; an exclusion on any member
-      protects the whole file, and a member still monitored outside the run's unmonitor
-      list blocks the deletion. Deliberately simple: no cross-season or duplicate-mapping
-      matrix beyond what the real mapping produces.
-- [x] Unmonitor all affected episodes before deleting their shared file. Deletions are
-      deduplicated by file, sizes counted once, and a failed unmonitor stops the file.
-      Per-episode explanations remain in the UI lists.
-
-**Tests:** shared excluded/deletable episodes; mixed keep/delete under Any and All; unknown
-or future sibling; cross-season file; duplicate mappings; missing IDs; equal IDs across
-instances. No file can appear in both protected and executable delete sets.
+Delivered: the agreed simpler policy replaces the proposed per-episode permission
+matrix. Each file uses its latest episode by the existing date/season/episode ordering
+for condition votes, with episode-count limits still counting episodes. An exclusion on
+any member protects the file. Unknown/future shared members retain protection. Physical
+deletions and byte totals are deduplicated per rule by Sonarr file ID; monitored members
+must be in the unmonitor plan, and a failed unmonitor stops execution. Per-episode rows
+remain available to monitoring and the UI. Evidence and bounded coverage are in VALIDATION.
+No separate complex mapping-reconciliation subsystem is planned for this checkpoint.
 
 ### 1.4 Apply Test Mode consistently
 

@@ -6,16 +6,19 @@ Choose how many **days**, **episodes** or **seasons** of each show to keep. Sona
 metadata and handles media operations through its API; no media server, media mount or
 path mapping is required. TV Retention does write its own settings, state and caches.
 
+A shared multi-episode file expires with its latest episode under the selected retention
+conditions. An exclusion on any member protects the whole file. It is deleted and counted
+once, only after its monitored episodes have been successfully unmonitored.
+
 ## Status and safety
 
 **Not ready for unattended destructive use. Keep retention schedules off and Test Mode
 on.** The [production-readiness plan](docs/PLAN.md), revised 2026-09-17, records unresolved
 release blockers, not completed fixes:
 
-- The run executor fails its regression; execution, recovery and reporting are not reliable.
-- Saving retention edits can drop manual exclusions.
-- A shared multi-episode file expires with its latest episode; an exclusion on any
-  episode in the file protects it.
+- Executor dispatch is fixed, but recovery authorization and concurrent-write safety
+  still have release blockers.
+- Cross-tab settings conflict protection is not yet implemented.
 - AniList can overwrite an existing Sonarr date rather than only filling blanks.
 - Immediate monitoring and recycle-bin actions bypass Test Mode.
 

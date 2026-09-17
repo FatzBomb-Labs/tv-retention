@@ -526,7 +526,8 @@ export function createSeriesEditor({
                                        textContent: existing ? 'Edit series' : 'Add series' });
         top.append(formBanner);
         if (existing) {
-          const queued = queuedBanner(rule);
+          const current = (getSettings().rules || []).find((other) => other.id === rule.id);
+          const queued = current && queuedBanner(current);
           if (queued) body.append(queued);
           const alertsHere = seriesAlerts(rule.id);
           if (alertsHere.length) body.append(seriesAlertCard(rule, alertsHere, { compact: true }));
@@ -581,10 +582,14 @@ export function createSeriesEditor({
                  state: formState };
       },
         save: async (context, startEnabled) => {
-        const draft = {
-          id: rule.id || undefined,
+        const rules = getSettings().rules || [];
+        const current = existing ? rules.find((other) => other.id === rule.id) : null;
+        if (existing && !current) {
+          throw new Error('That series is no longer in the library. Nothing was saved.');
+        }
+        // Retention owns only the edited fields, not exclusions, queues or watermarks.
+        const draft = Object.assign({}, current, {
           enabled: existing ? context.enabled.input.checked : !!startEnabled,
-          instance_id: series.instance_id,
           profile_id: context.presetSelect.value || '',
           keep_days: context.presetSelect.value ? null : (context.conditions.days.value || null),
           keep_episodes: context.presetSelect.value ? null : (context.conditions.episodes.value || null),
@@ -592,21 +597,30 @@ export function createSeriesEditor({
           combine: context.conditions.combine.value,
           include_specials: context.specials.value,
           auto_reenable: context.autoReenable.input.checked,
-          queue: rule.queue || undefined,
-        };
+        });
         if (!existing && series.selectable === false) {
           throw new Error(`${series.title} cannot be used: ${series.reason}.`);
         }
-        Object.assign(draft, { series_id: series.series_id, series_title: series.title || rule.series_title,
-                               tvdb_id: series.tvdb_id, path: series.path || rule.path });
-        getSettings().rules = (getSettings().rules || []).filter((other) => other.id !== rule.id).concat([draft]);
+        if (!existing) {
+          Object.assign(draft, { instance_id: series.instance_id, series_id: series.series_id,
+                                 series_title: series.title || rule.series_title,
+                                 tvdb_id: series.tvdb_id, path: series.path || rule.path });
+        }
+        getSettings().rules = existing
+          ? rules.map((other) => other.id === rule.id ? draft : other)
+          : rules.concat([draft]);
         await saveSettings(null);
         const matched = await api('match', {}, 'Matching against Sonarr…');
         applySaved(matched.settings);
 
         render();
         forgetLibrary();           // one more series with a rule
-        const saved = getSettings().rules[getSettings().rules.length - 1];
+        const saved = (getSettings().rules || []).find((other) => existing
+          ? other.id === rule.id
+          : other.instance_id === series.instance_id && other.series_id === series.series_id);
+        if (!saved) {
+          throw new Error('That series is no longer in the library. No monitoring changes were sent.');
+        }
         let done = '';
         // Applied now, against the saved rule, because the unmonitor half exists to stop
         // downloads that would otherwise happen before the next run.

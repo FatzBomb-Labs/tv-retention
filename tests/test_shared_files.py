@@ -47,3 +47,26 @@ class SharedFiles(unittest.TestCase):
 
     def test_failed_unmonitor_prevents_shared_delete(self):
         self.check_run(failed_monitor=True)
+
+    def test_unknown_or_future_sibling_is_not_permission_to_delete(self):
+        from core import evaluate
+        from test_retention import NOW, episode, settings
+        for future in (False, True):
+            with self.subTest(future=future):
+                first = episode(1, 1, days_ago=100)
+                second = episode(1, 2, days_ago=-1, air_date=future)
+                second.update(file_id=first['file_id'], path=first['path'])
+                result = evaluate([first, second], {'keep_days': 30, 'combine': 'all'},
+                                  settings(retention={'allow_estimated_dates': False}), now=NOW)
+                self.assertEqual(result['delete'], [])
+
+    def test_episode_count_counts_episodes_not_files(self):
+        from core import evaluate
+        from test_retention import NOW, episode, settings
+        rows = [episode(1, n, days_ago=10 - n) for n in range(1, 4)]
+        rows[1].update(file_id=rows[2]['file_id'], path=rows[2]['path'])
+        for combine in ('any', 'all'):
+            with self.subTest(combine=combine):
+                result = evaluate(rows, {'keep_episodes': 2, 'combine': combine}, settings(), now=NOW)
+                self.assertEqual([r['episode'] for r in result['delete']], [1])
+                self.assertEqual([r['episode'] for r in result['keep']], [2, 3])

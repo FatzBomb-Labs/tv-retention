@@ -1,6 +1,36 @@
 # Validation record
 
-## Latest implementation — 2026-09-17 (shared files)
+## Latest implementation — 2026-09-17 (bounded frontend rule-save preservation)
+
+Final combined Linux gate: **644 Python tests in 6.244s**, **28 frontend tests**, all
+passing; worker imports and all shipped Python/JavaScript syntax checks passed. No live
+calls or deployment. A focused shared-file follow-up passed **6 tests in 0.038s**,
+including post-fix tests for unknown/future siblings and episode-count semantics.
+
+Earlier Windows-only, fixture-backed checks:
+
+- `node --experimental-vm-modules --test tests/frontend/*.test.js`: **28 passed,
+  0 failed, 0 skipped** (1646.8144 ms), including six new editor-factory regressions.
+- With `PYTHONUTF8=1`, `.venv/Scripts/python.exe -m unittest discover -s tests -p
+  test_build.py`: **165 tests passed** (0.138s). No source-text assertions needed changes.
+- `git diff --check`: clean.
+
+The first five new regressions were observed failing against the original handler and
+passing after the patch. They cover latest episode and whole-season exclusions plus
+`auto_reenable_after`/independent metadata, actual removal Undo while the editor stays
+open through redraw/save/reopen, stable-ID targeting after reordered settings/matching,
+new-rule targeting by instance/series identity, and rejection of a removed existing rule
+without saving or resurrecting it. A sixth post-fix test covers disappearance in the match
+response: no follow-up monitoring or check may target another rule.
+
+The save merges only form-owned fields onto the latest frontend-held rule. Queue banners
+also read current settings. These tests use fake DOM/timers and fixture RPCs, not backend
+persistence; a serialized fixture round-trip verifies payload preservation, not worker
+validation. Transactions, multi-tab conflicts and stale in-flight responses remain open
+in PLAN Phase 2. The combined Linux gate above validates the current checkout; the
+shared-file gate below records the preceding checkpoint.
+
+## Previous implementation — 2026-09-17 (shared files)
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
 `tools/check-on-host.ps1` on `fatzserver-host` ran **642 Python tests in 6.237s**, all
@@ -10,7 +40,7 @@ passing, plus **22 frontend tests**, all passing. The preceding checkpoint passe
 Shared multi-episode files now expire with their latest member episode. The cutoff
 regression was observed failing before the patch: with episodes 1 and 2 sharing file 99
 and only episode 2 inside the keep window, the run sent `PUT episode/monitor` for
-`[101, 102]` where the fixture expected `[102]` only (**1 test in 0.030s**). After the
+`[101, 102]` where the fixture expected no mutations (**1 test in 0.030s**). After the
 change, `evaluate()` votes per file using the newest member, an exclusion on any member
 protects the file, and `process_rule()` deduplicates deletions by file, counting size
 once. A member still monitored outside the run's unmonitor list blocks the file; a

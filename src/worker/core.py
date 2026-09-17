@@ -1202,6 +1202,14 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     for episode in sorted(candidates, key=lambda e: _order_key(e, allow_estimates)):
         latest[file_key(episode)] = episode
     votes = {key: [] for key in latest}
+    # A shared file must not hide an unknown or forthcoming sibling behind the
+    # dated episode used as its cutoff. Single-episode behavior is unchanged.
+    for key in latest:
+        members = [e for e in candidates if file_key(e) == key]
+        if len(members) > 1 and any(
+                effective_date(e, allow_estimates)[0] is None
+                or effective_date(e, allow_estimates)[0] > now.date() for e in members):
+            votes[key].append(('file', 'unknown', 'Shared file has an undated or unaired episode'))
 
     if rule.get('keep_days'):
         cutoff = (now - dt.timedelta(days=int(rule['keep_days']))).date()
