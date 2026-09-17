@@ -117,8 +117,6 @@ replaying writes after an unavailable or malformed episode-list response.
 - [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
       including malformed individual rows and changed file membership. HTTP status is now
       structured, but a proxy-generated 404 must not substitute for verified target identity.
-- [ ] Retire duplicate legacy execution paths after checking callers, or route them through
-      the same guarded executor so tests cannot validate an obsolete path instead.
 
 **Tests:** first run; multiple operations; no operations; unmonitor failure; delete failure;
 request accepted but acknowledgement lost; crash before/after each checkpoint; interrupted

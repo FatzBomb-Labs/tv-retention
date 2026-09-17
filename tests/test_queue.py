@@ -91,17 +91,35 @@ if __name__ == '__main__':
 
 class UnmonitorOnDelete(unittest.TestCase):
     def test_deleting_a_file_always_unmonitors_it(self):
-        """Not a setting: a deleted file left monitored is a fetch-and-delete loop.
+        """The public executor must acknowledge unmonitoring before deleting a file."""
+        import urllib.error
+        from fake_sonarr import IsolatedWorker, SERIES, episode_payload
 
-        Auto unmonitor governs the episodes *around* the deletion — the ones outside the
-        window that have no file — never the deletion itself.
-        """
-        from pathlib import Path
-        source = (Path(__file__).resolve().parents[1] / 'src' / 'worker' / 'main.py').read_text()
-        block = source.split('if deleted_ids and not dry_run:')[1].split('if (settings.get(')[0]
-        self.assertIn('client.unmonitor(deleted_ids)', block)
-        self.assertNotIn('auto_unmonitor', block)
-        self.assertNotIn("rule.get('unmonitor')", block)
+        for fail_unmonitor in (False, True):
+            with self.subTest(fail_unmonitor=fail_unmonitor), IsolatedWorker() as fixture:
+                settings = fixture.settings(test_mode=False)
+                settings['rules'][0]['queue'] = {}
+                fixture.store.save_settings(settings)
+                fixture.sonarr.expect('GET', 'series', [SERIES])
+                fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                    'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                fixture.sonarr.expect('PUT', 'episode/monitor',
+                    urllib.error.URLError('fixture unmonitor failed') if fail_unmonitor else None,
+                    body={'episodeIds': [101], 'monitored': False})
+                if not fail_unmonitor:
+                    fixture.sonarr.expect('DELETE', 'episodefile/99')
+                result = fixture.main.run()
+                fixture.sonarr.assert_finished()
+                intent = fixture.store.load_intent(settings)
+                self.assertEqual([op['kind'] for op in intent['operations']],
+                                 ['set-monitored', 'delete-episode-file'])
+                self.assertEqual([op['status'] for op in intent['operations']],
+                                 ['failed', 'pending'] if fail_unmonitor else ['done', 'done'])
+                self.assertEqual([op['attempts'] for op in intent['operations']],
+                                 [1, 0] if fail_unmonitor else [1, 1])
+                self.assertEqual(result['status'], 'incomplete' if fail_unmonitor else 'complete')
+                self.assertEqual(result['deleted'], 0 if fail_unmonitor else 1)
+                self.assertEqual(len(fixture.sonarr.mutations), 1 if fail_unmonitor else 2)
 
 
 class LoadNormalises(unittest.TestCase):

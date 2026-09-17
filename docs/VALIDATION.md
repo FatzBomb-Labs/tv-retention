@@ -3,8 +3,9 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **610 Python tests in 5.937s**, all
-passing, plus **22 frontend tests**, all passing. The preceding canceled-removal checkpoint
+`tools/check-on-host.ps1` on `fatzserver-host` ran **610 Python tests in 5.420s**, all
+passing, plus **22 frontend tests**, all passing. The preceding recovery-error checkpoint
+passed **610 Python tests in 5.937s** and **22 frontend tests**. The canceled-removal checkpoint
 also passed (**606 Python tests in 5.913s**, repeated in **5.912s**). Earlier gates for
 persisted-intent retry (**605 in 5.406s**) and reporting fixes (**604 in 5.398s**) also passed,
 each with **22 frontend tests**.
@@ -18,6 +19,15 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
+- Legacy run execution is retired: the unused `apply_removals` helper was removed after
+  caller checks (including Pylance references); `process_rule` now refuses `dry_run=False`
+  before any Sonarr call. Its deletion/monitoring helpers only describe candidates.
+  The refusal regression first failed in both Test Mode subcases. A source-text test
+  coupled to the removed branch then failed with `IndexError`; it was replaced by a
+  real `main.run()` test with exact scripted requests and persisted operation assertions.
+  Successful unmonitoring precedes deletion; failed unmonitoring leaves deletion pending
+  with zero attempts. Both focused tests passed (**2 in 0.012s**), then the full gate passed.
+  Immediate RPC writes, shared-file safety, and recovery authorization remain open.
 - The original dispatch regression failed before the change (zero calls). Its ordinary
   Linux-import replacement passed alone: **1 test in 0.000s**, verbose output `ok`.
 - All **8 focused executor tests passed in 0.002s**: dispatch, before/after checkpoint
@@ -63,6 +73,7 @@ Evidence:
 | Surface | Current evidence |
 |---|---|
 | Public run, manual/scheduled flag | Queued unmonitor-all with Test Mode on/off; exact requests |
+| Public retention run | One ordinary file: unmonitor precedes DELETE; failed unmonitor blocks DELETE; exact requests and checkpoints |
 | Public run failure and retry | Failed-first-write reporting; second call reuses persisted intent with unchanged settings; no process restart |
 | Executor/recovery helper | Mocked checkpoint/dispatch failures and read-only reconciliation |
 | Scheduler loop, CLI, picker, scope pass, recycle-bin, other removals, process restart, restore | Full mode/permission/failure matrix remains open |

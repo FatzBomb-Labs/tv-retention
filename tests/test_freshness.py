@@ -151,28 +151,15 @@ class Freshness(unittest.TestCase):
         self.assertEqual(episode_calls, [('episodes', 1)],
                          'one Sonarr episode read for the whole rule, not two')
 
-    def test_a_real_run_still_reads_once_and_deletes_and_unmonitors_correctly(self):
-        # The dry-run test above proves the read count; this proves the consolidation
-        # did not disturb what actually gets written to Sonarr once dry_run is False —
-        # every episode here is 395+ days old against a 30-day keep window, so all five
-        # are expected to be deleted and unmonitored.
-        outcome = main.process_rule(self.settings, self.rule, None, dry_run=False)
-        self.assertTrue(outcome['ok'], outcome.get('error'))
-        episode_calls = [call for call in self.client.calls if call[0] == 'episodes']
-        self.assertEqual(episode_calls, [('episodes', 1)],
-                         'one Sonarr episode read even on the path that actually deletes')
-
-        deletes = [call for call in self.client.calls if call[0] == 'delete_episode_file']
-        self.assertEqual(len(deletes), 5, 'every episode outside the keep window is deleted')
-        self.assertEqual({action['ok'] for action in outcome['deleted']}, {True})
-
-        unmonitor_calls = [call for call in self.client.calls if call[0] == 'unmonitor']
-        self.assertTrue(unmonitor_calls, 'deleting a file must still unmonitor it — never optional')
-        unmonitored_ids = set()
-        for call in unmonitor_calls:
-            unmonitored_ids.update(call[1])
-        self.assertEqual(unmonitored_ids, {1, 2, 3, 4, 5},
-                         'every deleted episode is unmonitored, whichever call did it')
+    def test_rule_planner_refuses_legacy_execution_before_any_sonarr_call(self):
+        # Execution belongs to run() and its checkpoints, never to the rule planner.
+        for test_mode in (True, False):
+            with self.subTest(test_mode=test_mode):
+                self.settings['schedule']['test_mode'] = test_mode
+                self.client.calls.clear()
+                with self.assertRaisesRegex(Rejected, 'planner.*run'):
+                    main.process_rule(self.settings, self.rule, None, dry_run=False)
+                self.assertEqual(self.client.calls, [])
 
     def test_a_run_still_reconciles_monitoring_from_the_one_read(self):
         # The optimisation must not cost the reconciliation its own data: fileless

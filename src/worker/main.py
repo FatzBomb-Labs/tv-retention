@@ -341,15 +341,9 @@ def collect_episodes(settings: dict, rule: dict, client: Sonarr, tmdb=None) -> l
 
 
 
-def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_run: bool) -> dict:
-    """Ask Sonarr to remove one episode file.
-
-    Sonarr deletes the file, moves it to its recycle bin if it has one, takes the extra
-    files it imported alongside, and tidies the folder if it is configured to. None of
-    that is the plugin's business, and doing it here would only be a second, worse
-    implementation of it.
-    """
-    action = {
+def planned_deletion(episode: dict) -> dict:
+    """Describe a candidate deletion; only the checkpointed executor may send it."""
+    return {
         'episode_id': episode.get('episode_id'),
         'file_id': episode.get('file_id'),
         'path': episode['path'],
@@ -360,18 +354,10 @@ def delete_one(settings: dict, rule: dict, client: Sonarr, episode: dict, dry_ru
         'air_source': episode.get('air_source'),
         'size': episode.get('size'),
         'reason': episode.get('reason'),
-        'dry_run': dry_run,
+        'dry_run': True,
         'ok': True,
         'error': '',
     }
-    if dry_run:
-        return action
-    try:
-        client.delete_episode_file(episode['file_id'])
-    except (SonarrError, ValueError) as error:
-        action['ok'] = False
-        action['error'] = str(error)
-    return action
 
 
 # ---------------------------------------------------------------------------
@@ -436,50 +422,6 @@ def scope_pass(settings: dict, rule: dict, monitor_new: bool = False,
     return {'monitored': len(result['monitored']), 'unmonitored': len(result['unmonitored'])}
 
 
-def apply_removals(settings: dict, rules, dry_run: bool) -> list:
-    """Carry out the removals queued against series, before anything else runs.
-
-    A series being removed takes no part in the rest of the run: the decision to stop
-    managing it has already been made, so evaluating its retention would be work nobody
-    asked for. The plugin never deletes a series itself — options five and six ask Sonarr
-    to, so Sonarr's own recycle bin and bookkeeping apply.
-    """
-    done = []
-    for rule in rules:
-        queued = (rule.get('queue') or {}).get('removal')
-        if not queued:
-            continue
-        action = queued['action']
-        record = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
-                  'action': action, 'label': REMOVAL_ACTIONS.get(action, action),
-                  'queued_at': queued.get('created_at'), 'dry_run': dry_run, 'ok': True, 'error': ''}
-        if dry_run:
-            done.append(record)
-            continue
-        try:
-            client = client_for(settings, rule['instance_id'])
-            if action in ('monitor-all', 'unmonitor-all'):
-                episodes = client.episodes(rule['series_id'], files_only=False)
-                client.set_monitored([e['episode_id'] for e in episodes], action == 'monitor-all')
-            elif action == 'monitor-in-frame':
-                state = monitoring_for(settings, rule, force=True)
-                inside = [row['episode_id'] for row in state.get('in_frame_unmonitored') or []]
-                client.set_monitored(inside, True)
-            elif action in ('delete-series', 'delete-series-files'):
-                client.delete_series(rule['series_id'], delete_files=(action == 'delete-series-files'))
-                invalidate_catalogue(settings, rule['instance_id'])
-                log_line(settings, 'warning',
-                         f'{rule.get("series_title")}: {REMOVAL_ACTIONS[action].lower()}.')
-        except (SonarrError, Rejected) as error:
-            record.update(ok=False, error=str(error))
-            done.append(record)
-            continue
-        log_line(settings, 'warning', f'removed {record["series_title"]}: {record["label"].lower()}')
-        journal(settings, dict(record, at=now_iso()))
-        done.append(record)
-    return done
-
-
 def monitoring_targets(settings: dict, state: dict, rule: dict) -> dict:
     """Which episodes a run will switch.
 
@@ -501,8 +443,8 @@ def monitoring_targets(settings: dict, state: dict, rule: dict) -> dict:
     }
 
 
-def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool) -> dict:
-    """Bring a series' monitoring in line with its keep window.
+def planned_monitoring(settings: dict, rule: dict, state: dict) -> dict:
+    """Describe the monitoring changes required by a series' keep window.
 
     Unmonitoring everything outside the window is unconditional, including the episodes
     with no file: those are never deleted, so nothing else would ever unmonitor them, and
@@ -518,21 +460,13 @@ def reconcile_monitoring(settings: dict, rule: dict, state: dict, dry_run: bool)
               'searched': 0, 'error': '', 'newly_scoped': 0,
               'monitor_list': monitor_list,
               'unmonitor_list': list(state.get('out_frame_monitored') or [])}
-    if dry_run:
-        return result
-    try:
-        client = client_for(settings, rule['instance_id'])
-        if targets['unmonitor']:
-            client.set_monitored(targets['unmonitor'], False)
-        if monitor:
-            client.set_monitored(monitor, True)
-    except SonarrError as error:
-        result['error'] = str(error)
     return result
 
 
 def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool, remember: bool = True) -> dict:
-    """Evaluate and (unless previewing) execute one rule."""
+    """Plan one rule without external mutations; reject obsolete execution callers."""
+    if not dry_run:
+        raise Rejected('The rule planner cannot execute; use run() for checkpointed execution.')
     outcome = {
         'rule_id': rule['id'],
         'series_title': rule.get('series_title') or rule['path'],
@@ -576,16 +510,14 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool, remember: bool
                        blocked='Keep-by-age is blocked until every judged episode has an air date.')
         return outcome
 
-    # Phase one: bring monitoring in line with the keep window, before anything is
-    # removed. Doing it first means the run leaves Sonarr consistent even if the deletion
-    # pass is stopped by a guard.
+    # Plan monitoring alongside deletions; staging orders writes before file removal.
     # A run reads Sonarr for itself, but only once: `episodes` above is that reading, full
     # and fresh, so it is handed in here rather than asked for a second time. A stored
     # reading is still the one thing that must not stand behind a write, which is what
     # `preloaded` preserves — it is stored exactly as a fetch here would be.
-    reconciled = reconcile_monitoring(
+    reconciled = planned_monitoring(
         settings, rule, monitoring_for(settings, rule, force=True, preloaded=episodes,
-                                      persist=remember), dry_run)
+                                      persist=remember))
     outcome['monitored'] = reconciled['monitored']
     outcome['unmonitored_frame'] = reconciled['unmonitored']
     outcome['searched'] = reconciled['searched']
@@ -609,26 +541,9 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool, remember: bool
         outcome['blocked'] = decision['blocked']
         return outcome
 
-    deleted, deleted_ids = [], []
     for episode in decision['delete']:
-        action = delete_one(settings, rule, client, episode, dry_run)
-        outcome['deleted'].append(action)
-        if action['ok']:
-            outcome['freed_bytes'] += int(episode.get('size') or 0)
-            deleted_ids.append(episode.get('episode_id'))
-            deleted.append(episode)
-        else:
-            outcome['ok'] = False
-            outcome['error'] = action['error']
-
-    if deleted_ids and not dry_run:
-        # Not optional, and not a setting. Deleting a file while leaving the episode
-        # monitored guarantees Sonarr fetches it again and the next run deletes it again.
-        try:
-            client.unmonitor(deleted_ids)
-            outcome['unmonitored'] = len(deleted_ids)
-        except SonarrError as error:
-            outcome['error'] = f'Files removed, but unmonitoring failed: {error}'
+        outcome['deleted'].append(planned_deletion(episode))
+        outcome['freed_bytes'] += int(episode.get('size') or 0)
 
     return outcome
 
@@ -973,9 +888,8 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     One difference is worth knowing rather than fixing: `preloaded` comes from
     `collect_episodes`, which fills air dates from TMDB when a key is configured; the
     fetch below never does. A `process_rule` run therefore stores a TMDB-filled reading,
-    which a later, unrelated `monitoring_for(force=True)` call — the post-run refresh, or
-    `apply_removals`'s `monitor-in-frame` action, neither of which has a preloaded reading
-    to hand in — then overwrites with a plain one. Nothing acts on the stale write: the
+    which a later, unrelated `monitoring_for(force=True)` call without a preloaded
+    reading can overwrite with a plain one. Nothing acts on the stale write: the
     run that produced it already used the richer data in memory for its own decisions,
     and the next `process_rule` pass fills the cache in again. What can flicker is only
     what the interface shows from the cache in between, never what gets deleted.
