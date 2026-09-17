@@ -28,6 +28,11 @@ class Frequencies(unittest.TestCase):
         self.assertTrue(occurs_at(s, at(2026, 9, 7, 4, 30)))
         self.assertFalse(occurs_at(s, at(2026, 9, 7, 5, 30)))
 
+    def test_daily_schedule_uses_the_offset_of_the_clock_it_is_given(self):
+        eastern = dt.timezone(dt.timedelta(hours=-4), 'EDT')
+        moment = dt.datetime(2026, 9, 7, 1, 0, tzinfo=eastern)
+        self.assertTrue(occurs_at(schedule(frequency='daily', hour=1), moment))
+
     def test_weekly_uses_sunday_as_zero(self):
         # 2026-09-07 is a Monday.
         s = schedule(frequency='weekly', weekday=1, hour=4)

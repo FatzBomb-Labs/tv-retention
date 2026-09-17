@@ -157,12 +157,14 @@ gets turned off, and it is the first thing here that can delete anything.
 - [ ] Enable a daily schedule a few minutes ahead. Confirm the run happens without anyone
       being logged in — close the browser and check the history afterwards. The worker is
       the point; authentication guards the interface, never the work.
-- [ ] Confirm it appears in history marked *schedule*, reports what it would have done, and
-      changed nothing while Test Mode is on.
+- [ ] Confirm **System → Logs** says `scheduled test run`, names the plan count and says
+      that nothing changed. **System → Status** shows the same pass as *Last scheduled
+      test*. Test Mode does not create a durable run-history or journal entry.
 - [ ] Turn Test Mode off and watch one scheduled run go through for real.
 - [ ] Stop the container across a scheduled time, then start it again. Confirm the missed
       run is caught up rather than skipped.
-- [ ] Set `TZ` and confirm "daily at 4am" means 4am where you are.
+- [ ] Set `TVR_TZ` in the Compose environment (for example `America/New_York`) and confirm
+      "daily at 4am" means 4am where you are.
 
 ## 10. Restart
 

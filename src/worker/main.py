@@ -848,8 +848,10 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     dry_run = preview or test_mode
     started, clock = now_iso(), time.monotonic()
 
-    # Test Mode is literal: it does not bind, cache, journal, log, or create an intent.
-    # It still reads and decides the full run so its report is useful.
+    # Test Mode is literal: it does not bind, cache, journal, or create an intent. It
+    # still reads and decides the full run so its report is useful. The scheduler writes
+    # one separate operational log line after a scheduled test pass: it records only
+    # that the pass happened and its plan count, never a retained run outcome.
     if not dry_run:
         log_line(settings, 'info', ('scheduled ' if scheduled else '') + 'run started')
         bind_rules(settings)
@@ -1201,6 +1203,7 @@ def status_snapshot(settings: dict, health=None) -> dict:
         'schedule': dict((settings.get('schedule') or {})),
         'sync': dict(sync, age_seconds=sync_age, running=bool(progress.get('running'))),
         'last_run': state.get('last_run'),
+        'last_scheduled_run': jobs.get('last_run'),
         'pending_run': state.get('pending_run') or jobs.get('pending_run'),
         'progress': progress,
         'instances': dict(health.get('instances') or {}),
@@ -1626,7 +1629,10 @@ def tick() -> int:
     two small files and comparing timestamps.
     """
     settings = load_settings()
-    now = dt.datetime.now(dt.timezone.utc)
+    # Schedule fields describe the container's local civil time. Timestamps retained in
+    # state stay UTC, but `is_due` compares aware datetimes correctly across the offset.
+    # Calling `now(...UTC)` here made TZ affect the log stamp but not "daily at 1am".
+    now = dt.datetime.now().astimezone()
     state = job_state(settings)
     actions = []
 
@@ -1668,10 +1674,15 @@ def tick() -> int:
                 sync_from_sonarr(settings, reason='before the run')
             state['last_run'] = now_iso()
             save_job_state(settings, state)
-            actions.append('scheduled run')
             with contextlib.suppress(Rejected):
                 with run_lock():
-                    run(preview=False, scheduled=True)
+                    summary = run(preview=False, scheduled=True)
+                    if summary.get('test_mode'):
+                        log_line(settings, 'info',
+                                 f'scheduled test run: {summary["planned"]} planned across '
+                                 f'{len(summary["rules"])} rule(s); nothing changed')
+                    else:
+                        actions.append('scheduled run')
             state = job_state(settings)
             state['last_run'] = now_iso()
 

@@ -101,7 +101,7 @@ no media server, no Tautulli, no library mount.
 | `TVR_PORT` | `8787` | |
 | `PUID`, `PGID` | `1000` | Who owns `/config`. On Unraid use `99` and `100`. The container takes ownership on start, so no `chown` is asked of you. |
 | `UMASK` | `022` | |
-| `TZ` | `Etc/UTC` | Decides when "daily at 4am" is. |
+| `TVR_TZ` | `Etc/UTC` | Compose forwards this as the container's `TZ`; it decides when "daily at 4am" is. For example, use `America/New_York`. |
 
 **It will not start without a login.** Set the two variables, or set `TVR_AUTH=none` on
 purpose. The alternative — running with the interface locked away — would leave the half

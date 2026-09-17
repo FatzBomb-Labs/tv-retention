@@ -70,10 +70,15 @@ function createActivity({ api, refresh, getSnapshot, getSettings }) {
     ])));
     const run = $('tvr-status-run');
     const last = status.last_run;
-    run.replaceChildren(el('div', { className: 'tvr-inline-row' }, [
+    const rows = [el('div', { className: 'tvr-inline-row' }, [
       el('span', { className: 'tvr-inline-label', textContent: 'Last run' }),
       el('span', { textContent: last ? `${when(last.finished || last.started)} · ${last.deleted || 0} deleted` : 'No runs yet' }),
+    ])];
+    if (status.test_mode && status.last_scheduled_run) rows.push(el('div', { className: 'tvr-inline-row' }, [
+      el('span', { className: 'tvr-inline-label', textContent: 'Last scheduled test' }),
+      el('span', { textContent: `${when(status.last_scheduled_run)} · nothing changed` }),
     ]));
+    run.replaceChildren(...rows);
   }
 
   async function renderStatusView() {

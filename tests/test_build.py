@@ -205,6 +205,16 @@ class Interface(unittest.TestCase):
         self.assertIn('sync_from_sonarr', tick)
         self.assertIn("'watch': action_watch", (worker / 'actions.py').read_text())
 
+    def test_the_schedule_uses_container_local_time_and_names_test_passes(self):
+        worker = ROOT / 'src' / 'worker' / 'main.py'
+        tick = worker.read_text(encoding='utf-8').split('def tick()')[1].split('\ndef ')[0]
+        self.assertIn('now = dt.datetime.now().astimezone()', tick)
+        self.assertIn("'scheduled test run: {summary[\"planned\"]} planned across '", tick)
+        self.assertIn('nothing changed', tick)
+        status = worker.read_text(encoding='utf-8').split('def status_snapshot')[1].split('\ndef ')[0]
+        self.assertIn("'last_scheduled_run': jobs.get('last_run')", status)
+        self.assertIn('Last scheduled test', module_js('activity.js'))
+
     def test_a_background_sweep_is_watched_not_duplicated(self):
         self.assertIn('startPolling', self.js)
         self.assertIn('data.busy', self.js)
