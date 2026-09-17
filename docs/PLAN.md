@@ -36,7 +36,10 @@ this recovery-policy checkpoint as a fixed remaining-work baseline. Earlier comp
 work is recorded in VALIDATION and is not reconstructed into this denominator. Increment
 only when an entire baseline item is retired with evidence; partial fixes do not count.
 If scope changes, record the denominator change explicitly. This is checklist progress,
-not a production-readiness percentage.
+not a production-readiness percentage. Phase-level progress is reported separately:
+Phase 0 harness is established, Phase 1 is partially complete (ordinary replan and
+removal request identity landed; mixed-run separation, shared files, mode guard and
+checkpoint durability remain), and Phases 2–7 are not started.
 
 ### Non-negotiable boundaries
 
@@ -115,7 +118,9 @@ operations or require routine operator acknowledgement after an outage. Missing 
 are not newly reclaimed space. No rollback of completed retention is attempted.
 Explicit queued removals remain separate one-time intent: persist request identity, verify
 current target and queue generation, reconcile uncertain results, and never revive a
-cancellation or transfer old confirmation to a replacement series.
+cancellation or transfer old confirmation to a replacement series. Queued removals now
+carry a persisted `request_id`; recovery and dispatch require the current queue to hold
+that exact ID and action, and a stale settings save cannot restore a canceled ID.
 
 Ordinary-only unfinished intents now follow that policy: exact checkpoints are archived
 under `state/run-history/` before replacement, and retries refresh the catalogue and
@@ -136,10 +141,12 @@ Archive lifecycle, crash-history finalization and durability remain Phase 2 work
 - [ ] Report actual rather than planned byte totals, including partial success and retry,
       without counting failed, unattempted or already-completed work as newly reclaimed space.
 - [ ] Before explicit removal retries, verify current instance/series/file identity and
-      queue generation. Changed instance URLs, same-action cancel/requeue and a different
-      requested run scope must not silently revive old work. Freeze original decisions for
-      audit. Ordinary retention always re-plans; special operator resolution is reserved
-      for unprovable one-time removal permission, not routine retention failures.
+      queue generation. Changed instance URLs and a different requested run scope must not
+      silently revive old work. Freeze original decisions for audit. Ordinary retention
+      always re-plans; special operator resolution is reserved for unprovable one-time
+      removal permission, not routine retention failures. Same-action cancel/requeue is
+      now refused by request identity; uncertain deletion reconciliation and mixed-run
+      separation remain open.
 - [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
       including malformed individual rows and changed file membership. HTTP status is now
       structured, but a proxy-generated 404 must not substitute for verified target identity.

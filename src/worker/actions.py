@@ -635,7 +635,21 @@ def stamp_reenable_watermarks(previous, updated) -> None:
 
 
 def action_settings(settings, request):
-    updated = validate_settings(request.get('settings') or {}, previous=settings)
+    draft = request.get('settings') or {}
+    updated = validate_settings(draft, previous=settings)
+    current_rules = {rule['id']: rule for rule in settings.get('rules') or []}
+    for rule in updated.get('rules') or []:
+        removal = (rule.get('queue') or {}).get('removal')
+        if not removal:
+            continue
+        current = ((current_rules.get(rule['id'], {}).get('queue') or {}).get('removal') or {})
+        # An existing request ID is an echo of current state, never permission to
+        # restore canceled work. A newly queued action omits it and receives a new ID.
+        submitted = next((r for r in draft.get('rules') or [] if r.get('id') == rule['id']), {})
+        supplied_id = ((submitted.get('queue') or {}).get('removal') or {}).get('request_id')
+        if supplied_id and (supplied_id != current.get('request_id')
+                            or removal['action'] != current.get('action')):
+            raise Rejected('Saved removal was changed or canceled; reload before saving.')
     stamp_reenable_watermarks(settings, updated)
     save_settings(updated)
     main.log_settings_change(updated, settings, updated)

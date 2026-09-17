@@ -3,7 +3,7 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **613 Python tests in 5.964s**, all
+`tools/check-on-host.ps1` on `fatzserver-host` ran **618 Python tests in 4.996s**, all
 passing, plus **22 frontend tests**, all passing. The preceding legacy-retirement checkpoint
 passed **610 Python tests in 5.420s** and **22 frontend tests**. The preceding recovery-error checkpoint
 passed **610 Python tests in 5.937s** and **22 frontend tests**. The canceled-removal checkpoint
@@ -20,6 +20,18 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
+- Queued removals now carry a persisted `request_id` (validated, 64 chars, generated when
+  absent). `action_settings` refuses a submitted ID that does not match the current queue
+  request or action, so a stale document cannot restore canceled work; a new queue entry
+  omits the ID and receives a fresh one. `_operation` stamps removal operations with the
+  queue's request ID; `_validate_removal_request` requires the current queue to hold the
+  same ID and action at recovery and again immediately before dispatch. Legacy operations
+  without an ID are refused. Five regressions first failed: missing ID, same-action
+  cancel/requeue resuming the old operation, stale save restoring a canceled ID, legacy
+  operation authorization, and cancel-after-staging dispatch. All five passed after the
+  patch (**3 in 0.006s**, then **5 in the full gate**). This is request identity, not a
+  transaction lock: concurrent save/write races, uncertain deletion reconciliation,
+  mixed-run separation and remote target identity remain open.
 - Ordinary-only unfinished runs now archive exact operation checkpoints before staging a
   new intent, force a current series catalogue read and re-evaluate current settings. The
   first regression failed in `_resume_intent`: recovery requested episodes where the fresh

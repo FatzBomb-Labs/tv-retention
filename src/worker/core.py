@@ -559,6 +559,7 @@ def validate_queue(raw) -> dict:
         if action not in REMOVAL_ACTIONS:
             raise Rejected(f'Unknown removal action "{action}"')
         queue['removal'] = {'action': action,
+                            'request_id': _text(removal.get('request_id'), 'Removal request ID', 64) or new_id(),
                             'created_at': _text(removal.get('created_at'), 'Queued at', 40) or ''}
     for entry in raw.get('fixes') or []:
         kind = _text((entry or {}).get('kind'), 'Queued fix', 32)

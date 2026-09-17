@@ -556,6 +556,8 @@ def _run_error(rule: dict, error: Exception) -> dict:
 
 
 def _operation(kind: str, rule: dict, **detail) -> dict:
+    if detail.get('removal_action'):
+        detail['request_id'] = ((rule.get('queue') or {}).get('removal') or {}).get('request_id')
     return dict({'id': new_id(), 'kind': kind, 'rule_id': rule['id'],
                  'instance_id': rule['instance_id'], 'series_id': rule['series_id'],
                  'status': 'pending', 'attempts': 0, 'error': ''}, **detail)
@@ -636,6 +638,8 @@ def _execute_operation(settings: dict, intent: dict, operation: dict) -> None:
     operation['started_at'] = now_iso()
     save_intent(settings, intent)
     try:
+        if operation.get('removal_action'):
+            _validate_removal_request(load_settings(), operation)
         kind = operation['kind']
         if kind != 'remove-rule':
             client = client_for(settings, operation['instance_id'])
@@ -655,6 +659,20 @@ def _execute_operation(settings: dict, intent: dict, operation: dict) -> None:
     save_intent(settings, intent)
 
 
+def _validate_removal_request(settings: dict, operation: dict) -> None:
+    """A saved one-time operation may only use the same current queue request.
+
+    Legacy operations without an ID cannot prove continuity and are refused. This is
+    not a transaction lock or proof of remote target identity.
+    """
+    rule = next((r for r in settings.get('rules') or [] if r['id'] == operation.get('rule_id')), {})
+    queued = (rule.get('queue') or {}).get('removal') or {}
+    if (not operation.get('request_id')
+            or queued.get('request_id') != operation['request_id']
+            or queued.get('action') != operation.get('removal_action')):
+        raise Rejected('Saved removal was changed or canceled, or lacks request identity; recovery requires review.')
+
+
 def _resume_intent(settings: dict, intent: dict) -> None:
     """Refresh only unfinished targets and recognize a write completed before a crash.
 
@@ -664,14 +682,10 @@ def _resume_intent(settings: dict, intent: dict) -> None:
     """
     # A saved removal is not permission to resurrect an operator's canceled queue.
     # Check the whole unfinished removal set before reconciliation changes the ledger.
-    rules = {rule['id']: rule for rule in settings.get('rules') or []}
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done' or not operation.get('removal_action'):
             continue
-        rule = rules.get(operation.get('rule_id')) or {}
-        queued = (rule.get('queue') or {}).get('removal') or {}
-        if queued.get('action') != operation['removal_action']:
-            raise Rejected('Saved removal was changed or canceled; recovery requires review.')
+        _validate_removal_request(settings, operation)
     fresh = {}
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done' or operation.get('kind') == 'remove-rule':
