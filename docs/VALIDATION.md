@@ -26,10 +26,13 @@ Evidence:
   omits the ID and receives a fresh one. `_operation` stamps removal operations with the
   queue's request ID; `_validate_removal_request` requires the current queue to hold the
   same ID and action at recovery and again immediately before dispatch. Legacy operations
-  without an ID are refused. Five regressions first failed: missing ID, same-action
-  cancel/requeue resuming the old operation, stale save restoring a canceled ID, legacy
-  operation authorization, and cancel-after-staging dispatch. All five passed after the
-  patch (**3 in 0.006s**, then **5 in the full gate**). This is request identity, not a
+  without an ID are refused. Three regressions were observed failing before the patch:
+  missing ID, same-action cancel/requeue resuming the old operation, and stale save
+  restoring a canceled ID. Those three then passed in **0.006s**. Two further tests cover
+  legacy operations without identity and cancel-after-staging dispatch; they were added
+  after the patch, not demonstrated failing beforehand. All five passed in the full gate.
+  A repeat gate on committed tree `a07587b` passed **618 Python tests in 4.985s**, all
+  **22 frontend tests**, and all required import/syntax checks. This is request identity, not a
   transaction lock: concurrent save/write races, uncertain deletion reconciliation,
   mixed-run separation and remote target identity remain open.
 - Ordinary-only unfinished runs now archive exact operation checkpoints before staging a

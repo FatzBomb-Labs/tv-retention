@@ -29,17 +29,34 @@ delete lists, and AniList overwriting a Sonarr date; those remain open. Other fi
 source-inspected; concurrency, DST, container permissions and browser timing consequences
 need targeted validation. Test counts are evidence, not release criteria.
 
-### Progress baseline
+### Progress
 
-**OVERALL PLAN (0/94 complete)** uses the 94 unchecked implementation items present at
-this recovery-policy checkpoint as a fixed remaining-work baseline. Earlier completed
-work is recorded in VALIDATION and is not reconstructed into this denominator. Increment
-only when an entire baseline item is retired with evidence; partial fixes do not count.
-If scope changes, record the denominator change explicitly. This is checklist progress,
-not a production-readiness percentage. Phase-level progress is reported separately:
-Phase 0 harness is established, Phase 1 is partially complete (ordinary replan and
-removal request identity landed; mixed-run separation, shared files, mode guard and
-checkpoint durability remain), and Phases 2–7 are not started.
+**Latest implementation checkpoint: (4/4 complete)** — removal request identity,
+committed as `a07587b`. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
+partially complete; no complete phase exit gate has been met. This is not zero work
+completed or a production-readiness percentage. The former 0/94 counter is retired:
+it counted only remaining work, excluding fixes already delivered.
+
+Delivered and verified (evidence and limits in VALIDATION):
+- Isolated scripted Sonarr fixture, public-run regressions and mandatory Linux checks.
+- Restored executor dispatch and before/after checkpoints; retired legacy run write paths.
+- Failed/unattempted work is reported as incomplete rather than successful.
+- Recovery uses structured HTTP status and stops on failed reads.
+- Ordinary-only retries archive the old intent and re-plan from current settings and
+  fresh readings rather than replaying old deletion decisions.
+- Removal request IDs prevent same-action cancel/requeue from authorizing old operations,
+  reject stale saves carrying canceled IDs, and are checked again before dispatch.
+
+Remaining phase status:
+- **Phase 0 — partial:** full mutation matrix, fixture isolation audit and validation
+  interruption/cleanup evidence remain.
+- **Phase 1 — partial:** mixed-run recovery, target authorization, shared-file protection,
+  exclusion/queue preservation, mode guards and remaining checkpoint evidence are open.
+- **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
+  interface correctness, container/HTTP operation and release acceptance gates remain.
+
+Report each bounded checkpoint separately from completed phase gates. Do not reconstruct
+an arbitrary completed-item fraction from a checklist whose finished items are removed.
 
 ### Non-negotiable boundaries
 
@@ -106,7 +123,8 @@ summaries now expose incomplete operations and failed/unattempted removals. Pers
 retry is covered through a second public run with unchanged settings, not a process restart
 or recovery-authorization test; evidence is in VALIDATION. Recovery now refuses unfinished
 removals when the current queue action is missing or changed, preserving the intent for
-review. Same-action cancel-and-requeue, mid-run cancellation and the wider permission
+review. Request identity now rejects same-action cancel-and-requeue and cancellation
+observed before dispatch. Concurrent cancellation/write races and the wider permission
 checks below remain open; no operator recovery-resolution workflow exists yet. Recovery
 uses structured HTTP status for absent series and stops on failed reads rather than
 replaying writes after an unavailable or malformed episode-list response.
