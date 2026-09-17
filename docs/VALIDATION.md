@@ -1,6 +1,6 @@
 # Validation record
 
-Last run: 2026-09-16, from Windows via `tools\check-on-host.ps1` against fatzserver-host.
+Last run: 2026-09-17, from Windows via `tools\check-on-host.ps1` against fatzserver-host.
 This is the grouped implementation pass for notification removal, optional connections and
 API-key lifecycle, provider-backed air dates, backup/restore, Status, the operational
 library rows, staged run durability, and the consolidated series automation panel. The
@@ -15,7 +15,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 588 tests, all pass |
+| `python3 -m unittest discover -s tests` | 590 tests, all pass |
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors across all 19 shipped ES modules |
 | `node --test tests/frontend/*.test.js` | 22 tests, all pass |
@@ -26,21 +26,22 @@ The source now presents Series (including Presets and Exclusion Rules), Settings
 (including Schedule), System (including Stats and Backup), and Help. Test Mode is a
 separate prominent card above the Schedule controls. The focused local checks for this
 pass are `test_build.py` (164 tests) and the frontend runtime suite (22 tests), both
-passing. The host gate below has also passed for the deployed Build 18.
+passing. The host gate below has also passed for the deployed Build 20.
 
-### Build 18 acceptance smoke (read-only, 2026-09-16)
+### Build 20 acceptance smoke (read-only, 2026-09-17)
 
 The target container `tv-retention-demo` on `fatzserver-host` was checked without
 turning Test Mode off and without invoking a run or any write action. There is exactly
-one running TV Retention container, it is healthy, and it serves `tv-retention:dev-build18`.
+one running TV Retention container, it is healthy, and it serves `tv-retention:dev-build20`.
 
 | Check | Result |
 |---|---|
 | `GET /health` | HTTP 200, `{"ok": true}` |
 | `GET /` without a session | HTTP 303 to `/login` |
 | Login flow | Wrong password HTTP 401; configured credentials land on the page |
-| Authenticated snapshot | version `0.3.0`, build `18`, build date present |
-| Test Mode | `true` in the live settings and snapshot; no deletion was attempted |
+| Authenticated snapshot | version `0.3.0`, build `20`, Test Mode `true` |
+| Test Mode | local-time catch-up logged `6 planned across 32 rule(s); nothing changed`; no deletion was attempted |
+| Schedule clock | container is `America/New_York` (EDT); schedule fields use that local civil time |
 | Navigation | Series, Settings, System and Help views present; Schedule and Backup in their new locations |
 | Removed/replaced UI | Exclusion Rules present; no automatic-search control; Alerts and Safety are not standalone tabs |
 | Container logs | healthy startup line only; no traceback, permission error or HTTP 500 |
@@ -53,11 +54,11 @@ unchecked until an operator chooses them.
 
 | File | Tests | What it holds |
 |---|---|---|
-| `test_build.py` | 164 | The interface, checked statically |
+| `test_build.py` | 165 | The interface, checked statically |
 | `test_monitoring.py` | 36 | The two modes, the keep frame, and what each one asks Sonarr to do |
 | `test_freshness.py` | 62 | Reading ages, staleness, provider gates, what may be shown as current, the one-read-per-rule guarantee, and recycle-bin wiring |
 | `test_migration.py` | 45 | Settings v1 → v13, each step and the whole chain |
-| `test_schedules.py` | 26 | When a job is due, including what cron cannot express |
+| `test_schedules.py` | 27 | When a job is due, including what cron cannot express |
 | `test_retention.py` | 45 | Every condition, every keep mode, air-date precedence, the guards |
 | `test_mapping.py` | 19 | The Sonarr payload as it actually arrives, through the real client |
 | `test_cache.py` | 16 | Cache keys derived from the mapping's shape |
