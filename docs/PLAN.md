@@ -31,11 +31,26 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest implementation checkpoint: (4/4 complete)** — isolated removal checkpoints
-for mixed-run retries. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
-partially complete; no complete phase exit gate has been met. This is not zero work
-completed or a production-readiness percentage. The former 0/94 counter is retired:
-it counted only remaining work, excluding fixes already delivered.
+**Latest implementation checkpoint: (4/4 complete)** — unified removal-only recovery
+and guarded retry of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
+**OVERALL PLAN: (0/8 phase exit gates complete)** — Phases 0 and 1 are partially complete.
+This release-gate count is not an implementation-progress measure or a readiness percentage.
+The former 0/94 counter is retired: it excluded fixes already delivered.
+
+**Progress since the preceding mixed-run checkpoint (`9d7bbca`):**
+- Removal-only retries now share the durable, scope-aware ledger. A requested subset no
+  longer resumes an unrelated old removal-only intent.
+- Inconsistent completed intents with outstanding removal operations or local finalization
+  are handled without blindly restaging acknowledged work.
+- A failed initial staging read no longer holds a verifiable live request forever: retry
+  checks a fresh binding to the recorded target and saves the new operation before dispatch.
+- Canceled/deleted requests with no operation checkpoint retire without claiming success
+  and release their hold. Operation-backed uncertainty remains protected.
+- Restaging respects another rule's target hold in either ledger order. Missing legacy
+  identity remains blocked; changed-action failures report the action actually attempted.
+- Both initial regressions were observed failing before their fixes. Review-driven coverage
+  was added afterward. The final gate passed 638 Python and 22 frontend tests; a subsequent
+  committed-tree recovery check passed 40 tests. See VALIDATION for timings and limits.
 
 Delivered and verified (evidence and limits in VALIDATION):
 - Isolated scripted Sonarr fixture, public-run regressions and mandatory Linux checks.
@@ -58,13 +73,20 @@ Delivered and verified (evidence and limits in VALIDATION):
 Remaining phase status:
 - **Phase 0 — partial:** full mutation matrix, fixture isolation audit and validation
   interruption/cleanup evidence remain.
-- **Phase 1 — partial:** mixed-run recovery, target authorization, shared-file protection,
-  exclusion/queue preservation, mode guards and remaining checkpoint evidence are open.
+- **Phase 1 — partial, with substantial executor/retry work delivered:** dispatch,
+  incomplete-result reporting, fresh ordinary replanning, separate scoped removal ownership,
+  request-aware finalization and guarded record-only retry are verified in bounded fixtures.
+  Remaining blockers include remote target authorization, shared-file protection,
+  exclusion/queue preservation, all-entry-point mode guards, operation-backed recovery
+  resolution and remaining interruption evidence. Concurrency/durability also needs Phase 2.
 - **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
   interface correctness, container/HTTP operation and release acceptance gates remain.
 
-Report each bounded checkpoint separately from completed phase gates. Do not reconstruct
-an arbitrary completed-item fraction from a checklist whose finished items are removed.
+Lead progress reports with the delivered change since the previous checkpoint, its commits
+and evidence, followed by the remaining blockers. Name the checkpoint alongside its x/4
+count; keep the phase exit-gate count as secondary release status, not the headline measure
+of work. Do not reconstruct an arbitrary completed-item fraction from a checklist whose
+finished items are removed.
 
 ### Non-negotiable boundaries
 
@@ -222,12 +244,15 @@ list; existing auto-reenable metadata preserved.
 
 Primary areas: `core.py`, `sonarr.py`, `main.py`, mapping and retention tests.
 
-- [ ] Keep condition votes episode-specific rather than sharing votes by path.
-- [ ] Group physical file actions by `(instance_id, file_id)` after episode decisions.
-      Require complete membership and permission from every constituent episode; any keep,
-      exclusion, unknown or inconsistent mapping protects the entire file.
-- [ ] Unmonitor all affected episodes before deleting their shared file. Deduplicate writes,
-      sizes and success reporting while retaining per-episode explanations in the UI.
+- [x] Keep condition votes episode-specific rather than sharing votes by path.
+- [x] Group physical file actions by `(instance_id, file_id)` after episode decisions.
+      A shared file expires with its latest member episode; an exclusion on any member
+      protects the whole file, and a member still monitored outside the run's unmonitor
+      list blocks the deletion. Deliberately simple: no cross-season or duplicate-mapping
+      matrix beyond what the real mapping produces.
+- [x] Unmonitor all affected episodes before deleting their shared file. Deletions are
+      deduplicated by file, sizes counted once, and a failed unmonitor stops the file.
+      Per-episode explanations remain in the UI lists.
 
 **Tests:** shared excluded/deletable episodes; mixed keep/delete under Any and All; unknown
 or future sibling; cross-season file; duplicate mappings; missing IDs; equal IDs across

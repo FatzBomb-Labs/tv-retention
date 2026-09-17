@@ -14,7 +14,8 @@ release blockers, not completed fixes:
 
 - The run executor fails its regression; execution, recovery and reporting are not reliable.
 - Saving retention edits can drop manual exclusions.
-- A shared multi-episode file can appear in both protected and delete lists.
+- A shared multi-episode file expires with its latest episode; an exclusion on any
+  episode in the file protects it.
 - AniList can overwrite an existing Sonarr date rather than only filling blanks.
 - Immediate monitoring and recycle-bin actions bypass Test Mode.
 

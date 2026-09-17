@@ -1,6 +1,24 @@
 # Validation record
 
-## Latest implementation — 2026-09-17
+## Latest implementation — 2026-09-17 (shared files)
+
+**The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
+`tools/check-on-host.ps1` on `fatzserver-host` ran **642 Python tests in 6.237s**, all
+passing, plus **22 frontend tests**, all passing. The preceding checkpoint passed
+**638 Python tests in 6.221s** and **22 frontend tests**.
+
+Shared multi-episode files now expire with their latest member episode. The cutoff
+regression was observed failing before the patch: with episodes 1 and 2 sharing file 99
+and only episode 2 inside the keep window, the run sent `PUT episode/monitor` for
+`[101, 102]` where the fixture expected `[102]` only (**1 test in 0.030s**). After the
+change, `evaluate()` votes per file using the newest member, an exclusion on any member
+protects the file, and `process_rule()` deduplicates deletions by file, counting size
+once. A member still monitored outside the run's unmonitor list blocks the file; a
+failed unmonitor leaves the run incomplete with no delete. Four tests cover the cutoff,
+expired deletion counted once, excluded-sibling protection and failed-unmonitor
+protection. No deployment or live request occurred.
+
+## Previous implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
 `tools/check-on-host.ps1` on `fatzserver-host` ran **638 Python tests in 6.221s**, all

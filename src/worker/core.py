@@ -1180,53 +1180,63 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     # used to be a second gate here, saying the same kind of thing a few lines further
     # down, which meant "what will this run skip" had two places to be answered from.
     excluded = excluded_episodes(episodes, rule, settings)
+    # Sonarr removes a whole file. Use its latest episode for the cutoff, but
+    # let an exclusion on any member protect it. Keep episode rows for the UI
+    # and monitoring; the worker deduplicates physical deletions.
+    def file_key(episode):
+        return episode.get('file_id') or episode['path']
+
+    protected_files = {file_key(e): excluded[e.get('episode_id')]
+                       for e in episodes if e.get('path') and e.get('episode_id') in excluded}
     protected, candidates = [], []
     for episode in episodes:
         if not episode.get('path'):
             continue
-        why = excluded.get(episode.get('episode_id'))
+        why = protected_files.get(file_key(episode))
         if why:
             protected.append(dict(episode, reason=EXCLUSION_REASONS[why]))
             continue
         candidates.append(episode)
 
-    # Each condition votes 'keep', 'delete', or 'unknown' on every candidate.
-    votes = {episode['path']: [] for episode in candidates}
+    latest = {}
+    for episode in sorted(candidates, key=lambda e: _order_key(e, allow_estimates)):
+        latest[file_key(episode)] = episode
+    votes = {key: [] for key in latest}
 
     if rule.get('keep_days'):
         cutoff = (now - dt.timedelta(days=int(rule['keep_days']))).date()
-        for episode in candidates:
+        for key, episode in latest.items():
             date, source = effective_date(episode, allow_estimates)
             if date is None:
-                votes[episode['path']].append(('days', 'unknown', 'No air date available'))
+                votes[key].append(('days', 'unknown', 'No air date available'))
             elif date >= cutoff:
-                votes[episode['path']].append(('days', 'keep', f'Aired {date}, within {rule["keep_days"]} days'))
+                votes[key].append(('days', 'keep', f'Aired {date}, within {rule["keep_days"]} days'))
             else:
-                votes[episode['path']].append(('days', 'delete', f'Aired {date} ({source}), older than {rule["keep_days"]} days'))
+                votes[key].append(('days', 'delete', f'Aired {date} ({source}), older than {rule["keep_days"]} days'))
 
     if rule.get('keep_episodes'):
         ranked = sorted(candidates, key=lambda e: _order_key(e, allow_estimates), reverse=True)
-        keep_set = {e['path'] for e in ranked[:int(rule['keep_episodes'])]}
-        for episode in candidates:
-            if episode['path'] in keep_set:
-                votes[episode['path']].append(('episodes', 'keep', f'Among the newest {rule["keep_episodes"]} episodes'))
+        keep_set = {file_key(e) for e in ranked[:int(rule['keep_episodes'])]}
+        for key in latest:
+            if key in keep_set:
+                votes[key].append(('episodes', 'keep', f'Among the newest {rule["keep_episodes"]} episodes'))
             else:
-                votes[episode['path']].append(('episodes', 'delete', f'Not among the newest {rule["keep_episodes"]} episodes'))
+                votes[key].append(('episodes', 'delete', f'Not among the newest {rule["keep_episodes"]} episodes'))
 
     if rule.get('keep_seasons'):
         seasons = sorted({e.get('season') for e in candidates if e.get('season') is not None}, reverse=True)
         keep_seasons = set(seasons[:int(rule['keep_seasons'])])
-        for episode in candidates:
+        for key, episode in latest.items():
             season = episode.get('season')
             if season in keep_seasons:
-                votes[episode['path']].append(('seasons', 'keep', f'Season {season} is among the newest {rule["keep_seasons"]} seasons'))
+                votes[key].append(('seasons', 'keep', f'Season {season} is among the newest {rule["keep_seasons"]} seasons'))
             else:
-                votes[episode['path']].append(('seasons', 'delete', f'Season {season} is older than the newest {rule["keep_seasons"]} seasons'))
+                votes[key].append(('seasons', 'delete', f'Season {season} is older than the newest {rule["keep_seasons"]} seasons'))
 
     combine = rule.get('combine', 'any')
     delete, keep = [], []
     for episode in candidates:
-        cast = votes[episode['path']]
+        cast = votes[file_key(episode)]
         verdicts = [v for _, v, _ in cast]
         if not cast:
             keep.append(dict(episode, reason='No retention condition applied'))

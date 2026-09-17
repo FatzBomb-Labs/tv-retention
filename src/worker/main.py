@@ -542,7 +542,18 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool, remember: bool
         outcome['blocked'] = decision['blocked']
         return outcome
 
+    deleted_files = set()
+    outside_ids = {row.get('episode_id') for row in outcome['unmonitor_list']}
     for episode in decision['delete']:
+        file_id = episode.get('file_id')
+        if not file_id or file_id in deleted_files:
+            continue
+        members = [row for row in episodes if row.get('file_id') == file_id]
+        # A forthcoming/unknown member retained by monitoring must not be deleted.
+        if any(row.get('monitored') and row.get('episode_id') not in outside_ids
+               for row in members):
+            continue
+        deleted_files.add(file_id)
         outcome['deleted'].append(planned_deletion(episode))
         outcome['freed_bytes'] += int(episode.get('size') or 0)
 
