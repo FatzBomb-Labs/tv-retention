@@ -31,8 +31,8 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest implementation checkpoint: (4/4 complete)** — fresh ordinary planning after
-completed, locally finalized removals. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
+**Latest implementation checkpoint: (4/4 complete)** — request-aware removal
+finalization. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
 partially complete; no complete phase exit gate has been met. This is not zero work
 completed or a production-readiness percentage. The former 0/94 counter is retired:
 it counted only remaining work, excluding fixes already delivered.
@@ -46,7 +46,10 @@ Delivered and verified (evidence and limits in VALIDATION):
   fresh readings rather than replaying old deletion decisions. This now also covers mixed
   intents whose removals completed and no longer await local queue finalization.
 - Removal request IDs prevent same-action cancel/requeue from authorizing old operations,
-  reject stale saves carrying canceled IDs, and are checked again before dispatch.
+  reject stale saves carrying canceled IDs, and are checked again before dispatch. Local
+  finalization now removes only the rule whose current queue request, action and target
+  match the completed operation, reading current settings instead of saving the run's
+  stale copy.
 
 Remaining phase status:
 - **Phase 0 — partial:** full mutation matrix, fixture isolation audit and validation
@@ -149,8 +152,9 @@ records have successful operation checkpoints and none still awaits local queue
 finalization. The exact old mixed intent is archived, preserving completed removal history.
 Unresolved removals and completed requests still awaiting local finalization retain the
 legacy recovery path; they can still block ordinary work or replay its old decisions.
-This is not full mixed-run separation. Archive lifecycle, crash-history finalization and
-durability remain Phase 2 work.
+Finalization is request-aware but not transactional: a save racing the run can still be
+overwritten, and Phase 2 revision/lock work remains. Archive lifecycle, crash-history
+finalization and durability remain Phase 2 work.
 
 - [ ] Restrict execution to currently eligible operations. Separate mixed-run removal
       recovery from newly planned ordinary retention so failed/canceled explicit work

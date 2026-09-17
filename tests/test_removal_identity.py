@@ -2,6 +2,7 @@
 import copy
 import unittest
 import urllib.error
+from unittest.mock import patch
 
 import context  # noqa: F401
 from fake_sonarr import IsolatedWorker, SERIES, episode_payload
@@ -87,6 +88,48 @@ class RemovalIdentity(unittest.TestCase):
             self.assertIn('canceled', operation['error'])
             self.assertEqual(f.sonarr.requests, [])
             self.assertEqual(f.store.load_intent(settings), intent)
+
+    def test_finalization_preserves_newer_settings_and_removal_request(self):
+        for change in ('unrelated', 'canceled', 'requeued', 'target'):
+            with self.subTest(change=change), IsolatedWorker() as f:
+                settings = f.settings(test_mode=False)
+                settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
+                    path='/tv/Second', series_title='Second', queue={}, enabled=False))
+                f.store.save_settings(settings)
+                f.sonarr.expect('GET', 'series', [SERIES, dict(
+                    SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)])
+                f.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                    'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                f.sonarr.expect('PUT', 'episode/monitor',
+                    body={'episodeIds': [101], 'monitored': False})
+                finish = f.main._finish_removals
+                expected = {}
+
+                def edit_then_finish(stale, intent):
+                    current = f.store.load_settings()
+                    draft = copy.deepcopy(current)
+                    draft['rules'][1]['keep_days'] = 123
+                    if change in ('canceled', 'requeued'):
+                        draft['rules'][0]['queue']['removal'] = None
+                        actions.action_settings(current, {'settings': draft})
+                        current = f.store.load_settings()
+                        draft = copy.deepcopy(current)
+                        if change == 'requeued':
+                            draft['rules'][0]['queue']['removal'] = {'action': 'unmonitor-all'}
+                    elif change == 'target':
+                        draft['rules'][0]['series_id'] = 3
+                    actions.action_settings(current, {'settings': draft})
+                    expected.update(f.store.load_settings())
+                    finish(stale, intent)
+
+                with patch.object(f.main, '_finish_removals', side_effect=edit_then_finish):
+                    f.main.run()
+                actual = f.store.load_settings()
+                if change == 'unrelated':
+                    expected['rules'] = [r for r in expected['rules'] if r['id'] != 'r1']
+                self.assertEqual(actual, expected)
+                self.assertEqual(len(f.sonarr.mutations), 1)
+                f.sonarr.assert_finished()
 
 
 if __name__ == '__main__':

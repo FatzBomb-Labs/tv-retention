@@ -767,17 +767,36 @@ def _intent_summary(intent: dict, preview: bool, test_mode: bool, scheduled: boo
 
 
 def _finish_removals(settings: dict, intent: dict) -> None:
-    completed = {op['rule_id'] for op in intent.get('operations') or []
-                 if op.get('removal_action') and op.get('status') == 'done'}
+    """Finalize only the current request, without saving the run's stale settings.
+
+    This read/merge/write still needs transaction coordination against concurrent saves.
+    A completed external action is history, not permission to remove a replacement rule.
+    """
+    operations = [op for op in intent.get('operations') or [] if op.get('removal_action')]
+    if not any(op.get('status') == 'done' for op in operations):
+        return
+    current = load_settings()
+    completed = set()
+    for rule in current.get('rules') or []:
+        queued = (rule.get('queue') or {}).get('removal') or {}
+        request_id = queued.get('request_id')
+        matching = [op for op in operations
+                    if request_id and op.get('request_id') == request_id
+                    and op.get('rule_id') == rule['id']
+                    and op.get('removal_action') == queued.get('action')
+                    and op.get('instance_id') == rule.get('instance_id')
+                    and op.get('series_id') == rule.get('series_id')]
+        if matching and all(op.get('status') == 'done' for op in matching):
+            completed.add(rule['id'])
     if not completed:
         return
-    settings['rules'] = [rule for rule in settings.get('rules', []) if rule['id'] not in completed]
-    save_settings(settings)
-    health = load_health(settings)
+    current['rules'] = [rule for rule in current.get('rules', []) if rule['id'] not in completed]
+    save_settings(current)
+    health = load_health(current)
     for rule_id in completed:
         health['rules'].pop(rule_id, None)
     health['alerts'] = [a for a in (health.get('alerts') or []) if a.get('rule_id') not in completed]
-    write_cache(settings, 'health.json', health)
+    write_cache(current, 'health.json', health)
 
 
 def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:

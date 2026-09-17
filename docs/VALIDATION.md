@@ -3,8 +3,9 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **620 Python tests in 5.514s**, all
-passing, plus **22 frontend tests**, all passing. The preceding identity checkpoint passed
+`tools/check-on-host.ps1` on `fatzserver-host` ran **621 Python tests in 5.020s**, all
+passing, plus **22 frontend tests**, all passing. The preceding mixed-replan checkpoint
+passed **620 Python tests in 5.514s** and **22 frontend tests**. The preceding identity checkpoint passed
 **618 Python tests in 4.996s** and **22 frontend tests**. The preceding legacy-retirement checkpoint
 passed **610 Python tests in 5.420s** and **22 frontend tests**. The preceding recovery-error checkpoint
 passed **610 Python tests in 5.937s** and **22 frontend tests**. The canceled-removal checkpoint
@@ -21,6 +22,16 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
+- `_finish_removals` no longer saves the run's stale settings document. It reads current
+  settings and removes a rule only when the current queue request ID, action, instance and
+  series all match a completed removal operation. A public-run regression with an injected
+  settings edit between the Sonarr acknowledgement and finalization first failed in all
+  four subcases: an unrelated keep-days edit was reverted, and canceled, requeued and
+  retargeted queues still had their rule removed. After the fix, all four pass: the newer
+  document survives, a canceled or requeued request keeps its rule, and a retargeted rule
+  is not deleted. Focused suites passed **23 tests in 0.069s**; the full gate above
+  includes the regression. This is read-merge-write, not a transaction lock: a save racing
+  the run can still be overwritten, and remote target identity is not re-verified here.
 - Mixed-run recovery now distinguishes completed/finalized removal history from unresolved
   one-time work. A public-run regression completed queued unmonitoring for one series,
   lost the ordinary deletion reply for a second, then added an exclusion. Before the fix,
