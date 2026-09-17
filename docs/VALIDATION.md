@@ -3,8 +3,9 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **621 Python tests in 5.020s**, all
-passing, plus **22 frontend tests**, all passing. The preceding mixed-replan checkpoint
+`tools/check-on-host.ps1` on `fatzserver-host` ran **629 Python tests in 6.126s**, all
+passing, plus **22 frontend tests**, all passing. The preceding finalization checkpoint
+passed **621 Python tests in 5.020s** and **22 frontend tests**. The preceding mixed-replan checkpoint
 passed **620 Python tests in 5.514s** and **22 frontend tests**. The preceding identity checkpoint passed
 **618 Python tests in 4.996s** and **22 frontend tests**. The preceding legacy-retirement checkpoint
 passed **610 Python tests in 5.420s** and **22 frontend tests**. The preceding recovery-error checkpoint
@@ -22,6 +23,28 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
+- `test_mixed_recovery.py` adds eight tests for the bounded mixed-retry ledger. The first
+  regression was observed failing before implementation in all four subcases: unavailable
+  removal, cancellation, a new ordinary exclusion and an unrelated requested subset. All
+  aborted in legacy recovery. After the change, the focused baseline plus regression
+  passed **24 tests in 0.085s**. Unrelated ordinary work now uses fresh settings/readings,
+  while blocked removal errors remain visible and excluded content is not deleted.
+  Additional post-implementation tests cover interrupted handoff, reconciliation and
+  before/after-write ledger saves; interrupted replacement-intent save; repeated calls;
+  orphan acknowledged operations; missing/corrupt ledgers; changed acknowledged targets;
+  replacement-rule target holds; and overlapping ownership rejection. Four checkpoint
+  injection subcases show no subsequent write after save failure, one external mutation
+  across recovery, and no duplicate completion report. These are exception injection and
+  consecutive public calls, not process-kill/restart evidence. Exact old intents remain
+  archived. Existing removal-only tests were not relaxed.
+  The first full gate found only the static name scanner's closure limitation; explicit
+  `nonlocal` declarations fixed that scan, and the full gate above then passed. A Windows
+  run of the names module passed the scan but failed two import-dependent checks on
+  unavailable `fcntl`; it is not a substitute gate. No dependencies were installed.
+  Limits: removal-only recovery remains legacy; initial staging failures without operations
+  stay held; canceled requests need a resolution policy; strict ledger validation is not a
+  complete schema/migration or transactional durability guarantee. Instance URL changes,
+  process crashes, shared-file protection and all-entry-point mode guards remain open.
 - `_finish_removals` no longer saves the run's stale settings document. It reads current
   settings and removes a rule only when the current queue request ID, action, instance and
   series all match a completed removal operation. A public-run regression with an injected
@@ -42,10 +65,10 @@ Evidence:
   interruption at local removal finalization after an acknowledged write: the next public
   call finalizes without repeating the external action. That test was added after the
   initial patch and passes in the full gate; it is not process-crash evidence. Completed
-  requests still present in the queue stay on the legacy finalization path to avoid
-  freshly staging them again. Unresolved removals, missing completion records, and local
-  finalization cases still need separate ledgers; they may block or replay ordinary work.
-  No claim of complete mixed-run recovery, target authorization or concurrent safety.
+  requests still present in removal-only intents stay on the legacy finalization path to
+  avoid freshly staging them again. The newer mixed-retry checkpoint above supplies a
+  separate ledger for mixed cases. No claim of complete recovery, target authorization
+  or concurrent safety.
 - Queued removals now carry a persisted `request_id` (validated, 64 chars, generated when
   absent). `action_settings` refuses a submitted ID that does not match the current queue
   request or action, so a stale document cannot restore canceled work; a new queue entry

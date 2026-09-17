@@ -31,8 +31,8 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest implementation checkpoint: (4/4 complete)** — request-aware removal
-finalization. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
+**Latest implementation checkpoint: (4/4 complete)** — isolated removal checkpoints
+for mixed-run retries. **OVERALL PLAN: (0/8 phases complete)** — Phases 0 and 1 are
 partially complete; no complete phase exit gate has been met. This is not zero work
 completed or a production-readiness percentage. The former 0/94 counter is retired:
 it counted only remaining work, excluding fixes already delivered.
@@ -50,6 +50,10 @@ Delivered and verified (evidence and limits in VALIDATION):
   finalization now removes only the rule whose current queue request, action and target
   match the completed operation, reading current settings instead of saving the run's
   stale copy.
+- Unresolved mixed-run removals now hand off to a separate durable ledger before fresh
+  ordinary planning. Blocked requests and their targets are held while unrelated series
+  continue; scoped runs do not reconcile unrelated migrated requests. Missing handoff
+  evidence, corrupt ledgers and ambiguous ownership fail closed.
 
 Remaining phase status:
 - **Phase 0 — partial:** full mutation matrix, fixture isolation audit and validation
@@ -150,11 +154,19 @@ re-evaluate current rules. Archive failure stops replacement/writes. VALIDATION 
 the bounded coverage. Mixed intents now also re-plan ordinary work when all removal
 records have successful operation checkpoints and none still awaits local queue
 finalization. The exact old mixed intent is archived, preserving completed removal history.
-Unresolved removals and completed requests still awaiting local finalization retain the
-legacy recovery path; they can still block ordinary work or replay its old decisions.
-Finalization is request-aware but not transactional: a save racing the run can still be
-overwritten, and Phase 2 revision/lock work remains. Archive lifecycle, crash-history
-finalization and durability remain Phase 2 work.
+Unresolved mixed intents now archive first, hand removal checkpoints to
+`state/removal-ledger.json`, and re-plan ordinary work without copying ledger operations
+back into the run intent. Independent series may continue after a removal recovery/read
+failure; the selected blocked removal remains an error in the overall result. Both its
+rule ID and old Sonarr target are held. Ordinary execution still stops on its first failed
+operation. This is a retry policy, not general dependency-aware parallel execution.
+Removal-only intents still use legacy recovery and can block newly added ordinary work;
+records whose initial staging read failed before an operation existed remain held and
+need a safe restaging policy. Canceled/replaced requests remain historical holds, with no
+resolution workflow yet. Ledger lifecycle/compaction, full shape validation, process-crash
+coverage, remote target identity and transaction safety remain open. Finalization is
+request-aware but not transactional: a save racing the run can still be overwritten.
+Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
 
 - [ ] Restrict execution to currently eligible operations. Separate mixed-run removal
       recovery from newly planned ordinary retention so failed/canceled explicit work

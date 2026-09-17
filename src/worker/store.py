@@ -168,6 +168,29 @@ def archive_intent(settings: dict, intent: dict) -> None:
     atomic_json(state_dir(settings) / 'run-history' / f'{digest}.json', intent)
 
 
+def load_removal_ledger(settings: dict) -> dict:
+    """Missing is new; unreadable or malformed executable history must fail closed."""
+    path = state_dir(settings) / 'removal-ledger.json'
+    try:
+        value = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {'version': 1, 'batches': []}
+    if (not isinstance(value, dict) or value.get('version') != 1
+            or not isinstance(value.get('batches'), list)
+            or any(not isinstance(batch, dict) or not batch.get('id')
+                   or not isinstance(batch.get('operations'), list)
+                   or not isinstance(batch.get('removals'), list)
+                   or any(not isinstance(op, dict) or not op.get('removal_action')
+                          for op in batch['operations']) for batch in value['batches'])):
+        raise ValueError('Invalid removal recovery ledger')
+    return value
+
+
+def save_removal_ledger(settings: dict, ledger: dict) -> None:
+    """Persist one-time checkpoints independently of replaceable ordinary decisions."""
+    atomic_json(state_dir(settings) / 'removal-ledger.json', ledger)
+
+
 def journal(settings: dict, record: dict) -> None:
     """Append-only audit trail. One JSON object per line, never rewritten."""
     path = state_dir(settings) / 'journal.jsonl'

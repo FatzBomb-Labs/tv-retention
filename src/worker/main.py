@@ -37,7 +37,8 @@ from store import (CONFIG, NAME, RUNTIME, SCHEMA,
                    invalidate_catalogue, job_state, journal, load_health, load_settings,
                    load_intent, load_state, log_line, now_iso, read_cache, read_log, read_progress,
                    save_job_state, save_settings, save_state, set_progress, state_dir,
-                   save_intent, store_episodes, trim_health, write_cache)
+                   save_intent, load_removal_ledger, save_removal_ledger,
+                   store_episodes, trim_health, write_cache)
 from tmdb import TMDB, TMDBError, fill_air_dates
 from tvmaze import TVMaze, TVMazeError
 from anilist import AniList, AniListError
@@ -631,12 +632,13 @@ def _stage_intent(settings: dict, selected: list, queued_rules: list, tmdb,
             'rules': results, 'removals': removals, 'operations': operations}
 
 
-def _execute_operation(settings: dict, intent: dict, operation: dict) -> None:
+def _execute_operation(settings: dict, intent: dict, operation: dict, checkpoint=None) -> None:
     """Checkpoint before dispatch and after acknowledgement; disk failures propagate."""
+    persist = checkpoint or save_intent
     operation['status'] = 'in-progress'
     operation['attempts'] = int(operation.get('attempts') or 0) + 1
     operation['started_at'] = now_iso()
-    save_intent(settings, intent)
+    persist(settings, intent)
     try:
         if operation.get('removal_action'):
             _validate_removal_request(load_settings(), operation)
@@ -656,7 +658,7 @@ def _execute_operation(settings: dict, intent: dict, operation: dict) -> None:
         operation.update(status='failed', error=str(error), finished_at=now_iso())
     else:
         operation.update(status='done', error='', finished_at=now_iso())
-    save_intent(settings, intent)
+    persist(settings, intent)
 
 
 def _validate_removal_request(settings: dict, operation: dict) -> None:
@@ -673,7 +675,7 @@ def _validate_removal_request(settings: dict, operation: dict) -> None:
         raise Rejected('Saved removal was changed or canceled, or lacks request identity; recovery requires review.')
 
 
-def _resume_intent(settings: dict, intent: dict) -> None:
+def _resume_intent(settings: dict, intent: dict, checkpoint=None) -> None:
     """Refresh only unfinished targets and recognize a write completed before a crash.
 
     A network acknowledgement can be lost after Sonarr has accepted a request.  Replaying
@@ -723,13 +725,14 @@ def _resume_intent(settings: dict, intent: dict) -> None:
             if not operation['episode_ids']:
                 operation.update(status='done', error='', recovered_at=now_iso())
     intent['resumed_at'] = now_iso()
-    save_intent(settings, intent)
+    (checkpoint or save_intent)(settings, intent)
 
 
 def _intent_summary(intent: dict, preview: bool, test_mode: bool, scheduled: bool, started: str) -> dict:
     """Render the durable decision as the established run-result contract."""
     rules = json.loads(json.dumps(intent.get('rules') or []))
-    removals = json.loads(json.dumps(intent.get('removals') or []))
+    removals = json.loads(json.dumps((intent.get('removals') or [])
+                                    + (intent.get('recovery_removals') or [])))
     by_rule = {row.get('rule_id'): row for row in rules}
     dry_run = preview or test_mode
     for operation in intent.get('operations') or []:
@@ -799,6 +802,94 @@ def _finish_removals(settings: dict, intent: dict) -> None:
     write_cache(current, 'health.json', health)
 
 
+def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
+                               rule_ids=None) -> tuple[list, set, set]:
+    """Hand off mixed checkpoints before replacing ordinary work; isolate failures.
+
+    An exact archive precedes the ledger handoff. The source run ID makes that handoff
+    idempotent after interruption. Only the ledger owns migrated removal checkpoints;
+    new run summaries carry their readings, never executable copies of those operations.
+    """
+    if stored:
+        archive_intent(settings, stored)
+        if stored.get('removals') or any(
+                op.get('removal_action') for op in stored.get('operations') or []):
+            if not any(batch['id'] == stored['id'] for batch in ledger['batches']):
+                ledger['batches'].append(json.loads(json.dumps({
+                    'id': stored['id'], 'removals': stored.get('removals') or [],
+                    'operations': [op for op in stored.get('operations') or []
+                                   if op.get('removal_action')]})))
+                save_removal_ledger(settings, ledger)
+
+    owners = {}
+    for batch in ledger['batches']:
+        for op in batch['operations']:
+            key = (op.get('rule_id'), op.get('request_id'))
+            if key in owners and owners[key] != batch['id']:
+                raise Rejected('Removal request has overlapping recovery batches; refusing ambiguous ownership.')
+            owners[key] = batch['id']
+    records, held, targets = [], set(), set()
+    scope = set(rule_ids) if rule_ids else None
+    for batch in ledger['batches']:
+        operations = batch['operations']
+        # Operations are authority; display records are optional historical metadata.
+        batch_records = list(batch['removals'])
+        for op in operations:
+            if not any(record.get('rule_id') == op.get('rule_id')
+                       and record.get('action') == op.get('removal_action') for record in batch_records):
+                batch_records.append({'rule_id': op.get('rule_id'), 'action': op['removal_action'],
+                                      'ok': True, 'error': ''})
+        for record in batch_records:
+            rule_id = record.get('rule_id')
+            matching = [op for op in operations if op.get('rule_id') == rule_id
+                        and op.get('removal_action') == record.get('action')]
+            # An acknowledged request still present needs cleanup, not restaging.
+            queued = next((r for r in settings.get('rules') or [] if r['id'] == rule_id), {})
+            request_id = ((queued.get('queue') or {}).get('removal') or {}).get('request_id')
+            pending_cleanup = any(op.get('request_id') == request_id and request_id
+                                  for op in matching)
+            if matching and all(op.get('status') == 'done' for op in matching) and not pending_cleanup:
+                continue
+            held.add(rule_id)
+            targets.update((op.get('instance_id'), op.get('series_id')) for op in matching)
+            if scope is not None and rule_id not in scope:
+                continue
+            report = dict(record)
+            if not matching:
+                report.update(ok=False, error=record.get('error') or 'Removal has no operation checkpoint')
+                records.append(report)
+                continue
+            view = {'id': batch['id'], 'operations': matching, 'removals': [record]}
+
+            def checkpoint(_settings, _intent):
+                nonlocal settings, ledger
+                save_removal_ledger(settings, ledger)
+
+            try:
+                # Validate target continuity before even read-only reconciliation.
+                for op in matching:
+                    _validate_removal_request(settings, op)
+                    if (op.get('instance_id'), op.get('series_id')) != (
+                            queued.get('instance_id'), queued.get('series_id')):
+                        raise Rejected('Saved removal target changed; recovery requires review.')
+                _resume_intent(settings, view, checkpoint=checkpoint)
+            except (Rejected, SonarrError) as error:
+                report.update(ok=False, error=str(error))
+            else:
+                for op in matching:
+                    if op.get('status') != 'done':
+                        _execute_operation(settings, view, op, checkpoint=checkpoint)
+                        if op.get('status') != 'done':
+                            break
+                _finish_removals(settings, view)
+                done = all(op.get('status') == 'done' for op in matching)
+                report.update(ok=done, error='' if done else next(
+                    (op.get('error') for op in matching if op.get('error')),
+                    'A staged removal was not completed'))
+            records.append(report)
+    return records, held, targets
+
+
 def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     """Read the whole run, save its intent, then perform only those saved writes."""
     settings = load_settings()
@@ -847,7 +938,32 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     awaiting_finalization = any(
         (op.get('rule_id'), op.get('request_id'), op.get('removal_action')) in current_requests
         for op in removal_operations if op.get('status') == 'done')
-    if unfinished and (unresolved_removals or awaiting_finalization):
+    ledger = load_removal_ledger(settings)
+    if (stored or {}).get('separate_removals') and not ledger['batches']:
+        raise Rejected('Removal recovery ledger is missing; refusing to restage handed-off requests.')
+    separate = bool(ledger['batches']) or bool(
+        unfinished and stored.get('rules') and (unresolved_removals or awaiting_finalization))
+    if separate:
+        reports, held, targets = _separate_removal_recovery(settings, stored, ledger, rule_ids)
+        settings = load_settings()
+        bind_rules(settings, force=True)
+        eligible = [rule for rule in settings.get('rules') or []
+                    if rule['id'] not in held
+                    and (rule.get('instance_id'), rule.get('series_id')) not in targets
+                    and (not rule_ids or rule['id'] in rule_ids)]
+        selected = [rule for rule in eligible if rule.get('enabled')]
+        queued = [rule for rule in eligible if (rule.get('queue') or {}).get('removal')]
+        for rule in settings.get('rules') or []:
+            if (rule['id'] not in held and (rule.get('instance_id'), rule.get('series_id')) in targets
+                    and (not rule_ids or rule['id'] in rule_ids)):
+                reports.append({'rule_id': rule['id'], 'ok': False,
+                                'error': 'Target held by unresolved removal recovery'})
+        intent = _stage_intent(settings, selected, queued, tmdb)
+        # Only reports are copied. Ledger operations never return to run-intent.json.
+        intent['recovery_removals'] = reports
+        intent['separate_removals'] = True
+        save_intent(settings, intent)
+    elif unfinished and (unresolved_removals or awaiting_finalization):
         intent = stored
         _resume_intent(settings, intent)
     else:
@@ -866,7 +982,10 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
             # never be followed by a deletion, including after an uncertain response.
             break
     _finish_removals(settings, intent)
-    intent['status'] = 'complete' if all(op.get('status') == 'done' for op in intent.get('operations') or []) else 'incomplete'
+    intent['status'] = 'complete' if (
+        all(op.get('status') == 'done' for op in intent.get('operations') or [])
+        and all(record.get('ok') for record in (intent.get('removals') or [])
+                + (intent.get('recovery_removals') or []))) else 'incomplete'
     intent['finished'] = now_iso()
     save_intent(settings, intent)
     summary = _intent_summary(intent, preview, test_mode, scheduled, started)
