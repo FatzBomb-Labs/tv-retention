@@ -48,6 +48,7 @@ class PublicRunContract(unittest.TestCase):
             with self.subTest(scheduled=scheduled), IsolatedWorker() as fixture:
                 settings = fixture.settings()
                 before = fixture.store.CONFIG.read_bytes()
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
                 fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
                 result = fixture.main.run(scheduled=scheduled)
@@ -65,8 +66,10 @@ class PublicRunContract(unittest.TestCase):
             with self.subTest(scheduled=scheduled), IsolatedWorker() as fixture:
                 settings = fixture.settings(test_mode=False)
                 fixture.sonarr.expect('GET', 'series', [SERIES])
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
                 fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
                 fixture.sonarr.expect('PUT', 'episode/monitor',
                     body={'episodeIds': [101], 'monitored': False})
                 fixture.main.run(scheduled=scheduled)
@@ -82,14 +85,19 @@ class PublicRunContract(unittest.TestCase):
     def test_failed_first_write_stops_next_operation_and_reports_incomplete(self):
         with IsolatedWorker() as fixture:
             settings = fixture.settings(test_mode=False)
+            second = dict(SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)
             settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
-                                          path='/tv/Second', series_title='Second'))
+                tvdb_id=20, path='/tv/Second', series_title='Second', queue={'removal': {
+                    'action': 'unmonitor-all', 'target': {'instance_id': 'fake',
+                    'url': fixture.sonarr.url, 'series_id': 2, 'tvdb_id': 20, 'path': '/tv/Second'}}}))
             fixture.store.save_settings(settings)
-            fixture.sonarr.expect('GET', 'series', [SERIES, dict(
-                SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)])
-            for series_id in (1, 2):
-                fixture.sonarr.expect('GET', 'episode', [episode_payload(100 + series_id)],
+            fixture.sonarr.expect('GET', 'series', [SERIES, second])
+            for series_id, identity in ((1, SERIES), (2, second)):
+                fixture.sonarr.expect('GET', f'series/{series_id}', identity)
+                fixture.sonarr.expect('GET', 'episode',
+                    [dict(episode_payload(100 + series_id), seriesId=series_id)],
                     query={'seriesId': [str(series_id)], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 urllib.error.URLError('fixture write failed'),
                 body={'episodeIds': [101], 'monitored': False})
@@ -109,26 +117,35 @@ class PublicRunContract(unittest.TestCase):
     def test_persisted_retry_retries_failed_and_runs_unattempted_removals(self):
         with IsolatedWorker() as fixture:
             settings = fixture.settings(test_mode=False)
+            second = dict(SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)
             settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
-                                          path='/tv/Second', series_title='Second'))
+                tvdb_id=20, path='/tv/Second', series_title='Second', queue={'removal': {
+                    'action': 'unmonitor-all', 'target': {'instance_id': 'fake',
+                    'url': fixture.sonarr.url, 'series_id': 2, 'tvdb_id': 20, 'path': '/tv/Second'}}}))
             fixture.store.save_settings(settings)
-            fixture.sonarr.expect('GET', 'series', [SERIES, dict(
-                SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)])
-            for series_id in (1, 2):
-                fixture.sonarr.expect('GET', 'episode', [episode_payload(100 + series_id)],
+            fixture.sonarr.expect('GET', 'series', [SERIES, second])
+            for series_id, identity in ((1, SERIES), (2, second)):
+                fixture.sonarr.expect('GET', f'series/{series_id}', identity)
+                fixture.sonarr.expect('GET', 'episode',
+                    [dict(episode_payload(100 + series_id), seriesId=series_id)],
                     query={'seriesId': [str(series_id)], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 urllib.error.URLError('fixture write failed'),
                 body={'episodeIds': [101], 'monitored': False})
             fixture.main.run()
             # Same-process retry: the ledger reconciles each request before its write.
             # The failed request is retried; the never-attempted one executes once.
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('GET', 'episode', [episode_payload()],
                 query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [101], 'monitored': False})
-            fixture.sonarr.expect('GET', 'episode', [episode_payload(102)],
+            fixture.sonarr.expect('GET', 'series/2', second)
+            fixture.sonarr.expect('GET', 'episode', [dict(episode_payload(102), seriesId=2)],
                 query={'seriesId': ['2'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/2', second)
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [102], 'monitored': False})
             result = fixture.main.run()
@@ -147,8 +164,10 @@ class PublicRunContract(unittest.TestCase):
         with IsolatedWorker() as fixture:
             settings = fixture.settings(test_mode=False)
             fixture.sonarr.expect('GET', 'series', [SERIES])
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 urllib.error.URLError('fixture write failed'),
                 body={'episodeIds': [101], 'monitored': False})

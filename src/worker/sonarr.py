@@ -49,7 +49,9 @@ class SonarrError(Rejected):
 
 
 class Sonarr:
-    def __init__(self, instance: dict, timeout: int = TIMEOUT):
+    def __init__(self, instance: dict, timeout: int = TIMEOUT, *, write_guard=None):
+        # Standalone clients remain policy-free; application factories supply the guard.
+        self.write_guard = write_guard
         self.id = instance['id']
         self.name = instance['name']
         self.url = instance['url'].rstrip('/')
@@ -73,6 +75,8 @@ class Sonarr:
         request.add_header('User-Agent', USER_AGENT)
         if data is not None:
             request.add_header('Content-Type', 'application/json')
+        if method.upper() != 'GET' and self.write_guard is not None:
+            self.write_guard()
         try:
             with urllib.request.urlopen(request, timeout=self.timeout, context=self.context) as response:
                 payload = response.read()
@@ -208,11 +212,35 @@ class Sonarr:
         payload = self._request('GET', 'episode', {'seriesId': series_id, 'includeEpisodeFile': 'true'})
         if not isinstance(payload, list):
             raise SonarrError(f'{self.name}: unexpected episode response for series {series_id}')
-        episodes = []
+        episodes, seen = [], set()
         for entry in payload:
-            file_info = entry.get('episodeFile') or {}
+            # A partial mapping is not an authoritative membership read. In particular,
+            # dropping a missing ID can falsely complete queued monitoring on recovery.
+            # Validate even fileless rows before files_only can discard them.
+            if (not isinstance(entry, dict)
+                    or type(entry.get('id')) is not int or entry['id'] <= 0
+                    or entry['id'] in seen
+                    or type(entry.get('monitored')) is not bool
+                    or type(entry.get('hasFile')) is not bool
+                    or ('seriesId' in entry and (type(entry['seriesId']) is not int
+                                                or entry['seriesId'] != series_id))
+                    or any(type(entry.get(key)) is not int or entry[key] < 0
+                           for key in ('seasonNumber', 'episodeNumber'))):
+                raise SonarrError(f'{self.name}: malformed episode membership for series {series_id}')
+            seen.add(entry['id'])
+            file_info = entry.get('episodeFile')
+            if file_info is None:
+                file_info = {}
+            if not isinstance(file_info, dict):
+                raise SonarrError(f'{self.name}: malformed episode file for series {series_id}')
             file_id = entry.get('episodeFileId') or file_info.get('id')
-            has_file = bool(entry.get('hasFile') and file_id and file_info.get('path'))
+            if entry['hasFile'] and (
+                    type(file_id) is not int or file_id <= 0
+                    or not isinstance(file_info.get('path'), str) or not file_info['path'].strip()
+                    or ('id' in file_info and (type(file_info['id']) is not int
+                                               or file_info['id'] != file_id))):
+                raise SonarrError(f'{self.name}: incomplete episode file for series {series_id}')
+            has_file = entry['hasFile']
             if files_only and not has_file:
                 continue
             added = file_info.get('dateAdded')

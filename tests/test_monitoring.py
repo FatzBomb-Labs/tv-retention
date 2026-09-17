@@ -304,11 +304,15 @@ class ScopePassApplies(unittest.TestCase):
             def search_episodes(self, ids):
                 holder.calls.append(('search', sorted(ids), None))
 
+        self.settings['schedule']['test_mode'] = False
         self.original = main.client_for
+        self.original_load = main.load_settings
+        main.load_settings = lambda: self.settings
         main.client_for = lambda *a, **k: Client()
 
     def tearDown(self):
         self.main.client_for = self.original
+        self.main.load_settings = self.original_load
         self.temp.cleanup()
 
     def test_unmonitoring_outside_the_window_happens_now(self):

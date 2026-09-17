@@ -636,13 +636,14 @@ export function createSeriesEditor({
           // showing, and only where it differs from what Sonarr already has.
           const wanted = context.tree && context.tree();
           const changes = wanted ? wanted.changes() : { monitor: [], unmonitor: [] };
-          if (changes.monitor.length || changes.unmonitor.length) {
+          if (!pass.skipped && (changes.monitor.length || changes.unmonitor.length)) {
             const applied = await api('set-monitored', Object.assign({ rule_id: saved.id }, changes),
                                       'Setting getMonitoring() in Sonarr…');
             if (applied.monitored) parts.push(`${plural(applied.monitored, 'episode')} monitored`);
             if (applied.unmonitored) parts.push(`${plural(applied.unmonitored, 'episode')} unmonitored`);
           }
           done = parts.length ? ` ${parts.join(', ')} in Sonarr.` : '';
+          if (pass.skipped) done += ` ${pass.message || 'Sonarr changes were skipped.'}`;
         }
         if (saved) queueChecks([saved.id]);
         notice(`Series saved.${done}`, 'ok');

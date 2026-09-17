@@ -1,6 +1,102 @@
 # Validation record
 
-## Latest implementation — 2026-09-17 (bounded frontend rule-save preservation)
+## Latest implementation — 2026-09-17 (explicit removal target authorization)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **665 Python tests in
+6.525s**, **29 frontend tests** (390.432708 ms), all passing. Worker imports and shipped
+Python/JavaScript syntax checks passed. Checks used disposable host staging and isolated
+fixtures. No commit, deployment, container launch, live Sonarr call or media access occurred.
+The pre-existing uncommitted Test Mode work is retained.
+
+New external removal submissions through `action_settings` freeze server-owned instance ID,
+normalized URL, series ID, TVDB ID and canonical path. Existing request echoes retain the
+original server snapshot, ignoring client-supplied target edits. Validation preserves that
+snapshot without upgrading legacy queues. Stage records copy it before reads can fail.
+One verifier reloads current settings, checks request/action/target continuity, reads fresh
+`series_one` identity and returns the current client for dispatch. It is used for staging,
+reconciliation and dispatch. Legacy external requests/operations without matching evidence
+remain held; local remove-rule needs no remote snapshot. Finalization compares the same
+local target evidence without trying to reread an acknowledged deleted series. A bare 404
+never completes an uncertain deletion: it reports **cannot verify absence; review required**.
+
+Evidence:
+- Fail-first full gate: **661 Python tests in 6.403s, 15 failures**, covering snapshot
+  ownership, legacy external queues, uncertain-delete 404 and URL/TVDB/path/numeric-ID
+  changes before staging, operation-backed retry and dispatch. Frontend: **29 passed**
+  (391.262471 ms).
+- The first integration gate had **45 failures and 1 error** (661 tests in 6.402s): the
+  new target tests passed, while older strict fixtures lacked the new identity reads,
+  realistic target snapshots or still expected 404 to complete deletion. Those fixtures
+  were updated explicitly; the ordered fake transport was not relaxed. Existing cancellation,
+  ownership, subset-read and no-replay assertions remain. The next full gate passed
+  **661 in 6.481s**, frontend **29** (392.772742 ms).
+- Post-fix additions cover record-only restaging under all four identity changes, a legacy
+  operation with request ID but no target, current credentials at dispatch, acknowledged
+  deletion without a final remote read, and new-request record-only recovery accepting the
+  same target but refusing a changed target. These additions were not observed fail-first.
+  They are included in the final 665-test gate above.
+
+Limits: these are real action/run calls with fixture transport and same-process persisted
+retry, not process-kill/restart or live-service evidence. URL/path/TVDB/numeric identity is
+not proof of server provenance or protection against an indistinguishable replacement.
+Verification and dispatch are not atomic; settings revisions, concurrent saves, mode-transition
+coordination, checkpoint durability and full ledger validation remain Phase 2 work.
+Malformed episode rows and replaced file membership are not solved by series identity.
+Operation-backed uncertainty still lacks an operator resolution workflow; 404 remains held
+rather than providing automatic absence reconciliation. Phase 1 is not complete and
+no deployment is authorized by this gate.
+
+## Previous implementation — 2026-09-17 (bounded Test Mode write guard)
+
+`tools/check-on-host.ps1` on `fatzserver-host`: **657 Python tests in 5.845s**, **29
+frontend tests** (367.64644 ms), all passing; worker imports and shipped Python/JavaScript
+syntax checks passed. The preceding gate also passed (657 Python in 5.844s, 29 frontend).
+Focused Linux suite `test_mode_boundary test_monitoring test_run_contract test_shared_files
+test_sonarr`: **76 tests in 0.084s**, passing. `git diff --check` is clean. No commit,
+deployment, container launch, live Sonarr request or media access occurred; host checks
+used disposable staging and isolated fixtures.
+
+All shipped application Sonarr constructors now use `main.sonarr_client`. Before every
+non-GET request its guard reloads and validates saved settings, permitting only explicit
+Test Mode off and failing closed on load/validation errors. Standalone `Sonarr` remains
+policy-free unless supplied a guard. Settings stay editable. Scope passes return actual
+applied and skipped counts, including partial passes and no-op Test Mode passes; the
+editor reports the skip and does not submit its separate picker changes. Picker and
+recycle-bin writes reject clearly. Restore RPC is refused in **both modes**, before
+calling `backup.restore`; safe archive activation is not implemented.
+
+Evidence and limits:
+- Fail-first picker regression: **1 test in 0.035s failed**, recording an unexpected
+  `PUT episode/monitor` under Test Mode. The same test passed after the guard (**0.037s**).
+- Fail-first editor regression: **6 passed, 1 failed** because it still submitted picker
+  changes after a skipped pass; all **7 passed** after the UI change (114.1157 ms).
+- The other boundary cases were added after implementation. Real action/run transport
+  tests cover settings/scope/picker/recycle, manual and scheduled runs, preview and queued
+  series deletion in both modes, missing/corrupt/invalid settings, a reused client, and
+  same-process retry preserving an existing intent under Test Mode. CLI parsing invokes
+  the real run; a due tick invokes it with due/connectivity/background-sync decisions
+  stubbed. These are not process-restart or scheduler-timing proofs.
+- Toggle tests change saved mode during the first acknowledged PUT: the next write is
+  blocked, the run is incomplete without a DELETE, and a partial scope pass reports only
+  acknowledged flags as applied. **The check and dispatch are not atomic**: a request
+  already past the check may still be sent or complete after toggle acknowledgement.
+  Concurrent whole-document saves can still overwrite a newer mode. Phase 2 coordination
+  remains required; Phase 1 is not complete and deployment remains blocked.
+- Test Mode permits local configuration and operational writes (backup creation/listing,
+  caches, health, progress, logs and job bookkeeping). Runs entered in Test Mode/preview
+  do not persist executable plans or consume queued work. A live run toggled mid-flight
+  retains checkpoints/error bookkeeping for work already attempted. This is not a blanket
+  local read-only mode or authorization for a live smoke to invoke save/restore/Run.
+- Restore tests prove RPC refusal without calling archive activation or changing settings;
+  they do not prove safe restoration. No recovery-target identity changes were made.
+
+Intermediate failures were test integration issues, not claimed safety regressions: the
+first expanded focused run (73 tests) had six subtest failures from using local-only
+`remove` instead of `delete-series`; the first full gate (657 in 6.331s) had 19 freshness
+stub signature errors. The fixture now expects the actual series lookup/deletion, and
+freshness stubs target the application factory without weakening read-only assertions.
+
+## Previous implementation — 2026-09-17 (bounded frontend rule-save preservation)
 
 Final combined Linux gate: **644 Python tests in 6.244s**, **28 frontend tests**, all
 passing; worker imports and all shipped Python/JavaScript syntax checks passed. No live

@@ -11,6 +11,7 @@ main imports this lazily, from its dispatch, so the dependency runs one way only
 from __future__ import annotations
 
 import contextlib
+import copy
 import datetime as dt
 import hashlib
 import os
@@ -24,9 +25,9 @@ import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   describe_selectability, effective_rule, exclusion_summary, excluded_causes,
-                  new_id, next_episode, normalise, redact, validate_conditions, validate_settings,
+                  new_id, next_episode, normalise, redact, removal_target, validate_conditions, validate_settings,
                   validate_text)
-from sonarr import Sonarr, SonarrError
+from sonarr import SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
                    read_journal, read_log, read_progress, save_settings, save_state,
@@ -635,9 +636,26 @@ def stamp_reenable_watermarks(previous, updated) -> None:
 
 
 def action_settings(settings, request):
-    draft = request.get('settings') or {}
-    updated = validate_settings(draft, previous=settings)
+    draft = copy.deepcopy(request.get('settings') or {})
     current_rules = {rule['id']: rule for rule in settings.get('rules') or []}
+    # Snapshot fields are server-owned, including on echoes and legacy queues.
+    # Strip client values before validation so neither edits nor malformed snapshots
+    # can replace the original authority. New requests freeze before bind_rules runs.
+    for submitted in draft.get('rules') or []:
+        removal = (submitted.get('queue') or {}).get('removal')
+        if not isinstance(removal, dict) or not removal.get('action'):
+            continue
+        removal.pop('target', None)
+        previous_rule = current_rules.get(submitted.get('id'), {})
+        current = (previous_rule.get('queue') or {}).get('removal') or {}
+        if removal.get('request_id'):
+            if current.get('target') is not None:
+                removal['target'] = copy.deepcopy(current['target'])
+        elif removal['action'] != 'remove':
+            instance = next((i for i in settings.get('instances') or []
+                             if i['id'] == previous_rule.get('instance_id')), {})
+            removal['target'] = removal_target(instance, previous_rule)
+    updated = validate_settings(draft, previous=settings)
     for rule in updated.get('rules') or []:
         removal = (rule.get('queue') or {}).get('removal')
         if not removal:
@@ -773,15 +791,10 @@ def action_backup(settings, request):
         save_settings(updated)
         return {'result': result, 'backups': backup.list_backups(updated)}
     if operation == 'restore':
-        try:
-            result = backup.restore(settings, request.get('file'), request.get('confirm', ''))
-        except Rejected as error:
-            remember_error(error)
-            raise
-        updated = load_settings()
-        updated.setdefault('backup', {}).update(last_error='')
-        save_settings(updated)
-        return {'result': result}
+        # Archived settings/queues/intents cannot be activated safely without maintenance
+        # exclusion and quarantine. Do not install even briefly, in either current mode.
+        raise Rejected('Restore is temporarily unavailable until safe settings and pending-work '
+                       'activation is implemented. No files were restored.')
     raise Rejected('Unknown backup operation.')
 
 
@@ -820,7 +833,7 @@ def action_test_instance(settings, request):
     from core import validate_instance
     existing = {i['id']: i.get('api_key', '') for i in settings.get('instances', [])}
     instance = validate_instance(request.get('instance') or {}, existing)
-    client = Sonarr(instance)
+    client = main.sonarr_client(instance)
     status = client.status()
     return {
         'sonarr_version': status.get('version'),
@@ -878,7 +891,7 @@ def action_enable_recycle_bin(settings, request):
         raise Rejected('That Sonarr instance no longer exists.')
     from core import validate_path
     path = validate_path(request.get('path'), 'Recycle bin path')
-    client = Sonarr(instance)
+    client = main.sonarr_client(instance)
     media = client.media_management()
     media['recycleBin'] = path
     if not media.get('recycleBinCleanupDays'):

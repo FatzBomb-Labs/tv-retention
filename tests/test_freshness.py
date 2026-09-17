@@ -346,17 +346,17 @@ class Sync(unittest.TestCase):
             def episodes(self, series_id, files_only=True):
                 return [dict(item) for item in holder.episodes]
 
-        self.originals = (main.client_for, main.Sonarr, main.notify, main.check_one_rule,
+        self.originals = (main.client_for, main.sonarr_client, main.notify, main.check_one_rule,
                           main.save_settings)
         main.client_for = lambda *a, **k: Stub()
-        main.Sonarr = lambda instance: Stub()
+        main.sonarr_client = lambda instance: Stub()
         main.notify = lambda settings, subject, description, importance='normal', event='errors': \
             self.notified.append((subject, event))
         main.check_one_rule = lambda *a, **k: None
         main.save_settings = lambda settings: None
 
     def tearDown(self):
-        main.client_for, main.Sonarr, main.notify, main.check_one_rule, \
+        main.client_for, main.sonarr_client, main.notify, main.check_one_rule, \
             main.save_settings = self.originals
         self.temp.cleanup()
 
@@ -531,7 +531,7 @@ class Sync(unittest.TestCase):
                 raise Rejected('unreachable')
 
         main.client_for = lambda *a, **k: Broken()
-        main.Sonarr = lambda instance: Broken()
+        main.sonarr_client = lambda instance: Broken()
         report = main.sync_from_sonarr(self.settings)
         self.assertTrue(report['errors'])
         self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1, 'yesterday beats nothing')
@@ -561,7 +561,7 @@ class Sync(unittest.TestCase):
 
         holder = self
         main.client_for = lambda *a, **k: ReadOnly()
-        main.Sonarr = lambda instance: ReadOnly()
+        main.sonarr_client = lambda instance: ReadOnly()
         main.check_one_rule = self.originals[3]      # the real one, so it reads for itself
         main.sync_from_sonarr(self.settings)
         self.assertEqual(forbidden, [])

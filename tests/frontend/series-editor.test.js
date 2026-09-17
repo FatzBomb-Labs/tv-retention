@@ -37,7 +37,7 @@ const ruleFixture = (overrides = {}) => ({
 const findText = (node, value) => node.textContent === value ? node
   : (node.children || []).map((child) => findText(child, value)).find(Boolean);
 
-async function harness(initialRules, match = (settings) => settings) {
+async function harness(initialRules, match = (settings) => settings, passResult = {}) {
   const elements = new Map();
   const context = vm.createContext({
     document: {
@@ -70,7 +70,8 @@ async function harness(initialRules, match = (settings) => settings) {
   const api = async (action, payload) => {
     calls.push({ action, payload: copy(payload) });
     if (action === 'match') return { settings: copy(match(copy(settings))) };
-    if (action === 'scope-pass' || action === 'set-monitored') return {};
+    if (action === 'scope-pass') return passResult;
+    if (action === 'set-monitored') return {};
     throw new Error(`Unexpected RPC: ${action}`);
   };
   const saveSettings = async () => {
@@ -109,6 +110,21 @@ async function harness(initialRules, match = (settings) => settings) {
     },
   };
 }
+
+test('Test Mode save reports skipped monitoring and does not submit picker changes', async () => {
+  const h = await harness([ruleFixture()], undefined, {
+    monitored: 0, unmonitored: 0, skipped: true,
+    message: 'Test Mode is on; Sonarr changes were skipped.',
+    skipped_monitored: 0, skipped_unmonitored: 3,
+  });
+  const form = h.open();
+  form.context.tree = () => ({ changes: () => ({ monitor: [42], unmonitor: [] }) });
+  await h.save(form);
+  assert.equal(h.saves.length, 1);
+  assert.equal(h.calls.some((call) => call.action === 'set-monitored'), false);
+  assert.match(h.elements.get('tvr-notice').textContent, /Series saved.*Test Mode.*skipped/);
+  assert.doesNotMatch(h.elements.get('tvr-notice').textContent, /episode[s]? (unmonitored|monitored)/);
+});
 
 test('retention save preserves latest episode/whole-season exclusions and independent metadata after reload', async () => {
   const h = await harness([ruleFixture()]);

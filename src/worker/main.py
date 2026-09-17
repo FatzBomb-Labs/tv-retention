@@ -27,7 +27,7 @@ sys.path.insert(0, str(HERE))
 from core import (DEFAULTS, air_watermark, keep_frame, REMOVAL_ACTIONS, VERSION, Rejected, atomic_json,
                   canonical_json, classify_monitoring, describe_lifecycle, describe_selectability,
                   effective_rule, evaluate, air_date_gaps, interpolate_air_dates, new_id, normalise, redact,
-                  rule_fingerprint, specials_included, validate_settings)
+                  removal_target, rule_fingerprint, specials_included, validate_settings)
 import alerts
 from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
@@ -144,12 +144,39 @@ def notify(*_args, **_kwargs) -> None:
 # Sonarr helpers
 # ---------------------------------------------------------------------------
 
+class TestModeBlocked(SonarrError):
+    """A write was skipped because the current saved mode prohibits it."""
+
+
+def require_sonarr_write() -> None:
+    """Re-read for every request, never authorize using a run's settings snapshot.
+
+    This is not an atomic toggle/dispatch transaction: a request already past this
+    check may still be sent. Cross-thread/process transition coordination is Phase 2.
+    """
+    try:
+        current = load_settings()
+        # load_settings deliberately tolerates validation failures for the editor.
+        # That tolerance must never become permission to send an external write.
+        validate_settings(current, previous=current)
+    except Exception as error:
+        raise SonarrError('Sonarr write refused: current saved settings could not be '
+                          'loaded and validated.') from error
+    if (current.get('schedule') or {}).get('test_mode', True) is not False:
+        raise TestModeBlocked('Test Mode is on; Sonarr changes were skipped.')
+
+
+def sonarr_client(instance: dict) -> Sonarr:
+    """The only factory for application-owned Sonarr clients, including read paths."""
+    return Sonarr(instance, write_guard=require_sonarr_write)
+
+
 def client_for(settings: dict, instance_id: str) -> Sonarr:
     for instance in settings.get('instances', []):
         if instance['id'] == instance_id:
             if not instance.get('enabled', True):
                 raise Rejected(f'Sonarr instance "{instance["name"]}" is disabled.')
-            return Sonarr(instance)
+            return sonarr_client(instance)
     raise Rejected('That Sonarr instance no longer exists.')
 
 
@@ -413,14 +440,28 @@ def scope_pass(settings: dict, rule: dict, monitor_new: bool = False,
         result['unmonitored'] = [episode for episode in frame['out_frame'] if episode.get('monitored')]
 
     client = client_for(settings, rule['instance_id'])
+    applied = {'monitored': 0, 'unmonitored': 0}
+    # Also report a skipped no-op pass: the editor may have separate picker changes.
+    try:
+        require_sonarr_write()
+    except TestModeBlocked as error:
+        return dict(applied, skipped=True, message=str(error),
+                    skipped_monitored=len(result['monitored']),
+                    skipped_unmonitored=len(result['unmonitored']))
     for key, wanted in (('monitored', True), ('unmonitored', False)):
         ids = [row['episode_id'] for row in result[key] if row.get('episode_id')]
         if ids:
-            client.set_monitored(ids, wanted)
+            try:
+                client.set_monitored(ids, wanted)
+            except TestModeBlocked as error:
+                return dict(applied, skipped=True, message=str(error),
+                            skipped_monitored=len(result['monitored']) - applied['monitored'],
+                            skipped_unmonitored=len(result['unmonitored']) - applied['unmonitored'])
+            applied[key] = len(ids)
     log_line(settings, 'info',
              f'{rule.get("series_title") or rule["path"]}: one-time pass monitored '
-             f'{len(result["monitored"])}, unmonitored {len(result["unmonitored"])}')
-    return {'monitored': len(result['monitored']), 'unmonitored': len(result['unmonitored'])}
+             f'{applied["monitored"]}, unmonitored {applied["unmonitored"]}')
+    return applied
 
 
 def monitoring_targets(settings: dict, state: dict, rule: dict) -> dict:
@@ -569,7 +610,9 @@ def _run_error(rule: dict, error: Exception) -> dict:
 
 def _operation(kind: str, rule: dict, **detail) -> dict:
     if detail.get('removal_action'):
-        detail['request_id'] = ((rule.get('queue') or {}).get('removal') or {}).get('request_id')
+        queued = ((rule.get('queue') or {}).get('removal') or {})
+        detail['request_id'] = queued.get('request_id')
+        detail['target'] = json.loads(json.dumps(queued.get('target')))
     return dict({'id': new_id(), 'kind': kind, 'rule_id': rule['id'],
                  'instance_id': rule['instance_id'], 'series_id': rule['series_id'],
                  'status': 'pending', 'attempts': 0, 'error': ''}, **detail)
@@ -587,9 +630,12 @@ def _removal_stage(settings: dict, rules: list, tmdb, enrich: bool = True) -> tu
                   'action': action, 'label': REMOVAL_ACTIONS.get(action, action),
                   'queued_at': queued.get('created_at'), 'dry_run': False, 'ok': True, 'error': '',
                   'request_id': queued.get('request_id'), 'instance_id': rule.get('instance_id'),
-                  'series_id': rule.get('series_id')}
+                  'series_id': rule.get('series_id'),
+                  'target': json.loads(json.dumps(queued.get('target')))}
+        # Record authority before any read can fail or mutable binding can change.
+        authority = dict(record, removal_action=action)
         try:
-            client = client_for(settings, rule['instance_id'])
+            client = _verify_removal_target(authority)
             if action in ('monitor-all', 'unmonitor-all'):
                 ids = [row['episode_id'] for row in client.episodes(rule['series_id'], files_only=False)
                        if row.get('episode_id')]
@@ -604,8 +650,6 @@ def _removal_stage(settings: dict, rules: list, tmdb, enrich: bool = True) -> tu
                 operations.append(_operation('set-monitored', rule, episode_ids=ids, monitored=True,
                                              removal_action=action))
             elif action in ('delete-series', 'delete-series-files'):
-                # A current series lookup is the final identity check before its deletion.
-                client.series_one(rule['series_id'])
                 operations.append(_operation('delete-series', rule,
                                              delete_files=(action == 'delete-series-files'),
                                              removal_action=action))
@@ -653,11 +697,12 @@ def _execute_operation(settings: dict, intent: dict, operation: dict, checkpoint
     operation['started_at'] = now_iso()
     persist(settings, intent)
     try:
-        if operation.get('removal_action'):
-            _validate_removal_request(load_settings(), operation)
+        client = (_verify_removal_target(operation) if operation.get('removal_action')
+                  else None)
         kind = operation['kind']
         if kind != 'remove-rule':
-            client = client_for(settings, operation['instance_id'])
+            if client is None:
+                client = client_for(settings, operation['instance_id'])
             if kind == 'set-monitored':
                 client.set_monitored(operation.get('episode_ids') or [], operation.get('monitored', False))
             elif kind == 'delete-episode-file':
@@ -675,17 +720,51 @@ def _execute_operation(settings: dict, intent: dict, operation: dict, checkpoint
 
 
 def _validate_removal_request(settings: dict, operation: dict) -> None:
-    """A saved one-time operation may only use the same current queue request.
-
-    Legacy operations without an ID cannot prove continuity and are refused. This is
-    not a transaction lock or proof of remote target identity.
-    """
+    """Validate local continuity, including during finalization after deletion."""
     rule = next((r for r in settings.get('rules') or [] if r['id'] == operation.get('rule_id')), {})
     queued = (rule.get('queue') or {}).get('removal') or {}
     if (not operation.get('request_id')
             or queued.get('request_id') != operation['request_id']
             or queued.get('action') != operation.get('removal_action')):
         raise Rejected('Saved removal was changed or canceled, or lacks request identity; recovery requires review.')
+    if (operation.get('instance_id'), operation.get('series_id')) != (
+            rule.get('instance_id'), rule.get('series_id')):
+        raise Rejected('Saved removal target changed; recovery requires review.')
+    if operation.get('removal_action') == 'remove':
+        return
+    target = operation.get('target')
+    if not target or target != queued.get('target'):
+        raise Rejected('Saved removal target lacks matching snapshot; requeue or review required.')
+    instance = next((i for i in settings.get('instances') or []
+                     if i['id'] == rule.get('instance_id')), {})
+    if removal_target(instance, rule) != target:
+        raise Rejected('Saved removal target changed; recovery requires review.')
+
+
+def _verify_removal_target(operation: dict):
+    """Reload authority and endpoint; a fresh identity read never borrows cached binding.
+
+    The returned current client is also the dispatch client. This is deliberately not
+    an atomic settings/remote transaction; concurrent changes still need Phase 2.
+    """
+    current = load_settings()
+    validate_settings(current, previous=current)
+    _validate_removal_request(current, operation)
+    if operation.get('removal_action') == 'remove':
+        return None
+    target = operation['target']
+    client = client_for(current, target['instance_id'])
+    try:
+        series = client.series_one(target['series_id'])
+    except SonarrError as error:
+        if error.status_code == 404:
+            raise Rejected('Removal target cannot verify absence; review required.') from error
+        raise
+    if any(series.get(key) != target[key] for key in ('series_id', 'tvdb_id', 'path')):
+        raise Rejected('Saved removal target changed in Sonarr; recovery requires review.')
+    # Catch cancellation/endpoint changes observed while the identity read was in flight.
+    _validate_removal_request(load_settings(), operation)
+    return client
 
 
 def _resume_intent(settings: dict, intent: dict, checkpoint=None) -> None:
@@ -700,25 +779,20 @@ def _resume_intent(settings: dict, intent: dict, checkpoint=None) -> None:
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done' or not operation.get('removal_action'):
             continue
-        _validate_removal_request(settings, operation)
+        _validate_removal_request(load_settings(), operation)
     fresh = {}
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done' or operation.get('kind') == 'remove-rule':
             continue
+        client = (_verify_removal_target(operation) if operation.get('removal_action')
+                  else client_for(settings, operation['instance_id']))
         if operation.get('kind') == 'delete-series':
-            try:
-                client_for(settings, operation['instance_id']).series_one(operation['series_id'])
-            except SonarrError as error:
-                if error.status_code == 404:
-                    operation.update(status='done', error='', recovered_at=now_iso())
-                else:
-                    raise
             continue
         key = (operation['instance_id'], operation['series_id'])
         if key in fresh:
             continue
         # Uncertain reads must abort recovery, not fall through to replaying writes.
-        fresh[key] = client_for(settings, key[0]).episodes(key[1], files_only=False)
+        fresh[key] = client.episodes(key[1], files_only=False)
     for operation in intent.get('operations') or []:
         if operation.get('status') == 'done':
             continue
@@ -803,6 +877,11 @@ def _finish_removals(settings: dict, intent: dict) -> None:
                     and op.get('instance_id') == rule.get('instance_id')
                     and op.get('series_id') == rule.get('series_id')]
         if matching and all(op.get('status') == 'done' for op in matching):
+            try:
+                for op in matching:
+                    _validate_removal_request(current, op)
+            except Rejected:
+                continue
             completed.add(rule['id'])
     if not completed:
         return
@@ -901,9 +980,13 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
                     report.update(ok=False, error='Target held by another removal checkpoint')
                     records.append(report)
                     continue
+                live_removal = (queued.get('queue') or {}).get('removal') or {}
                 if (queued.get('match_status') != 'matched'
                         or not record.get('request_id')
-                        or target != (record.get('instance_id'), record.get('series_id'))):
+                        or target != (record.get('instance_id'), record.get('series_id'))
+                        or (live_removal.get('action') != 'remove' and (
+                            not record.get('target')
+                            or record['target'] != live_removal.get('target')))):
                     report.update(ok=False, error='Unstaged removal target cannot be verified; recovery requires review.')
                     records.append(report)
                     continue
@@ -930,7 +1013,7 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
             try:
                 # Validate target continuity before even read-only reconciliation.
                 for op in matching:
-                    _validate_removal_request(settings, op)
+                    _validate_removal_request(load_settings(), op)
                     if (op.get('instance_id'), op.get('series_id')) != (
                             queued.get('instance_id'), queued.get('series_id')):
                         raise Rejected('Saved removal target changed; recovery requires review.')
@@ -1248,7 +1331,7 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
         if not instance.get('enabled', True):
             continue
         try:
-            fresh = Sonarr(instance).series()
+            fresh = sonarr_client(instance).series()
         except Rejected as error:
             report['errors'].append(f'{instance["name"]}: {error}')
             continue
@@ -1521,7 +1604,7 @@ def check_connectivity(settings: dict) -> bool:
             health['instances'][instance['id']] = entry
             continue
         try:
-            version = Sonarr(instance).status().get('version', '')
+            version = sonarr_client(instance).status().get('version', '')
             was_down = entry.get('reachable') is False
             entry.update(reachable=True, ok=entry.get('ok', True), error='', sonarr_version=version)
             if was_down:
@@ -1622,7 +1705,7 @@ def check_instance(settings: dict, instance: dict, force: bool = True) -> dict:
     if not instance.get('enabled', True):
         return dict(result, disabled=True)
     try:
-        client = Sonarr(instance)
+        client = sonarr_client(instance)
         status = client.status()
         catalogue = catalogue_for(settings, instance['id'], force=force)
     except (SonarrError, Rejected) as error:
@@ -1930,7 +2013,7 @@ def monitoring_for(settings: dict, rule: dict, force: bool = False, offline: boo
 def check_recycle_bin(settings: dict, instance: dict) -> str:
     """Sonarr's recycle bin path, or '' when it has none. Cached with the instance state."""
     try:
-        media = Sonarr(instance).media_management()
+        media = sonarr_client(instance).media_management()
         return str(media.get('recycleBin') or '')
     except (SonarrError, Rejected):
         return ''

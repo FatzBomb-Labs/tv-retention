@@ -32,11 +32,14 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered changes:** simple latest-episode shared-file retention (`5c19739`),
-followed by protection for unknown/future shared members and editor saves that preserve
-current exclusions, Undo and rule identity. The final gate passed **644 Python and 28
-frontend tests**. Shared-file cutoff and the first five editor regressions were observed
-failing before their fixes; additional coverage was added afterward. See VALIDATION.
+**Latest delivered change (uncommitted):** server-owned explicit removal target snapshots
+and shared current-target verification before staging, reconciliation and dispatch. Legacy
+external requests without evidence stay held; bare 404 cannot complete uncertain deletion.
+The final gate passed **665 Python and 29 frontend tests**. Initial authorization regressions
+were observed failing before the fix; expanded record-only, legacy-operation, fresh-client
+and finalization coverage was added afterward. Prior uncommitted request-time Test Mode
+work is retained. Atomic transitions, transactions and safe restore remain open; see
+VALIDATION for exact evidence and limits.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
@@ -84,9 +87,10 @@ Remaining phase status:
   incomplete-result reporting, fresh ordinary replanning, separate scoped removal ownership,
   request-aware finalization and guarded record-only retry are verified in bounded fixtures.
   Latest additions cover simple shared-file protection and frontend exclusion/queue
-  preservation. Remaining blockers include remote target authorization, cross-tab settings
-  conflicts, all-entry-point mode guards, operation-backed recovery resolution and remaining
-  interruption evidence. Concurrency/durability also needs Phase 2.
+  preservation, the request-time Test Mode boundary and explicit removal target authorization.
+  Remaining blockers include cross-tab settings conflicts, atomic mode transitions,
+  operation-backed recovery resolution, authoritative file readings and interruption evidence.
+  Concurrency/durability also needs Phase 2.
 - **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
   interface correctness, container/HTTP operation and release acceptance gates remain.
 
@@ -137,9 +141,11 @@ Primary areas: `tests/`, `tools/check-on-host.*`, `docs/VALIDATION.md`.
 The normal-import executor tests, public-run coverage, scripted Sonarr fixture and
 mandatory checks are in place; evidence and current matrix limits are in VALIDATION.
 
-- [ ] Add a mutation matrix covering manual run, scheduled run, CLI, monitoring picker,
-      scope pass, recycle-bin changes, removal, restart and restore, with Test Mode both
-      on and off. Assert exact permitted requests, not only result counts.
+- [ ] Complete process-restart and safe-restore mutation evidence. The bounded both-mode
+      matrix now covers manual/scheduled run, CLI, due tick, picker, scope pass, recycle-bin,
+      series removal, preview and restore refusal with exact fake requests. Due/connectivity
+      decisions are stubbed for tick; persisted retry is same-process, not restart.
+      See VALIDATION for the current coverage and limitations.
 - [ ] Use fresh temporary config/state for every backend test and isolated schedules.
       Continue the Linux host gate; do not patch Linux path or `fcntl` behavior to make
       the Windows box impersonate the container.
@@ -158,14 +164,15 @@ Primary areas: `src/worker/main.py`, `actions.py`, `sonarr.py`, executor tests.
 Dispatch/completion now belongs to the executor, with explicit intent and read-only
 recovery reconciliation. Failed operations stop the current run conservatively. Run
 summaries now expose incomplete operations and failed/unattempted removals. Persisted-intent
-retry is covered through a second public run with unchanged settings, not a process restart
-or recovery-authorization test; evidence is in VALIDATION. Recovery now refuses unfinished
+retry and changed-target authorization are covered through consecutive public runs, not a
+process restart; evidence is in VALIDATION. Recovery now refuses unfinished
 removals when the current queue action is missing or changed, preserving the intent for
 review. Request identity now rejects same-action cancel-and-requeue and cancellation
 observed before dispatch. Concurrent cancellation/write races and the wider permission
 checks below remain open; no operator recovery-resolution workflow exists yet. Recovery
-uses structured HTTP status for absent series and stops on failed reads rather than
-replaying writes after an unavailable or malformed episode-list response.
+uses structured HTTP status and stops on failed reads rather than replaying writes after
+an unavailable or malformed episode-list response. A 404 cannot verify absence and leaves
+uncertain series deletion held for review, never marked complete.
 
 **Agreed unattended recovery policy:** keep confirmed completed work, preserve failures
 and uncertainty, and calculate ordinary retention anew from current settings and fresh
@@ -177,6 +184,13 @@ current target and queue generation, reconcile uncertain results, and never revi
 cancellation or transfer old confirmation to a replacement series. Queued removals now
 carry a persisted `request_id`; recovery and dispatch require the current queue to hold
 that exact ID and action, and a stale settings save cannot restore a canceled ID.
+New external requests also freeze server-owned instance ID, normalized URL, series ID,
+TVDB ID and canonical path. Echoed requests preserve the server snapshot. Stage records
+retain it before reads, and one shared verifier checks current queue/endpoint plus fresh
+Sonarr identity before staging, reconciliation and dispatch, returning the current client
+for dispatch. Missing legacy evidence holds external work until requeue/review; local
+remove-rule remains local. Finalization checks the same snapshot without rereading a
+successfully deleted series. This is not an atomic authorization/dispatch transaction.
 
 Ordinary-only unfinished intents now follow that policy: exact checkpoints are archived
 under `state/run-history/` before replacement, and retries refresh the catalogue and
@@ -200,7 +214,7 @@ Canceled/deleted record-only requests retire without claiming success and releas
 hold; the original error is reported on retirement and the original intent remains archived.
 Operation-backed canceled/replaced requests remain historical holds, with no resolution
 workflow yet. Ledger lifecycle/compaction, full shape validation, process-crash
-coverage, remote target identity and transaction safety remain open. Finalization is
+coverage, authoritative file membership and transaction safety remain open. Finalization is
 request-aware but not transactional: a save racing the run can still be overwritten.
 Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
 
@@ -215,16 +229,13 @@ Archive lifecycle, crash-history finalization and durability remain Phase 2 work
       propagation is covered, but process crashes and multi-operation durability remain open.
 - [ ] Report actual rather than planned byte totals, including partial success and retry,
       without counting failed, unattempted or already-completed work as newly reclaimed space.
-- [ ] Before explicit removal retries, verify current instance/series/file identity and
-      queue generation. Changed instance URLs and a different requested run scope must not
-      silently revive old work. Freeze original decisions for audit. Ordinary retention
-      always re-plans; special operator resolution is reserved for unprovable one-time
-      removal permission, not routine retention failures. Same-action cancel/requeue is
-      now refused by request identity; uncertain deletion reconciliation and mixed-run
-      separation remain open.
+- [ ] Provide explicit operator resolution for unprovable operation-backed removal
+      permission, including uncertain series deletion whose fresh lookup returns 404.
+      Preserve original decisions/checkpoints for audit; do not turn a review action into
+      authorization for a replacement target. Ordinary retention continues to re-plan.
 - [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
-      including malformed individual rows and changed file membership. HTTP status is now
-      structured, but a proxy-generated 404 must not substitute for verified target identity.
+      including malformed individual rows and changed file membership. Fresh series identity
+      and conservative refusal of proxy-style 404 do not establish file-level authority.
 
 **Tests:** first run; multiple operations; no operations; unmonitor failure; delete failure;
 request accepted but acknowledgement lost; crash before/after each checkpoint; interrupted
@@ -267,14 +278,27 @@ No separate complex mapping-reconciliation subsystem is planned for this checkpo
 
 Primary areas: `actions.py`, `main.py`, `sonarr.py`, `settings.js`, `series-editor.js`.
 
-- [ ] Enforce one external-mutation policy across every write entry point, not just `run()`.
-      A UI-disabled button is not the enforcement boundary.
-- [ ] Keep configuration saves usable while skipping or refusing external monitoring and
-      recycle-bin changes with explicit wording. Do not claim a skipped pass was applied.
-- [ ] Define a safe in-progress Test Mode transition: an acknowledged toggle must prevent
-      subsequent writes, while accurately reporting a request already in flight.
-- [ ] Resume, manual run, schedule and restore must all obey the current mode. Preview must
-      neither persist executable work nor activate queued work on a later run.
+Delivered, bounded: every application-created Sonarr client uses one transport guard,
+reloading and strictly validating current saved mode before each non-GET request. Missing
+mode defaults on; load/validation errors refuse writes. Settings remain editable, scope
+passes return explicit skipped/applied counts, and the editor reports skips without
+submitting follow-up picker changes. Picker/recycle writes reject clearly. Standalone
+clients retain their optional guard API. Restore RPC refuses activation in either mode.
+Manual/scheduled/CLI/tick and preview fixture evidence is recorded in VALIDATION.
+
+Allowed local writes under Test Mode include configuration, backup creation/listing,
+caches, health/progress/logs and job bookkeeping. Runs entered in Test Mode/preview do not
+persist executable work or consume queues. A live run toggled mid-flight keeps checkpoints
+and failure bookkeeping for attempted work; Test Mode is not local read-only operation.
+
+- [ ] Coordinate a safe in-progress Test Mode transition: an acknowledged toggle must
+      prevent subsequent dispatch, while reporting requests already in flight. The current
+      check blocks the next checked request but is not atomic with dispatch; a request
+      already past it can still be sent. Stale settings saves can also overwrite the mode.
+      This requires Phase 2 transaction/concurrency work, not another per-action guard.
+- [ ] Prove mode enforcement across process restart and coordinated restore activation.
+      Same-process retry currently preserves the old intent under Test Mode; safe restore
+      remains Phase 3 work. Do not re-enable restore RPC before its activation gates land.
 
 **Exit gate for Phase 1:** all P0 regression paths pass through the real action/run surface
 against fake Sonarr, including zero external mutations under Test Mode. Do not deploy yet

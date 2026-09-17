@@ -28,8 +28,10 @@ class RemovalIdentity(unittest.TestCase):
         with IsolatedWorker() as f:
             settings = f.settings(test_mode=False)
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('PUT', 'episode/monitor', urllib.error.URLError('lost reply'),
                 body={'episodeIds': [101], 'monitored': False})
             f.main.run()
@@ -103,8 +105,10 @@ class RemovalIdentity(unittest.TestCase):
                 f.store.save_settings(settings)
                 f.sonarr.expect('GET', 'series', [SERIES, dict(
                     SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)])
+                f.sonarr.expect('GET', 'series/1', SERIES)
                 f.sonarr.expect('GET', 'episode', [episode_payload()], query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                f.sonarr.expect('GET', 'series/1', SERIES)
                 f.sonarr.expect('PUT', 'episode/monitor',
                     body={'episodeIds': [101], 'monitored': False})
                 finish = f.main._finish_removals

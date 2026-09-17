@@ -124,8 +124,10 @@ class IsolatedWorker:
                            'api_key': self.sonarr.api_key}],
             'schedule': {'test_mode': test_mode},
             'rules': [{'id': 'r1', 'instance_id': 'fake', 'series_id': 1,
-                       'series_title': 'Fixture', 'path': '/tv/Fixture', 'keep_days': 30,
-                       'queue': {'removal': {'action': removal}}}],
+                       'series_title': 'Fixture', 'path': '/tv/Fixture', 'tvdb_id': 10, 'keep_days': 30,
+                       'queue': {'removal': {'action': removal, 'target': {
+                           'instance_id': 'fake', 'url': self.sonarr.url, 'series_id': 1,
+                           'tvdb_id': 10, 'path': '/tv/Fixture'}}}}],
         })
         settings['state_dir'] = str(self.root / 'state')
         self.store.save_settings(settings)

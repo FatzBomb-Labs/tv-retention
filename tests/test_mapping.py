@@ -81,6 +81,47 @@ class SeriesMapping(unittest.TestCase):
             self.assertEqual(required - set(entry), set())
 
 
+class EpisodeMembership(unittest.TestCase):
+    def test_malformed_member_refuses_entire_read_even_when_filtering_files(self):
+        from fake_sonarr import episode_payload
+        from sonarr import SonarrError
+        valid = episode_payload()
+        missing = dict(episode_payload(102, file_id=None))
+        del missing['id']
+        malformed = [None, [], 'row', {}, missing]
+        member = episode_payload(102, number=2)
+        malformed += [dict(member, id=value) for value in (None, 0, -1, True, '101', 1.5)]
+        malformed += [dict(member, monitored=value) for value in (None, 'false', 0)]
+        malformed += [dict(member, episodeFile=value) for value in ([], 'file', 12)]
+        malformed += [dict(member, seriesId=2), dict(member, episodeFileId=100),
+                      dict(member, episodeFile={'id': 99}), dict(member, hasFile='false')]
+        for row in malformed:
+            for files_only in (False, True):
+                with self.subTest(row=row, files_only=files_only):
+                    client = Sonarr(INSTANCE)
+                    client._request = lambda *a, **k: [valid, row]
+                    with self.assertRaises(SonarrError):
+                        client.episodes(1, files_only=files_only)
+
+    def test_duplicate_id_is_not_authoritative_membership(self):
+        from fake_sonarr import episode_payload
+        from sonarr import SonarrError
+        client = Sonarr(INSTANCE)
+        client._request = lambda *a, **k: [episode_payload(), episode_payload(monitored=False)]
+        with self.assertRaises(SonarrError):
+            client.episodes(1, files_only=False)
+
+    def test_valid_shared_file_and_fileless_members_and_empty_list(self):
+        from fake_sonarr import episode_payload
+        client = Sonarr(INSTANCE)
+        client._request = lambda *a, **k: [episode_payload(), episode_payload(102, number=2),
+                                          episode_payload(103, number=3, file_id=None)]
+        self.assertEqual([r['episode_id'] for r in client.episodes(1, False)], [101, 102, 103])
+        self.assertEqual([r['episode_id'] for r in client.episodes(1)], [101, 102])
+        client._request = lambda *a, **k: []
+        self.assertEqual(client.episodes(1, False), [])
+
+
 class CacheSchema(unittest.TestCase):
     def test_the_schema_marker_retires_older_cached_results(self):
         """A cached result written before a field existed must not be shown missing it."""

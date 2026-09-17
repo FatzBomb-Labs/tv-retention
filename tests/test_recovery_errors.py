@@ -6,6 +6,7 @@ from unittest.mock import patch
 import context  # noqa: F401
 from fake_sonarr import IsolatedWorker, SERIES, episode_payload
 from sonarr import Sonarr, SonarrError
+from core import Rejected
 
 
 class RecoveryErrors(unittest.TestCase):
@@ -21,12 +22,12 @@ class RecoveryErrors(unittest.TestCase):
                         Sonarr(settings['instances'][0]).series_one(1)
                 self.assertEqual(caught.exception.status_code, status)
 
-    def test_series_recovery_completes_only_on_http_404(self):
+    def test_series_recovery_never_treats_http_error_as_verified_absence(self):
         for status in (401, 403, 404, 500, 503):
             with self.subTest(status=status), IsolatedWorker() as fixture:
-                settings = fixture.settings(test_mode=False)
-                operation = {'kind': 'delete-series', 'instance_id': 'fake',
-                             'series_id': 1, 'status': 'in-progress', 'attempts': 1}
+                settings = fixture.settings(test_mode=False, removal='delete-series')
+                operation = fixture.main._operation('delete-series', settings['rules'][0],
+                    removal_action='delete-series', status='in-progress', attempts=1)
                 intent = {'id': 'fixture-intent', 'status': 'incomplete',
                           'operations': [operation]}
                 fixture.store.save_intent(settings, intent)
@@ -34,21 +35,22 @@ class RecoveryErrors(unittest.TestCase):
                     fixture.sonarr.url + '/api/v3/series/1', status,
                     'fixture response', {}, None)
                 with patch('urllib.request.urlopen', side_effect=error) as request:
-                    if status == 404:
+                    with self.assertRaises(Rejected) as caught:
                         fixture.main._resume_intent(settings, intent)
-                        self.assertEqual(operation['status'], 'done')
+                    if status == 404:
+                        self.assertIn('cannot verify absence', str(caught.exception))
                     else:
-                        with self.assertRaises(SonarrError):
-                            fixture.main._resume_intent(settings, intent)
-                        self.assertEqual(operation['status'], 'in-progress')
+                        self.assertEqual(caught.exception.status_code, status)
+                    self.assertEqual(operation['status'], 'in-progress')
+                    self.assertEqual(fixture.store.load_intent(settings), intent)
                     request.assert_called_once()
                     self.assertEqual(request.call_args.args[0].get_method(), 'GET')
 
     def test_not_found_in_connection_message_does_not_complete_series(self):
         with IsolatedWorker() as fixture:
-            settings = fixture.settings(test_mode=False)
-            operation = {'kind': 'delete-series', 'instance_id': 'fake',
-                         'series_id': 1, 'status': 'in-progress', 'attempts': 1}
+            settings = fixture.settings(test_mode=False, removal='delete-series')
+            operation = fixture.main._operation('delete-series', settings['rules'][0],
+                removal_action='delete-series', status='in-progress', attempts=1)
             intent = {'id': 'fixture-intent', 'status': 'incomplete',
                       'operations': [operation]}
             fixture.store.save_intent(settings, intent)
@@ -61,18 +63,43 @@ class RecoveryErrors(unittest.TestCase):
             self.assertEqual(fixture.store.load_intent(settings), intent)
             self.assertEqual(fixture.sonarr.mutations, [])
 
+    def test_removal_staging_rejects_missing_id_instead_of_monitoring_partial_membership(self):
+        for action in ('monitor-all', 'unmonitor-all', 'monitor-in-frame'):
+            with self.subTest(action=action), IsolatedWorker() as fixture:
+                settings = fixture.settings(test_mode=False, removal=action)
+                missing_id = episode_payload(102, number=2, file_id=None)
+                del missing_id['id']
+                fixture.sonarr.expect('GET', 'series', [SERIES])
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
+                fixture.sonarr.expect('GET', 'episode', [episode_payload(), missing_id], query={
+                    'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                result = fixture.main.run()
+                self.assertEqual(result['status'], 'incomplete')
+                self.assertIn('malformed episode membership', '; '.join(result['errors']))
+                self.assertEqual(fixture.store.load_intent(settings)['operations'], [])
+                self.assertEqual(fixture.store.load_settings()['rules'][0]['queue'],
+                                 settings['rules'][0]['queue'])
+                self.assertEqual(fixture.sonarr.mutations, [])
+                fixture.sonarr.assert_finished()
+
     def test_public_retry_stops_on_unavailable_or_malformed_recovery_read(self):
-        for response in (urllib.error.URLError('host not found'), {'unexpected': 'payload'}):
+        missing_id = episode_payload()
+        del missing_id['id']
+        for response in (urllib.error.URLError('host not found'), {'unexpected': 'payload'},
+                         [missing_id], [episode_payload(), None]):
             with self.subTest(response=str(response)), IsolatedWorker() as fixture:
                 settings = fixture.settings(test_mode=False)
                 fixture.sonarr.expect('GET', 'series', [SERIES])
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
                 fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
                 fixture.sonarr.expect('PUT', 'episode/monitor',
                     urllib.error.URLError('fixture acknowledgement lost'),
                     body={'episodeIds': [101], 'monitored': False})
                 fixture.main.run()
                 before = fixture.store.load_intent(settings)
+                fixture.sonarr.expect('GET', 'series/1', SERIES)
                 fixture.sonarr.expect('GET', 'episode', response, query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
                 fixture.sonarr.expect('GET', 'series', [SERIES])

@@ -546,6 +546,18 @@ REMOVAL_CONFIRMATIONS = {'delete-series': 'DELETE', 'delete-series-files': 'DELE
 QUEUED_FIXES = ['monitor-in-frame', 'unmonitor-out-frame']
 
 
+def removal_target(instance: dict, rule: dict) -> dict:
+    """Canonical target evidence; absent identity cannot authorize external removal."""
+    series_id = _whole(rule.get('series_id'), 'Removal series ID', 1, 2 ** 31 - 1)
+    tvdb_id = _whole(rule.get('tvdb_id'), 'Removal TVDB ID', 1, 2 ** 31 - 1)
+    if not series_id or not tvdb_id or not instance.get('id'):
+        raise Rejected('Removal target lacks identity; refresh the rule and requeue.')
+    return {'instance_id': _text(instance['id'], 'Removal instance ID', 64, required=True),
+            'url': validate_url(instance.get('url')),
+            'series_id': series_id, 'tvdb_id': tvdb_id,
+            'path': normalise(validate_path(rule.get('path'), 'Removal target path'))}
+
+
 def validate_queue(raw) -> dict:
     """A rule's pending intent. Nothing here has happened yet; a run is what applies it."""
     raw = raw if isinstance(raw, dict) else {}
@@ -561,6 +573,12 @@ def validate_queue(raw) -> dict:
         queue['removal'] = {'action': action,
                             'request_id': _text(removal.get('request_id'), 'Removal request ID', 64) or new_id(),
                             'created_at': _text(removal.get('created_at'), 'Queued at', 40) or ''}
+        target = removal.get('target')
+        if target is not None:
+            if not isinstance(target, dict):
+                raise Rejected('Invalid removal target snapshot')
+            queue['removal']['target'] = removal_target(
+                {'id': target.get('instance_id'), 'url': target.get('url')}, target)
     for entry in raw.get('fixes') or []:
         kind = _text((entry or {}).get('kind'), 'Queued fix', 32)
         if kind not in QUEUED_FIXES:

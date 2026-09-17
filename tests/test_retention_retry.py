@@ -107,10 +107,12 @@ class RetentionRetry(unittest.TestCase):
             series = [SERIES, dict(SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)]
             row = dict(episode_payload(102, file_id=199), seriesId=2)
             fixture.sonarr.expect('GET', 'series', series)
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
             fixture.sonarr.expect('GET', 'episode', [row], query={
                 'seriesId': ['2'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             for episode_id in (101, 102):
                 fixture.sonarr.expect('PUT', 'episode/monitor',
                     body={'episodeIds': [episode_id], 'monitored': False})
@@ -150,8 +152,10 @@ class RetentionRetry(unittest.TestCase):
         with IsolatedWorker() as fixture:
             settings = fixture.settings(test_mode=False)
             fixture.sonarr.expect('GET', 'series', [SERIES])
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'series/1', SERIES)
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [101], 'monitored': False})
             with patch.object(fixture.main, '_finish_removals', side_effect=OSError('interrupted')):

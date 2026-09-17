@@ -23,8 +23,11 @@ class MixedRecovery(unittest.TestCase):
                 ordinary = dict(episode_payload(102, file_id=199), seriesId=2)
                 f.sonarr.expect('GET', 'series', series)
                 for series_id, row in ((1, episode_payload()), (2, ordinary)):
+                    if series_id == 1:
+                        f.sonarr.expect('GET', 'series/1', SERIES)
                     f.sonarr.expect('GET', 'episode', [row], query={
                         'seriesId': [str(series_id)], 'includeEpisodeFile': ['true']})
+                f.sonarr.expect('GET', 'series/1', SERIES)
                 f.sonarr.expect('PUT', 'episode/monitor', urllib.error.URLError('lost reply'),
                     body={'episodeIds': [101], 'monitored': False})
                 first = f.main.run()
@@ -48,6 +51,9 @@ class MixedRecovery(unittest.TestCase):
                     reads.append((parsed.path, parsed.query))
                     if parsed.path == '/api/v3/series':
                         return BytesIO(json.dumps(series).encode())
+                    if parsed.path == '/api/v3/series/1':
+                        self.assertNotIn(change, ('canceled', 'subset'))
+                        return BytesIO(json.dumps(SERIES).encode())
                     self.assertEqual(parsed.path, '/api/v3/episode')
                     target = urllib.parse.parse_qs(parsed.query)['seriesId'][0]
                     if target == '1':
@@ -134,6 +140,7 @@ class MixedRecovery(unittest.TestCase):
             settings = f.settings(test_mode=False)
             request_id = settings['rules'][0]['queue']['removal']['request_id']
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
                 query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
             first = f.main.run()
@@ -147,8 +154,10 @@ class MixedRecovery(unittest.TestCase):
             # Connectivity returns. The still-live queue is fresh operator intent;
             # no operation from the first run was dispatched or can be replayed.
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [101], 'monitored': False})
             second = f.main.run()
@@ -174,6 +183,7 @@ class MixedRecovery(unittest.TestCase):
             with self.subTest(deleted=deleted), IsolatedWorker() as f:
                 settings = f.settings(test_mode=False)
                 f.sonarr.expect('GET', 'series', [SERIES])
+                f.sonarr.expect('GET', 'series/1', SERIES)
                 f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
                     query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
                 f.main.run()
@@ -209,10 +219,12 @@ class MixedRecovery(unittest.TestCase):
         with IsolatedWorker() as f:
             settings = f.settings(test_mode=False)
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
                 query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
             f.main.run()
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
             save, calls = f.main.save_removal_ledger, []
@@ -235,6 +247,7 @@ class MixedRecovery(unittest.TestCase):
             with self.subTest(change=change), IsolatedWorker() as f:
                 settings = f.settings(test_mode=False)
                 f.sonarr.expect('GET', 'series', [SERIES])
+                f.sonarr.expect('GET', 'series/1', SERIES)
                 f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
                     query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
                 f.main.run()
@@ -277,13 +290,16 @@ class MixedRecovery(unittest.TestCase):
         with IsolatedWorker() as f:
             settings = f.settings(test_mode=False)
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', urllib.error.URLError('old staging failure'),
                 query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
             f.main.run()
             old = f.store.load_intent(settings)
             current = f.store.load_settings()
-            current['rules'][0]['queue']['removal'] = {'action': 'delete-series-files'}
-            f.store.save_settings(current)
+            import actions
+            draft = copy.deepcopy(current)
+            draft['rules'][0]['queue']['removal'] = {'action': 'delete-series-files'}
+            actions.action_settings(current, {'settings': draft})
             f.sonarr.expect('GET', 'series', [SERIES])
             f.sonarr.expect('GET', 'series/1', urllib.error.URLError('new staging failure'))
             f.sonarr.expect('GET', 'series', [SERIES])
@@ -313,9 +329,11 @@ class MixedRecovery(unittest.TestCase):
                 settings, old = self.seed_mixed(f)
                 f.sonarr.expect('GET', 'series', [SERIES])
                 if failure > 1:
+                    f.sonarr.expect('GET', 'series/1', SERIES)
                     f.sonarr.expect('GET', 'episode', [episode_payload()], query={
                         'seriesId': ['1'], 'includeEpisodeFile': ['true']})
                 if failure == 4:
+                    f.sonarr.expect('GET', 'series/1', SERIES)
                     f.sonarr.expect('PUT', 'episode/monitor',
                         body={'episodeIds': [101], 'monitored': False})
                 save, calls = f.main.save_removal_ledger, []
@@ -331,9 +349,11 @@ class MixedRecovery(unittest.TestCase):
                         f.main.run()
                 self.assertEqual(f.store.load_intent(settings), old)
                 self.assertEqual(len(f.sonarr.mutations), 1 if failure == 4 else 0)
+                f.sonarr.expect('GET', 'series/1', SERIES)
                 f.sonarr.expect('GET', 'episode', [episode_payload(monitored=failure != 4)], query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
                 if failure != 4:
+                    f.sonarr.expect('GET', 'series/1', SERIES)
                     f.sonarr.expect('PUT', 'episode/monitor',
                         body={'episodeIds': [101], 'monitored': False})
                 result = f.main.run()
@@ -406,8 +426,10 @@ class MixedRecovery(unittest.TestCase):
         with IsolatedWorker() as f:
             settings, old = self.seed_mixed(f)
             f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('GET', 'episode', [episode_payload()], query={
                 'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            f.sonarr.expect('GET', 'series/1', SERIES)
             f.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [101], 'monitored': False})
             with patch.object(f.main, 'save_intent', side_effect=OSError('replacement interrupted')):
