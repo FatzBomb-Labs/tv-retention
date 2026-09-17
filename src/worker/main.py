@@ -1674,7 +1674,11 @@ def tick() -> int:
                 sync_from_sonarr(settings, reason='before the run')
             state['last_run'] = now_iso()
             save_job_state(settings, state)
-            with contextlib.suppress(Rejected):
+            scheduled_test = bool((settings.get('schedule') or {}).get('test_mode', True))
+            if scheduled_test:
+                log_line(settings, 'info',
+                         'scheduled test run started; Test Mode is on and nothing will change')
+            try:
                 with run_lock():
                     summary = run(preview=False, scheduled=True)
                     if summary.get('test_mode'):
@@ -1683,6 +1687,8 @@ def tick() -> int:
                                  f'{len(summary["rules"])} rule(s); nothing changed')
                     else:
                         actions.append('scheduled run')
+            except Rejected as error:
+                log_line(settings, 'warning', f'scheduled run did not complete: {error}')
             state = job_state(settings)
             state['last_run'] = now_iso()
 

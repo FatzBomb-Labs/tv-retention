@@ -209,8 +209,10 @@ class Interface(unittest.TestCase):
         worker = ROOT / 'src' / 'worker' / 'main.py'
         tick = worker.read_text(encoding='utf-8').split('def tick()')[1].split('\ndef ')[0]
         self.assertIn('now = dt.datetime.now().astimezone()', tick)
+        self.assertIn("'scheduled test run started; Test Mode is on and nothing will change'", tick)
         self.assertIn("'scheduled test run: {summary[\"planned\"]} planned across '", tick)
         self.assertIn('nothing changed', tick)
+        self.assertIn("'scheduled run did not complete: {error}'", tick)
         status = worker.read_text(encoding='utf-8').split('def status_snapshot')[1].split('\ndef ')[0]
         self.assertIn("'last_scheduled_run': jobs.get('last_run')", status)
         self.assertIn('Last scheduled test', module_js('activity.js'))
