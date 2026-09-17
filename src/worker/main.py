@@ -714,12 +714,30 @@ def _stage_intent(settings: dict, selected: list, queued_rules: list, tmdb,
             'rules': results, 'removals': removals, 'operations': operations}
 
 
-def _execute_operation(settings: dict, operation: dict) -> None:
-    """Mark the exact external call in progress, then record its result atomically."""
+def _execute_operation(settings: dict, intent: dict, operation: dict) -> None:
+    """Checkpoint before dispatch and after acknowledgement; disk failures propagate."""
     operation['status'] = 'in-progress'
     operation['attempts'] = int(operation.get('attempts') or 0) + 1
     operation['started_at'] = now_iso()
-    save_intent(settings, _ACTIVE_INTENT)
+    save_intent(settings, intent)
+    try:
+        kind = operation['kind']
+        if kind != 'remove-rule':
+            client = client_for(settings, operation['instance_id'])
+            if kind == 'set-monitored':
+                client.set_monitored(operation.get('episode_ids') or [], operation.get('monitored', False))
+            elif kind == 'delete-episode-file':
+                client.delete_episode_file(operation['file_id'])
+            elif kind == 'delete-series':
+                client.delete_series(operation['series_id'], delete_files=operation.get('delete_files', False))
+                invalidate_catalogue(settings, operation['instance_id'])
+            else:
+                raise Rejected(f'Unknown operation kind: {kind}')
+    except (Rejected, SonarrError, ValueError) as error:
+        operation.update(status='failed', error=str(error), finished_at=now_iso())
+    else:
+        operation.update(status='done', error='', finished_at=now_iso())
+    save_intent(settings, intent)
 
 
 def _resume_intent(settings: dict, intent: dict) -> None:
@@ -770,21 +788,6 @@ def _resume_intent(settings: dict, intent: dict) -> None:
                 operation.update(status='done', error='', recovered_at=now_iso())
     intent['resumed_at'] = now_iso()
     save_intent(settings, intent)
-    client = client_for(settings, operation['instance_id'])
-    try:
-        if operation['kind'] == 'set-monitored':
-            client.set_monitored(operation.get('episode_ids') or [], operation.get('monitored', False))
-        elif operation['kind'] == 'delete-episode-file':
-            client.delete_episode_file(operation['file_id'])
-        elif operation['kind'] == 'delete-series':
-            client.delete_series(operation['series_id'], delete_files=operation.get('delete_files', False))
-            invalidate_catalogue(settings, operation['instance_id'])
-        # remove-rule has no Sonarr call; it is finalized with the other settings cleanup.
-    except (Rejected, SonarrError, ValueError) as error:
-        operation.update(status='failed', error=str(error), finished_at=now_iso())
-    else:
-        operation.update(status='done', error='', finished_at=now_iso())
-    save_intent(settings, _ACTIVE_INTENT)
 
 
 def _intent_summary(intent: dict, preview: bool, test_mode: bool, scheduled: bool, started: str) -> dict:
@@ -835,14 +838,8 @@ def _finish_removals(settings: dict, intent: dict) -> None:
     write_cache(settings, 'health.json', health)
 
 
-# The intent is kept here only while `_execute_operation` serializes its before/after
-# checkpoints. `run_lock` makes the worker single-runner, so no second thread can observe it.
-_ACTIVE_INTENT = None
-
-
 def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     """Read the whole run, save its intent, then perform only those saved writes."""
-    global _ACTIVE_INTENT
     settings = load_settings()
     test_mode = bool((settings.get('schedule') or {}).get('test_mode', True))
     dry_run = preview or test_mode
@@ -878,11 +875,14 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     else:
         intent = _stage_intent(settings, selected, queued, tmdb)
         save_intent(settings, intent)
-    _ACTIVE_INTENT = intent
     for operation in intent.get('operations') or []:
         if operation.get('status') in ('done',):
             continue
-        _execute_operation(settings, operation)
+        _execute_operation(settings, intent, operation)
+        if operation.get('status') != 'done':
+            # Conservative until explicit dependencies land: a failed unmonitor must
+            # never be followed by a deletion, including after an uncertain response.
+            break
     _finish_removals(settings, intent)
     intent['status'] = 'complete' if all(op.get('status') == 'done' for op in intent.get('operations') or []) else 'incomplete'
     intent['finished'] = now_iso()
@@ -901,7 +901,6 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
              f'{summary["freed_bytes"] // 1024 // 1024} MiB')
     if summary['errors']:
         log_line(settings, 'error', 'run errors: ' + '; '.join(summary['errors'])[:600])
-    _ACTIVE_INTENT = None
     return summary
 
 

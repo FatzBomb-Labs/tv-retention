@@ -12,21 +12,29 @@ trap "rm -rf $staging" EXIT
 tar -xf - -C "$staging"
 cd "$staging"
 printf "Development staging: %s\n" "$staging"
-python3 -m unittest discover -s tests -v
-PYTHONPATH=src/worker python3 -c "import main, actions, server" && echo "worker imports OK"
-if command -v node >/dev/null; then
-  # Every shipped module, checked as an ES module: `--input-type` governs stdin, and a
-  # bare `node --check file.js` would parse with script goal, where import/export is a
-  # syntax error and a file without them says nothing about module semantics.
-  for script in src/assets/*.js; do
-    node --input-type=module --check < "$script" || { echo "syntax check failed: $script" >&2; exit 1; }
-  done
-  echo "module syntax OK"
-  # The runtime test links the page the way the browser does, which needs the vm module
-  # API. The flag reaches the children the test runner spawns; its warning is on stderr.
-  node --experimental-vm-modules --test tests/frontend/*.test.js \
-    && echo "frontend runtime tests OK"
+# Required dependencies must not produce a successful partial gate.
+command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+command -v node >/dev/null || { echo "Node is required for the release gate" >&2; exit 1; }
+export TVR_CONFIG_DIR="$staging/config" TVR_CONFIG="$staging/config/settings.json"
+export TVR_RUNTIME="$staging/runtime" TVR_DEVELOPMENT=1
+status=0
+python3 -m unittest discover -s tests -v || status=1
+# Enumerate shipped modules rather than relying on main importing them transitively.
+for module in src/worker/*.py; do
+  python3 -m py_compile "$module" || status=1
+  name=$(basename "$module" .py)
+  PYTHONPATH=src/worker python3 -c "import importlib, sys; importlib.import_module(sys.argv[1])" "$name" \
+    || status=1
+done
+# Check ES module syntax, not script-goal syntax; keep checking after a test failure.
+for script in src/assets/*.js; do
+  node --input-type=module --check < "$script" || status=1
+done
+node --experimental-vm-modules --test tests/frontend/*.test.js || status=1
+if [ "$status" -eq 0 ]; then
+  echo "All required checks passed"
 else
-  echo "node not present; modules not syntax checked, frontend runtime tests not run"
+  echo "Required validation failed" >&2
 fi
+exit "$status"
 '

@@ -1,17 +1,16 @@
-# Frontend refactor completion record
+# Frontend architecture after extraction
 
-The decomposition of `src/assets/app.js` is complete. This file records the final
-architecture and the contracts that future changes must preserve; it is no longer a
-phase plan.
+The decomposition of `src/assets/app.js` is complete; no further extraction is planned.
+This records module ownership and requirements for future changes, not proof that every
+behavior is correct. [PLAN.md](PLAN.md), revised 2026-09-17, owns the unresolved safety,
+persistence and UI work. [VALIDATION.md](VALIDATION.md) distinguishes historical passing
+checks from the later failing review. See `AGENTS.md` for repository and release rules.
 
-Read it with `AGENTS.md`, `README.md`, and `docs/VALIDATION.md`. Implementation and tests
-outrank this summary.
+## Module responsibilities
 
-## Final state
-
-The entry began at 3,496 lines and is now a composition root of roughly 350 lines. It
-constructs feature factories, owns the few documents replaced wholesale at runtime, and
-brokers explicit callbacks between features. It contains no feature-sized UI body.
+`app.js` is the composition root: it constructs feature factories, owns replaceable
+shared documents, orchestrates full renders and brokers explicit feature callbacks.
+The 19-module responsibility map is:
 
 ```text
 src/assets/
@@ -36,82 +35,71 @@ src/assets/
   library.js        catalogue caches, filters, bands, cards, layout and scale
 ```
 
-No further frontend extraction is planned. In particular:
+`library.js` keeps catalogue state, bands, cards and display preferences in one rendering
+closure; `series-editor.js` keeps the pane, drafts and form lifecycle together. About stays
+in `settings.js` as a read-only projection with no independent state or listeners.
 
-- `library.js` remains one module because catalogue state, band selection, cards and
-  display preferences are one rendering closure. Splitting it would require a broad
-  context object or sibling callback cycle.
-- `series-editor.js` remains one module because the pane, draft map and form lifecycle are
-  one closure.
-- The small About renderer remains in `settings.js`: it is a read-only projection of the
-  settings and snapshot accessors that module already owns, with no state or listeners of
-  its own.
-- `app.js` remains the explicit composition root. There is no event bus, mutable callback
-  registry, shared state module or service locator.
+## Dependency, state and lifecycle rules
 
-## Dependency and state rules
+- `app.js` remains the explicit composition root: no event bus, mutable callback registry,
+  shared state module or service locator. Sibling feature modules do not import each other;
+  cross-feature work uses narrow, intent-named capabilities supplied by the entry.
+- Replaceable documents are read through accessors such as `getSettings`, `getSnapshot`
+  and `getMonitoring`, not captured object references that go stale after save/refresh.
+- Entry-owned state changes use named setters or invalidation intents. Instance saves call
+  `forgetSeriesCache`, rather than receiving the cache binding. Plan invalidation must
+  cover retention, exclusions, queue, instance and mode changes; revision coupling and
+  stale-response handling are unresolved work in PLAN, not guarantees of this structure.
+- Cross-feature reads stay explicit and deferred: topbar receives `getLibrary` and `ruleFor`
+  for sidebar counts; library receives `syncedAgo` for card status. `renderLibrary` is the
+  single library redraw capability; the old `renderRules` alias is gone.
+- Every module except `app.js` must be side-effect-free at import: no DOM access, storage,
+  listeners, timers or network work. Only the entry may look up `#tv-retention` on import;
+  feature work begins through explicit factory/method calls.
+- Attach static listeners exactly once from `wire()` and dynamic listeners when controls
+  are constructed, not on every full render. Asset imports must remain within one release
+  digest, and non-entry modules must be importable without a page.
 
-- Modules that need replaceable documents receive accessors such as `getSettings`,
-  `getSnapshot`, and `getMonitoring`; capturing those objects would make a module stale
-  after the next save or refresh.
-- A module that needs another feature asks the entry for a narrow capability named for
-  intent. Sibling feature modules do not import each other.
-- Writes to entry-owned state use named setters or invalidation intents. For example,
-  instance saves call `forgetSeriesCache`; they do not receive the cache binding.
-- Every module except `app.js` is side-effect-free at import. DOM listeners, storage
-  reads, timers and network work begin only from a factory method such as `wire()`.
-- Topbar/library cross-feature reads remain explicit and deferred: topbar receives
-  `getLibrary` and `ruleFor` for sidebar counts; library receives `syncedAgo` for card
-  status text.
-- `renderLibrary` is the one library redraw capability. The historical `renderRules`
-  compatibility alias has been removed.
+## Behavioral requirements — not current guarantees
 
-## Behavior contracts preserved by the split
+The split was intended to preserve these boundaries. The latest review found violations;
+mechanical extraction checks do not demonstrate end-to-end safety. PLAN defines the fixes
+and required regression evidence.
 
-- Test Mode means no writes, scheduled or manual.
-- A rule that does not resolve to exactly one Sonarr series is never processed.
-- Deleting an episode file always unmonitors it.
-- Destructive series removal remains queued and undoable until a run.
-- Cached readings always show their age.
-- Per-series Sonarr reads remain background work and never raise the global busy overlay.
-- The Run button is disabled only by a complete, trustworthy plan with nothing actionable.
-- Exclusions are decided once and outrank every retention rule.
-- Library views share one catalogue and differ only by filter.
-- Leaving the library closes the editor and clears drafts.
-- Static listeners are attached exactly once from `wire()`; dynamic listeners are
-  attached when their controls are constructed.
-- Settings saves still post and replace the whole validated document.
-- Asset imports stay within one release digest and every non-entry module remains safe to
-  import without a page.
+- Test Mode must prevent external Sonarr mutations on every entry point, scheduled or
+  manual. Settings remain editable; permitted local operational writes need an explicit
+  policy. Immediate monitoring/recycle-bin paths currently violate the external-write
+  requirement, so the old blanket claim that nothing writes is not implementation evidence.
+- Process a rule only with exactly one confirmed Sonarr series identity, including queued
+  and resumed work. No file deletion may proceed without confirmed unmonitoring of all
+  affected episodes. Ordinary retention never monitors; explicit removal dispositions
+  remain separate operator intent. The executor regression currently fails.
+- Destructive removal stays queued and undoable until execution starts; stale drafts or
+  recovered intents must not resurrect canceled work.
+- Decide exclusions once, ahead of every retention rule. Protect monitoring state and
+  every file containing excluded content. Retention edits must preserve exclusions;
+  exclusion loss and shared protected/delete files are confirmed review failures.
+- Show cached readings with their age. Per-show Sonarr reads stay background work, with
+  no global busy overlay or unrelated-show blocking.
+- Suppress Run as having nothing actionable only on a complete, current, trustworthy
+  plan. Stale/partial/unknown readings cannot justify an empty-plan claim; queued removals
+  must count toward eligibility. Freshness, confirmation and revision behavior need PLAN's
+  targeted tests.
+- Library views share one catalogue and differ by filter. Leaving the library closes the
+  editor and clears drafts; late responses must not repopulate a closed or different pane.
 
-## Extraction verification
+## Save implementation and evidence
 
-Each move was reconstructed against its parent commit after undoing only mechanical
-accessor substitutions and listener lifting. The final large cuts matched exactly:
+Settings saves currently post and replace the whole validated document. **This is an
+implementation detail, not an immutable contract.** PLAN calls for backend revisions and
+conflict rejection, owned-field/rule-ID merges, serialized frontend saves and request/draft
+generation checks so stale submissions or responses cannot erase newer intent.
 
-- presets: 97/97 lines
-- connections: 122/122 lines
-- theme: 23/23 lines
-- library: 549/549 lines
-
-The completed graph has also been reviewed for initialization order, stale state,
-cache invalidation, listener duplication, render ordering and dependency cycles.
-
-The authoritative gate is `./tools/check-on-host.sh`, or
-`tools\check-on-host.ps1` from Windows. The current release passes 582 Python tests,
-worker imports, syntax checks for all nineteen ES modules, and 22 frontend runtime tests.
-
-## Release identity
-
-`VERSION` is the semantic version, `BUILD` is the monotonically increasing shipped-build
-number, and the image creates `BUILD_DATE` when it is built. Help -> About shows all
-three; the top banner shows only the semantic version.
-
-Increment `BUILD` for every deployed code change. Change `VERSION` when the release
-meaning changes.
-
-## Work that remains elsewhere
-
-Product work is tracked only in `docs/PLAN.md`. The series-details regression reported
-after the extraction is a behavior review, not unfinished module work, and should be
-investigated against the live pane and pre-refactor history before changing it.
+Extraction was checked against parent commits with mechanical accessor/listener changes
+accounted for, and the graph was reviewed for initialization, state access, invalidation,
+listeners, render order and cycles. Those historical checks are not proof that the review
+findings are fixed or that the current gate passes. Validation commands and release identity
+policy belong in `AGENTS.md`; dated results and coverage limits belong in VALIDATION.
+The cleanup-time Linux gate failed on the known executor regression before reaching
+frontend checks; see VALIDATION. No deployment was performed. Remaining product and
+correctness work belongs in PLAN, not an unfinished extraction plan.

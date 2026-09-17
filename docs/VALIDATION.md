@@ -1,186 +1,144 @@
 # Validation record
 
-Last run: 2026-09-17, from Windows via `tools\check-on-host.ps1` against fatzserver-host.
-This is the grouped implementation pass for notification removal, optional connections and
-API-key lifecycle, provider-backed air dates, backup/restore, Status, the operational
-library rows, staged run durability, and the consolidated series automation panel. The
-gate stages the source under `/tmp`, installs nothing, touches no `/boot` path, reads no
-media, and contacts no Sonarr.
+## Latest implementation — 2026-09-17
 
-## Automated
+**The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
+`tools/check-on-host.ps1` on `fatzserver-host` ran **603 Python tests in 5.366s**, all
+passing (a preceding run also passed in 5.395s), plus **22 frontend tests**, all passing.
+Every shipped worker module was
+separately imported and syntax-checked; every shipped JavaScript module was syntax-checked.
+No deployment, live Sonarr request, or media access occurred; staging was disposable.
 
-`./tools/check-on-host.sh`, or `tools\check-on-host.ps1` — source staged under `/tmp` on
-the host, removed afterwards.
-It installs nothing, touches no `/boot` path, reads no media, and contacts no Sonarr.
+The executor now owns dispatch and completion, receives its intent explicitly, and stops
+the run after a failed operation. Recovery no longer dispatches the last loop variable.
+Before/after checkpoint failures propagate rather than permitting another write. These
+are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
-| Check | Result |
+Evidence:
+- The original dispatch regression failed before the change (zero calls). Its ordinary
+  Linux-import replacement passed alone: **1 test in 0.000s**, verbose output `ok`.
+- All **8 focused executor tests passed in 0.002s**: dispatch, before/after checkpoint
+  failure, failed Sonarr write, local rule removal, unknown operation, read-only recovery,
+  and empty recovery. They replace the AST-only diagnostic.
+- `tests/test_run_contract.py` verifies `main.run()` for both scheduled flag values and
+  both Test Mode values using the real client mapping and persistence. Queued unmonitoring
+  sends exactly one PUT when enabled; Test Mode sends none and creates no state directory.
+  This does not exercise the scheduler loop, CLI, or every removal disposition.
+- `tests/fake_sonarr.py` records exact method/path/query/body, rejects unexpected requests,
+  blocks socket access, and supports changed/shared/fileless payloads and lost responses.
+  Its first run exposed an invalid synthetic key; that fixture error was corrected before
+  the passing gate. Older tests have not all been migrated to this isolation boundary.
+- The gate now requires Node, continues independent checks after test failure, and gives
+  PowerShell staging scripts unique paths with cleanup on success/failure. Concurrent
+  and interrupted-SSH cleanup fault injection has not yet been exercised.
+
+### Mutation coverage still required
+
+| Surface | Current evidence |
+|---|---|
+| Public run, manual/scheduled flag | Queued unmonitor-all with Test Mode on/off; exact requests |
+| Executor/recovery helper | Mocked checkpoint/dispatch failures and read-only reconciliation |
+| Scheduler loop, CLI, picker, scope pass, recycle-bin, other removals, restart, restore | Full mode/permission/failure matrix remains open |
+
+## Historical review — 2026-09-17, before the executor fix
+
+**The gate failed at this point.** A cleanup-time rerun via `tools/check-on-host.ps1`
+on `fatzserver-host` ran 591 tests in 5.877s: 590 passed and the executor regression below
+failed (exit 1). The script stopped before its separate worker-import, module-syntax and
+frontend checks. Source was staged under `/tmp`; no deployment or live-service checks
+were performed. The earlier successful gate predates `tests/test_run_executor_review.py`.
+The review recorded these failures:
+
+| Evidence | Recorded result |
+|---|---|
+| Executor regression, `tests/test_run_executor_review.py` | Expected `set_monitored([101], False)` once; actual call count was 0. The staged operation was not dispatched. |
+| Isolated retention-editor check | Saving retention edits lost manual exclusion fields. |
+| Isolated shared-file check | File ID `99` appeared in both protected and delete lists. |
+| Isolated AniList check | An existing Sonarr air date was overwritten rather than left intact. |
+
+The executor diagnostic extracts the actual function via AST; it is not a full public
+run/recovery test. The other three results are isolated reproductions, not live-service
+acceptance. Other review findings in [PLAN.md](PLAN.md) are source-inspected unless
+separately evidenced; concurrency, DST, container permissions and browser timing still
+need targeted validation. PLAN owns the fixes and release gates.
+
+The cleanup-time gate reconfirmed the executor failure only; the other three recorded
+reproductions were not independently rerun. No deployment or live-service checks occurred.
+
+## Historical automated gate — 2026-09-17, before the executor regression
+
+Recorded from Windows via `tools\check-on-host.ps1` against `fatzserver-host` for the
+grouped implementation pass (notification removal, connections/API keys, provider dates,
+backup/restore, Status, library rows, staged runs and series automation).
+The gate staged source under `/tmp` and removed it afterwards, installed nothing,
+touched no `/boot` path, read no media and contacted no Sonarr.
+
+| Check | Recorded result |
 |---|---|
 | `python3 -m unittest discover -s tests` | 590 tests, all pass |
-| Worker imports | every module loads, server.py included |
+| Worker imports | every module loads, `server.py` included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors across all 19 shipped ES modules |
 | `node --test tests/frontend/*.test.js` | 22 tests, all pass |
 
-### Current navigation/Test Mode pass (local, 2026-09-16)
+These are the claims recorded for that run, including import and syntax coverage, not
+an independent audit of the gate or evidence that the later regression passes. Static
+interface checks and isolated backend/frontend tests did not establish executor safety,
+live provider correctness, concurrent persistence or real backup/restore behavior.
 
-The source now presents Series (including Presets and Exclusion Rules), Settings
-(including Schedule), System (including Stats and Backup), and Help. Test Mode is a
-separate prominent card above the Schedule controls. The focused local checks for this
-pass are `test_build.py` (164 tests) and the frontend runtime suite (22 tests), both
-passing. The host gate below has also passed for the deployed Build 20.
+## Build 20 acceptance smoke — read-only, 2026-09-17
 
-### Build 20 acceptance smoke (read-only, 2026-09-17)
+At the time of this check, `tv-retention-demo` on `fatzserver-host` was the only running
+TV Retention container, healthy and serving `tv-retention:dev-build20`. This is historical
+smoke evidence, not a claim about the deployment now. The operator did not turn Test Mode
+off, invoke a run or invoke any write action; the scheduler catch-up was observed below.
 
-The target container `tv-retention-demo` on `fatzserver-host` was checked without
-turning Test Mode off and without invoking a run or any write action. There is exactly
-one running TV Retention container, it is healthy, and it serves `tv-retention:dev-build20`.
-
-| Check | Result |
+| Check | Recorded result |
 |---|---|
 | `GET /health` | HTTP 200, `{"ok": true}` |
 | `GET /` without a session | HTTP 303 to `/login` |
 | Login flow | Wrong password HTTP 401; configured credentials land on the page |
 | Authenticated snapshot | version `0.3.0`, build `20`, Test Mode `true` |
 | Test Mode | local-time catch-up logged `6 planned across 32 rule(s); nothing changed`; no deletion was attempted |
-| Schedule clock | container is `America/New_York` (EDT); schedule fields use that local civil time |
+| Schedule clock | container was `America/New_York` (EDT at the time); schedule fields used that local civil time. This does not prove DST-transition correctness. |
 | Navigation | Series, Settings, System and Help views present; Schedule and Backup in their new locations |
-| Removed/replaced UI | Exclusion Rules present; no automatic-search control; Alerts and Safety are not standalone tabs |
+| Removed/replaced UI | Exclusion Rules present; no automatic-search control; Alerts and Safety were not standalone tabs |
 | Container logs | healthy startup line only; no traceback, permission error or HTTP 500 |
 
-This is the safe portion of [ACCEPTANCE.md](ACCEPTANCE.md). The first live deletion,
-monitoring write, optional-provider calls, and backup/restore remain intentionally
-unchecked until an operator chooses them.
+This smoke does not establish write safety or a general Test Mode barrier. Immediate
+monitoring and recycle-bin paths have unresolved Test Mode findings in PLAN; browsing
+is not equivalent to saving rules or changing monitored flags. Further acceptance follows
+[ACCEPTANCE.md](ACCEPTANCE.md) and PLAN's prerequisite gates, not this historical smoke.
 
-### Coverage by area
+## Earlier evidence — historical baselines, not current acceptance
 
-| File | Tests | What it holds |
-|---|---|---|
-| `test_build.py` | 165 | The interface, checked statically |
-| `test_monitoring.py` | 36 | The two modes, the keep frame, and what each one asks Sonarr to do |
-| `test_freshness.py` | 62 | Reading ages, staleness, provider gates, what may be shown as current, the one-read-per-rule guarantee, and recycle-bin wiring |
-| `test_migration.py` | 45 | Settings v1 → v13, each step and the whole chain |
-| `test_schedules.py` | 27 | When a job is due, including what cron cannot express |
-| `test_retention.py` | 45 | Every condition, every keep mode, air-date precedence, the guards |
-| `test_mapping.py` | 19 | The Sonarr payload as it actually arrives, through the real client |
-| `test_cache.py` | 16 | Cache keys derived from the mapping's shape |
-| `test_queue.py` | 15 | Queued removals and the check queue |
-| `test_settings.py` | 38 | Validation, redaction, injection and traversal rejection, one rule per series |
-| `test_names.py` | 20 | Names each module can reach, names nothing uses, alert display rules |
-| `test_presets.py` | 10 | Shared values, and what a preset may not do |
-| `test_progress.py` | 12 | The progress marker, the banner over it, and what the header totals |
-| `test_sonarr.py` | 13 | Rule-to-series matching, ambiguity refused rather than guessed, and the media-management methods a recycle-bin write goes through |
-| `test_unaired.py` | 9 | Unaired seasons, and the next episode due |
-| `test_server.py` | 44 | What the front door refuses, guards and lets through, the release namespace on the wire, malformed startup configuration, and the poster cache's bounds and pruning |
-| `test_store.py` | 14 | `read_log`'s byte-offset tracking, the atomic run-intent record, and `state_dir`'s writability cache — all run locally, no `fcntl` needed |
+- **2026-09-16, Build 10 disposable image:** missing credentials caused clean startup
+  refusal (exit 1); `/config` acquired default uid/gid 1000 ownership without operator
+  `chown`. The smoke container was removed without touching the demo container. These
+  narrow observations do not validate all privilege modes or restore permissions.
+- **2026-09-07, read-only performance:** 3,022 series and 36 rules; source staged under
+  `/tmp`, `TVR_CONFIG` away from `/boot`, every Sonarr call asserted GET. Reading the 36
+  bound series took 72 calls, 1.3s and 14.8 MiB. Cached rechecks, including after keep-window
+  edits, took 0 calls and 0.03s; recomputing all plans on a heartbeat took 0 calls and 0.07s.
+  This is a historical cache baseline, not a benchmark of the current application.
+- **2026-09-11, browser module graph:** `tv-retention:phase4` on port 18788 used a copy of
+  demo settings with the schedule forced off and Test Mode on; the original config was
+  not opened for writing and the container was removed afterwards. Modules and static
+  imports stayed under `/assets/ad57b2472405/…`, with HTTP 200 and `immutable` caching.
+  An unknown digest returned 404 with `Cache-Control: no-store`; non-allowlisted paths
+  also returned 404. There were no console/page errors, traceback or HTTP 500. Opening a
+  series rendered without the global busy overlay; the plan-specific Run confirmation
+  named Test Mode, and cancelling sent nothing. This read-only session covered the graph
+  then shipped, not all current modules or delayed-response workflows.
 
-`test_build.py` is the largest because the interface is checked statically: it is the file
-with no runtime under test, so the guards that would otherwise be a browser sit here.
-Among them — every element the script hides exists in the markup, every id is unique,
-braces and parentheses balance, and every icon the interface names is one we ship.
+## Evidence still missing
 
-`test_server.py` covers what used to be somebody else's problem. The plugin was handed
-authentication and a CSRF token by emhttp and never had to be right about either. One of
-its tests found that `TVR_PORT=` — set but empty, a realistic way to write a compose file —
-would have taken the container down at startup, because `os.environ.get`'s default applies
-to a variable that is absent rather than one set to nothing.
+No recorded live acceptance establishes deletion or monitoring-write correctness, real
+optional-provider behavior (including TMDB/TVMaze/AniList date filling), API-key lifecycle,
+or backup/restore. Isolated contract tests and the historical gate do not replace those
+checks. The gate used no live provider keys or provider network calls.
 
-## Earlier image smoke test
-
-This earlier smoke test was run on 2026-09-16 on fatzserver-host, tagged
-`tv-retention:smoketest-build10` and removed afterwards. The host's own
-`tv-retention-demo` container was never touched, stopped, or read from. It is retained as
-historical container evidence; the grouped implementation gate above is the current source
-validation.
-
-| Check | Result |
-|---|---|
-| No `TVR_USERNAME`/`TVR_PASSWORD` | exits immediately, code 1, the same two-paragraph message `startup_error()` returns — no traceback |
-| `TVR_USERNAME`/`TVR_PASSWORD` set | starts, healthy within 3s, one clean log line (`TV Retention listening on :8787`) |
-| `GET /` with no session | 303 to `/login` |
-| `GET /health` | 200 |
-| `/login` page | carries a release digest (`/assets/<12 hex>/icon-32.png`); fetching that exact asset through it returns 200 |
-| `POST /login`, wrong password | 401 |
-| `POST /login`, correct password | 303, session cookie set |
-| `/config` after start | owned by uid/gid 1000 (the `PUID`/`PGID` default), no `chown` asked of the operator |
-| Container logs across the whole session | the one startup line — no error, traceback, or 500 |
-
-This exercises the container/startup hardening directly: `env_int`'s parsing (a real,
-unmalformed `TVR_USERNAME`/`TVR_PASSWORD` through the whole path), `build_release()`
-succeeding against the real shipped assets, and `_failures`' lock guarding a real wrong
-password followed by a real correct one. It does not exercise Sonarr, TMDB, or a deletion —
-none of those need a container to test and none were in scope for this pass. See "Not yet
-exercised" below for what still is.
-
-## Live, read-only, against 3022 series and 36 rules
-
-Measured 2026-09-07. Staged under `/tmp` with `TVR_CONFIG` pointed away from `/boot`, and
-every Sonarr call asserted to be a GET.
-
-| Measurement | Result |
-|---|---|
-| Full read of the 36 bound series | 72 calls, 1.3s, 14.8 MiB |
-| Re-check with nothing changed | 0 calls, 0.03s |
-| Re-check after editing every rule's keep window | 0 calls, 0.03s |
-| One tick's change feed (`history/since`, 90s window) | 2 calls, 0 KiB, ~1s |
-| Heartbeat recomputing all 36 plans | 0 calls, 0.07s |
-| New-series check (catalogue, six-hourly) | 1 call, 3.6s, 11.5 MiB |
-| Settings migrated v4 → v5 | `monitor_missing` gone from all 36 rules, mode `unmonitor-only` |
-| Plan under Unmonitor only | 186 deletions, 0 monitoring changes |
-| Plan under Full sync | 186 deletions, 290 episodes monitored |
-
-The three zero-call rows are the point of the design: re-deciding a rule is arithmetic over
-episodes already held, so editing a keep window, raising a preset or a day passing costs
-nothing at all.
-
-## Earlier live checks
-
-Against the running `Sonarr-Series` container, from a `/tmp` staging directory with
-`TVR_CONFIG` pointed at `/tmp`. GET requests only.
-
-| Check | Result |
-|---|---|
-| `test-instance` | Sonarr answered, and reported its recycle-bin setting |
-| `match` | The folder `News & Talk/Daily Show, The (1996) {tvdb-71256}` matched "The Daily Show" |
-| `preview`, preset-driven | A rule pointing at a "Keep 180 days" preset resolved correctly: 66 episodes considered, 1 selected with a real Sonarr air date (2026-03-06), 65 kept |
-
-## The module graph in a browser
-
-Exercised 2026-09-11, against `tv-retention:phase4` built on the host from the phase-4
-tree and run on port 18788 against a *copy* of the demo settings with `schedule.enabled`
-forced false and Test Mode on. The original `/tmp/tvr-demo` config was not opened for
-writing, and the container was removed afterwards.
-
-This is the first browser session the split module graph has had. Until it, the release
-namespace and the seven-file import graph were validated only statically and over curl.
-
-The counts below are that session's and are left as recorded. The tree has since grown
-`activity.js`, `settings.js`, `checks.js` and `series-removal.js`, so a repeat run should
-see eleven files rather than seven; what the session established — that a digest holds a
-whole graph and that a stale one is refused — does not change with the count.
-
-| Check | Result |
-|---|---|
-| Page loads, all seven modules fetched under one digest | `/assets/ad57b2472405/…`, every file 200, `immutable` |
-| Every static import specifier in the entry resolves within the digest | 6 of 6 — `dom`, `format`, `changes`, `episode-trees`, `transport`, `feedback` |
-| A digest the server does not hold | 404 with `Cache-Control: no-store`, not served from the current release |
-| Non-allowlisted paths under the digest | `interface.html`, `../worker/core.py`, `settings.json` all 404 |
-| Console and page errors across the whole session | none |
-| All five sections render | Series, Media management, Settings, System, Help |
-| Series list | 181 cards, no placeholder left behind |
-| Opening a series card | renders; the busy overlay is **never** raised, which is the constraint on per-show reads |
-| Run confirmation | states the actual plan — 36 series, 191 deletions, 211 GiB — and names Test Mode; cancelling sent nothing |
-| Server log | no error, traceback or 500; healthy throughout |
-
-The two layers extracted in phase 4 are both covered here: `transport.js` by every RPC the
-page makes and by the overlay staying down, `feedback.js` by the Run confirmation.
-
-## Not yet exercised
-
-- **A live deletion.** Test Mode has never been turned off on this server, and no version of this — plugin or container — has ever removed a file. See
-  [ACCEPTANCE.md](ACCEPTANCE.md).
-- **A live monitoring write.** The selection has been exercised; Sonarr's `PUT` has not.
-- **Optional provider requests, backup/restore, and API-key lifecycle** — covered by the
-  isolated contract tests and host gate, but not exercised against a live deployment.
-- **TMDB/TVMaze/AniList air-date filling** — no live provider keys or network calls were
-  used by the gate.
-- **Outbound notifications and webhooks** — removed; there is no external delivery path to
-  exercise. Alerts remain in the app and System → Status.
+Concurrency, recovery, Test Mode mutation coverage, DST transitions, dropped-privilege
+restore and current real-browser workflows require the targeted evidence in PLAN. Keep
+schedules off and Test Mode on; neither authorizes immediate write actions. Follow PLAN's
+isolated acceptance ladder before any operator-approved live write. Removed outbound
+notifications/webhooks are not pending tests; alerts remain in the app and System → Status.

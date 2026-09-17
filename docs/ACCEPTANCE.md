@@ -1,204 +1,203 @@
-# Acceptance checks on the target system
+# Acceptance checks
 
-Work through these before turning **Test Mode** off. Each step is either read-only or
-reversible.
+**Not ready for unattended destructive use. No live writes are authorized by this
+checklist.** Keep retention schedules off and Test Mode on. The
+[2026-09-17 production-readiness plan](PLAN.md) is the gate of record; this checklist is
+not evidence that its fixes have landed.
 
-Test Mode means nothing writes — scheduled or manual, no exceptions. Section 6 is where it
-gets turned off, and it is the first thing here that can delete anything.
+The review confirmed executor failure, retention edits losing exclusions, shared files
+being both protected and selected for deletion, and AniList overwriting Sonarr dates.
+Immediate monitoring/recycle-bin actions bypass Test Mode. Backup/restore, concurrent
+persistence, recovery, scheduling and UI-state correctness also have unresolved work.
+Do not interpret a successful preview or old validation record as release approval.
 
-## 1. Start it
+## Environment and sequence
 
-- [ ] `docker compose up -d --remove-orphans` with no `TVR_USERNAME`/`TVR_PASSWORD` and no `TVR_AUTH`.
-      Confirm it **exits**, and that the message names both ways forward.
-- [ ] Add the two variables and start again. `http://<host>:8787` shows a login.
-- [ ] A wrong password is refused; the right one lands on the page with the **TEST MODE**
-      chip showing.
-- [ ] `docker logs` carries no traceback and no permission error. Confirm `/config` was
-      taken over without anyone being asked to `chown` anything, and that `PUID=99
-      PGID=100` is honoured if you set it.
-- [ ] Every icon is **visible**, not merely present — the bars/grid toggle, refresh, close,
-      the caret in the scheduled-changes menu. An icon with no glyph behind it renders as
-      an empty, zero-sized element, so the button is there and there is nothing to click.
-- [ ] Stop the container and start it again. Confirm you are logged out (sessions are in
-      memory, deliberately) and that nothing else was lost.
-- [ ] After an upgrade, the page loads the new script *and the new stylesheet* without a
-      manual cache clear. The asset URL carries a hash of every asset together — hashing
-      them separately and truncating took every character from the first, so CSS-only
-      releases shipped under the key the browser already held.
-- [ ] **Help → About** shows the semantic version, build number and the date this image
-      was built. The compact version in the top banner remains the semantic version alone.
-- [ ] With `TVR_AUTH=none`, confirm it starts, serves without a login, and says so in the
-      log. Then put the password back.
+**Default: disposable config, fake Sonarr and no production credentials or endpoints.**
+All saves, API-key changes, monitoring, queue operations, restore, failure injection and
+restart checks below belong there. For actual media behavior, use a dedicated disposable
+Sonarr with synthetic expendable files only after PLAN's prerequisite gates. Deletion is
+not guaranteed reversible, even with a recycle bin.
 
-## 1a. Bringing settings over from the plugin
+Follow PLAN's acceptance ladder in order:
 
-- [ ] `cp /boot/config/plugins/tv-retention/settings.json ./config/settings.json`, start,
-      and confirm every rule, preset and instance is present with its API key intact.
-- [ ] Confirm the settings file on disk now reads `"settings_version": 13` and that any
-      legacy `notifications` block is gone; Sonarr keys, rules and presets remain intact.
+1. **A — Deterministic fixtures:** P0/P1 regressions, including the executor and mutation matrix.
+2. **B — Isolated container + fake Sonarr:** full UI/action flow and exact request recording.
+3. **C — Disposable real Sonarr/media:** separately authorized destructive checks after A/B.
+4. **D — Target read-only smoke:** the restricted section below, after isolated validation.
+5. **E — Operator-approved target canary:** deferred to PLAN; not authorized now.
 
-## 2. Sonarr instances
+Unchecked items describe required evidence, not promises the current code satisfies. Record
+candidate revision, image/base digest, VERSION/BUILD/date, environment, results and failures
+in [VALIDATION.md](VALIDATION.md). Do not waive known failures because older suites passed.
 
-- [ ] **Settings → Connections** → add `Sonarr-Series` (`http://<server>:8989`).
-      **Test & save** reports the Sonarr version and how many series it holds.
-- [ ] Add `Sonarr-Anime` (port 8990) and test it.
-- [ ] Note whether either Sonarr has a recycle bin configured — the test reports it. If
-      not, everything Sonarr deletes is permanent, which is why the alert offers a
-      one-click fix rather than a setting of its own.
-- [ ] Reload the page: the API keys show as masked, and saving again keeps them working.
-- [ ] Disable an instance and confirm its rules stay in place and stop being processed.
+## 1. Isolated startup, upgrade and persistence
 
-## 3. The library
+- [ ] Missing login credentials cause startup refusal with both remedies named. Wrong
+      passwords fail; valid credentials open the UI. Explicit `TVR_AUTH=none` works only
+      in the protected test network; restore login afterwards.
+- [ ] Fresh settings start with Test Mode on and retention schedule off. Verify logs,
+      `/config` ownership and writes under PUID/PGID, UMASK and explicit non-root `user:`;
+      check configurable port/health behavior rather than assuming compatibility.
+- [ ] Restart/recreate only the disposable application. Sessions expire; settings,
+      rules, history and journal persist. Removing the disposable container does not
+      remove its persistent config. No production Sonarr stop or host reboot is needed.
+- [ ] Migrate a copy of supported older settings, including plugin-era fixtures, with
+      disposable endpoints and schedules forced off before startup. Verify rules, presets,
+      exclusions, connections and credential retention without displaying secrets; legacy
+      notifications disappear and migration settles on the current supported schema.
+      Preserve an untouched copy; do not replay old intent or assume a fixed schema number.
+- [ ] Upgrade without clearing the browser cache: script, stylesheet and nested imports
+      use one release digest. A CSS-only change also changes the namespace.
 
-- [ ] **Series → All** lists everything both Sonarr instances hold. Confirm the count
-      matches Sonarr's own.
-- [ ] Switch between **All**, **Connected** and **Not connected** and confirm the counts
-      add up.
-- [ ] Confirm the default list is an operational row with title/state, retention,
-      episodes/storage, next airing or ended state, scheduled-change badges and alerts.
-- [ ] Switch to poster view and back. Confirm the selected series stays selected and the
-      column header is hidden only in poster mode.
-- [ ] Narrow the browser to a phone-width viewport. Confirm rows collapse into a readable
-      two-column record without clipping the title or scheduled-change badges.
-- [ ] **Hide ended** removes finished series with no rule, and keeps a finished series
-      that has one. Confirm a finished series with an alert stays visible either way.
-- [ ] Search for a series by part of its name; confirm the sort orders behave.
+## 2. Build 20 UI and navigation checks
 
-## 4. Presets and rules
+Retain these visual/workflow checks for later candidates; Build 20 is not a safety approval.
 
-- [ ] Open **Series → Presets** and create a preset, for example *Keep 180 days*. Point two shows at it, and confirm
-      both cards show the preset name.
-- [ ] Edit the preset. Confirm the editor lists the shows that will change, and that both
-      cards update after saving.
-- [ ] Confirm a preset in use cannot be removed.
-- [ ] Open **Series → Exclusion Rules** and confirm the global exclusion controls are present,
-      while the one-time monitoring pass remains in the series editor.
-- [ ] Add one show with **Custom** retention and confirm the preset has no effect on it.
-- [ ] Confirm **Custom** is the first option and the one a new series starts on.
-- [ ] Open a series with no rule, set a keep window, and press **Save** (not *Save and
-      enable*). Confirm the rule is added switched off, and that no run touches it.
-- [ ] Switch it on from the editor. Confirm the list behind the pane updates immediately,
-      without pressing Update.
-- [ ] Type a keep value into one series, click a second series, then click back. Confirm
-      what you typed is still there. Leave the library and return: confirm it is not.
-- [ ] Confirm a rule that resolves to no Sonarr series saves as **not matched**, in red,
-      with the reason shown — and that a preview skips it.
+- [ ] Icons are visibly rendered: list/grid, refresh, close and scheduled-changes caret.
+      **Help → About** shows semantic version, build number and image build date; the
+      compact top banner shows semantic version only.
+- [ ] **Series → All / Watching / Not watching** counts agree with the fixture catalogue.
+      Watching means a retention rule, not watched history. Presets and Exclusion Rules
+      remain under Series; Settings has General, Connections, Air dates and Schedule;
+      System has Status, Stats, Backup and Logs.
+- [ ] List rows show title/state, retention, episodes/storage, next airing/ended state,
+      scheduled-change badges and alerts. Poster/list switching retains selection and
+      hides the column header only in poster mode.
+- [ ] Phone-width rows form readable two-column records without clipped titles/badges.
+      Check long titles, zoom, keyboard focus, light/dark themes and visible primary actions.
+- [ ] Search/sort work. **Hide ended** hides ended shows without rules, but keeps those
+      with rules or alerts. **Alerts only** filters to the affected shows.
+- [ ] The editor preserves visible series facts/actions around scrolling settings.
+      Draft next-run counts update before save, monitoring colors describe the keep window,
+      and counts open the matching episode details.
 
-## 5. Preview
+## 3. Rules, presets, exclusions and plan integrity — isolated only
 
-- [ ] **Show scheduled changes** in the header. For each rule, confirm: the episode list
-      looks right, air dates come from `sonarr` rather than an estimate, and no file
-      appears that you want to keep.
-- [ ] Deliberately set a rule that would delete most of a show, and confirm the per-rule
-      guard blocks it with an explanation.
-- [ ] Change a keep window in the editor and confirm the next-run lines above the settings
-      move with it, before saving.
+- [ ] **Custom** is first/default. Two rules sharing a preset show its name; editing it
+      lists and changes both, not a custom rule. An in-use preset cannot be removed.
+- [ ] **Save** adds a disabled rule; **Save and enable** enables it. The existing-rule
+      switch saves immediately. Disabled ordinary retention stays inactive, but saving
+      a disabled rule currently can still send the outside-window monitoring pass.
+- [ ] Draft values survive browsing another series and clear when leaving the library.
+      Verify exclusion -> retention edit -> save -> reload preserves protection, and
+      Undo -> edit -> save does not resurrect a queue. These are unresolved regressions.
+- [ ] Global Exclusion Rules and per-series overrides/pickers explain their sources.
+      Global exclusions cannot be unticked locally. Whole-season selection covers future
+      episodes; individually selecting all current episodes remains individual entries.
+      Specials inherit the global default unless overridden on the series.
+- [ ] Any keeps when any condition says keep; All requires every condition to say keep.
+      Unknown dates prevent deletion in both. Unique identity is required; unmatched or
+      ambiguous rules must not produce executable work.
+- [ ] Check scheduled-change counts, bytes, reasons and date provenance against fixture
+      truth, including exclusions, future/unknown episodes and shared multi-episode files.
+      No protected file may also be executable. There is **no deletion-percentage guard**.
+- [ ] Stale/partial readings cannot hide Run or claim a complete empty plan. Confirmation
+      identifies actual scope and uncertainty. Delayed responses and concurrent tabs must
+      not overwrite newer edits or clear current drafts; require PLAN's regression evidence.
 
-## 6. First live deletion
+## 4. Monitoring, removals and execution — unsafe tests, isolated only
 
-- [ ] Pick one show with a small, obviously-correct plan. Switch every other rule off.
-- [ ] Press **Run now** and confirm the confirmation names the actual plan — the count and
-      the size — rather than describing runs in general.
-- [ ] Verify in Sonarr that exactly the listed episodes now show no file, and that they are
-      unmonitored. Deleting always unmonitors; that is an invariant, not a setting.
-- [ ] Verify on disk that Sonarr's recycle bin caught the files, if one is configured.
-- [ ] Check the run appears in **System → Logs → Runs**, and that `journal.jsonl` in the
-      state folder has a matching record.
-- [ ] Switch the other rules back on.
+- [ ] Record exact Sonarr requests for every entry point with Test Mode on/off. Required
+      release behavior is zero external mutations in Test Mode; current scope-pass,
+      monitored-picker and recycle-bin actions violate this. Settings/local operational
+      writes are a separate policy, not proof that Sonarr was untouched.
+- [ ] **Change monitor status for episodes within scope** shows the whole current keep
+      window, not only newly scoped episodes. Boxes reflect Sonarr, shaded rows/counts
+      agree, and only changed flags are submitted. With writes permitted in isolation,
+      these changes and the automatic outside-window pass happen on save, not next run.
+- [ ] The exclusion picker's monitoring column submits only changed flags; no-op picker
+      saves send none. Do not confuse this with the retention editor's automatic scope pass.
+      Verify excluded episodes retain their state through subsequent edits and runs.
+- [ ] Queue each removal disposition: leave Sonarr untouched, monitor all, unmonitor all,
+      monitor inside the window, delete series keeping files, delete series/files. Queueing
+      alone must not apply the disposition; Undo must persist until execution begins.
+- [ ] The UI requires exact `DELETE` for series-record removal or `DELETE ALL` for series
+      and files; wrong words fail, not a wrong series title. **Set monitoring in Sonarr
+      before it goes** is a separate immediate picker; queue Undo does not reverse it.
+- [ ] Require executor, unmonitor-failure, partial-failure, interrupted-run and changed-identity
+      regressions to pass before disposable real deletion. Ordinary retention never monitors;
+      explicit removal monitoring is separately identified. No delete may proceed without
+      successful unmonitoring of every affected episode or against any protected shared file.
+- [ ] Only at ladder C, with explicit isolated Test Mode-off authorization, verify exact
+      file/monitor outcomes, recycle-bin behavior and truthful history/journal/byte totals.
+      Restore safe settings afterwards. Never substitute a real user's show for this fixture.
 
-## 7. Monitoring
+## 5. Connections, providers, alerts and freshness — isolated only
 
-- [ ] Confirm a run unmonitors what falls outside the keep window and asks Sonarr to fetch
-      nothing. The plan's monitor count is always zero: no run monitors anything.
-- [ ] Widen a rule and save. Confirm the one-time pass is offered for the episodes the
-      widening brought into scope, that the tree shows the window's own episodes checked as
-      Sonarr has them, and that only the difference is sent.
-- [ ] Confirm the unmonitor half happened on save without being offered — a run does it
-      regardless, so waiting only gives Sonarr a day to fetch what that run would delete.
-- [ ] Confirm an episode you unmonitored by hand in Sonarr is not re-monitored.
-- [ ] Exclude an episode that falls outside the keep window, monitor it in Sonarr, and run.
-      Confirm it is neither deleted nor unmonitored — that guarantee is the reason there is
-      no setting for this.
-- [ ] In the exclusion picker, confirm the second column reads as Sonarr has it: unmonitor
-      something in Sonarr, reopen, and confirm the box is clear rather than ticked.
-- [ ] Open the picker and close it with **Save**, having touched nothing. Confirm no
-      monitoring change is sent — only what you move is written.
-- [ ] Move one box, save, and confirm the log names that series and counts exactly one.
-- [ ] Confirm every episode shows its air date and source, and that one with none says so
-      rather than showing a blank.
-- [ ] Confirm episodes inside the keep window are shaded, and that the count matches what
-      the pane says the next run would keep.
-- [ ] Tick every episode of a season one by one. Confirm the season heading fills in, and
-      that what is **saved** is still one entry per episode — the heading's own box is the
-      only thing that means "including episodes that have not aired".
+- [ ] Add multiple disposable Sonarr instances under **Settings → Connections**.
+      **Test & save** reports version/count/recycle-bin state. Reload masks credentials;
+      saving an unchanged mask preserves them. Disabling an instance retains its rules.
+- [ ] Test optional connections without exposing secrets. Credential fields are masked;
+      URLs are not promised secret masking. Plex/Jellyfin success means connectivity only,
+      not usable episode dates. Do not count unimplemented choices as date providers.
+- [ ] With fixture responses, verify Sonarr precedence, provider order, numbering and
+      unresolved exclude/disable behavior. AniList must not overwrite existing dates;
+      the confirmed failure blocks enabling it. Check estimates/history provenance against
+      real fixture events rather than trusting a provider's successful connection test.
+- [ ] Cold load remains usable as per-show readings arrive. Reading age and per-series
+      refresh update facts/counts; a show without a rule refreshes catalogue facts too.
+- [ ] Simulate Sonarr unavailability using the fake service, not production outages.
+      Connections/Status/series alerts identify the problem; no outbound webhook is sent.
+      Under managed-only filtering, disabling a rule hides its alerts; enabling restores
+      them. Acknowledged warnings return when changed; errors cannot be acknowledged away.
+- [ ] Status includes build/date/uptime, mode, schedule, sync age, pending/current run,
+      reachability/recycle bin, storage, API-key state and warnings/errors. Status refresh
+      sends no Sonarr mutations. Worker readiness must not be inferred from HTTP alone.
 
-## 8. Alerts and freshness
+## 6. API key, backup and restore — isolated only
 
-- [ ] Open the page cold and confirm it is usable immediately, with each series' reading
-      filling in on its own and no busy overlay.
-- [ ] Confirm the editor names the age of the reading behind it, and that the refresh
-      beside it updates that age, the counts and the plan.
-- [ ] On a series with **no rule**, press refresh and confirm the facts actually change —
-      it re-reads the catalogue entry, since there is no rule to check.
-- [ ] Stop Sonarr briefly and run
-      `docker exec tv-retention python3 /app/worker/main.py check`. Confirm the Status and
-      Connections badges flag it, the affected shows are flagged individually, and no
-      outbound notification or webhook is attempted.
-- [ ] Switch off a series that has an alert. Confirm its badge and line in the roll-up stop;
-      switching it back on brings them back.
-- [ ] Acknowledge a warning and confirm it hides; change what it says and confirm it
-      returns. Confirm an error cannot be acknowledged.
+- [ ] Create/copy the TV Retention key; normal snapshots expose metadata, not the full
+      secret or hash. Regenerate replaces it and Revoke changes its state. Test preservation
+      of the one-time reveal through background rendering; this remains open work.
+- [ ] **System → Backup → Back up now** creates a credential-bearing archive of the active
+      config data at a separate absolute destination. Verify archive contents, exclusion of
+      the destination, persistence after replacement and owned-archive retention.
+- [ ] Exercise non-root permissions, concurrent/same-second backups and external-state
+      handling. The supplied Compose mount alone does not persist a separate backup path.
+      Atomic archive replacement is not evidence of snapshot consistency.
+- [ ] Restore rejects missing/wrong `RESTORE` confirmation and malformed/incompatible
+      archives. Require PLAN's staged activation, rollback, concurrency and permission gates;
+      current restore is not proven safe. Use only disposable copies and endpoints.
+- [ ] After restore, no historical intent/queue or schedule may silently re-arm; Test Mode
+      must be on and scheduling off until reviewed. Neither restore nor subsequent worker
+      activity may mutate Sonarr without new authorization. Verify actual reload and draft
+      reset, not just a returned reload flag. These protections are still planned.
 
-## 9. Schedule
+## 7. Scheduling and recovery — isolated only
 
-- [ ] Open **Settings → Schedule** and confirm the prominent **Test Mode** card is above
-      the schedule controls, clearly states whether writes are allowed, and saves its
-      toggle immediately.
-- [ ] Enable a daily schedule a few minutes ahead. Confirm the run happens without anyone
-      being logged in — close the browser and check the history afterwards. The worker is
-      the point; authentication guards the interface, never the work.
-- [ ] Confirm **System → Logs** says `scheduled test run`, names the plan count and says
-      that nothing changed. **System → Status** shows the same pass as *Last scheduled
-      test*. Test Mode does not create a durable run-history or journal entry.
-- [ ] Turn Test Mode off and watch one scheduled run go through for real.
-- [ ] Stop the container across a scheduled time, then start it again. Confirm the missed
-      run is caught up rather than skipped.
-- [ ] Set `TVR_TZ` in the Compose environment (for example `America/New_York`) and confirm
-      "daily at 4am" means 4am where you are.
+- [ ] The prominent Test Mode card is above schedule controls and saves its toggle
+      immediately. Required wording must distinguish local writes from external mutations;
+      the current blanket "nothing writes" wording is not an assurance.
+- [ ] Using fake time/service fixtures, verify hourly/daily/weekly/monthly/custom schedules,
+      timezone/DST, sparse cron, missed-run catch-up and Sonarr-unavailable pending work.
+      The worker must run without login and avoid duplicate/replayed writes across restart.
+- [ ] A scheduled test pass appears in Logs/Status as such, without a durable run-history
+      or journal outcome; verify external requests independently. After the prerequisite
+      gates, write-enabled schedule checks belong only to disposable ladder C.
+- [ ] Ended-series notices, empty-window disabling and one-time Auto re-enable behave as
+      documented, including specials and exclusion-only files. Observe Test Mode behavior
+      separately; this is not permission to schedule a live library.
 
-## 10. Restart
+## 8. Target read-only smoke — restricted ladder D
 
-- [ ] `docker compose restart`, and reboot the host. Confirm settings, rules, history and
-      the journal all survive, and that the schedule resumes on its own.
+Only after A–C and operator approval. This level proves display/read behavior, not writes.
 
-## 11. Removing a series
+- [ ] Stage under `/tmp` with a copy of settings and `TVR_CONFIG` pointed away from `/boot`.
+      Force schedules off and Test Mode on before startup; exclude executable intent and
+      queued work from staging. Never mount the active production configuration for this check.
+- [ ] Verify login, version/build/date, asset refresh, library display, cache ages,
+      read-only Sonarr refreshes and Status/permissions against the staged copy.
+- [ ] Browse only: no rule/picker saves, enable toggles, queueing, Run, recycle-bin fix,
+      API-key changes or restore. Test Mode alone does not make these actions read-only.
+      Local staging cache/log writes are expected; Sonarr mutations are not permitted.
+- [ ] Do not stop production Sonarr, reboot its host or restore production settings for
+      convenience. Clean up only the isolated TV Retention staging/preflight artifacts.
 
-- [ ] Queue a removal and confirm nothing happens until a run applies it, and that undo is
-      available until then.
-- [ ] Confirm the removal action offered — leave it alone, monitor, unmonitor, or ask
-      Sonarr to delete it — is what actually happens.
-- [ ] Confirm a wrong title typed into the confirmation is refused.
-- [ ] Confirm it asks *Sonarr* to delete the series rather than deleting anything itself,
-      so Sonarr's recycle bin and bookkeeping apply.
+## 9. Target canary and release — deferred
 
-## 12. Connections, API key, backup and status
-
-- [ ] Under **Settings → Connections**, configure an optional provider, test it, and confirm
-      its URL/credential is masked after saving. Saving an unchanged mask keeps the secret.
-- [ ] Create the TV Retention API key, copy it, and confirm the full value is not shown after
-      refresh. Regenerate replaces it; Revoke changes the state without exposing a secret.
-- [ ] Under **System → Backup**, configure a separate writable destination and press **Back up now**. Confirm
-      the timestamped ZIP contains settings, state, journal and caches, excludes the backup
-      directory itself, and is pruned to the configured count. Treat the archive as a
-      credential-bearing file.
-- [ ] Restore a point only after typing `RESTORE`; confirm the page asks for a reload and
-      that no Sonarr call or media change occurs during backup/restore.
-- [ ] Open **System → Status** and confirm build/date/uptime, Test Mode, sync age, pending
-      or current run, Sonarr reachability/recycle-bin state, storage health and API-key
-      state. Refreshing Status must be read-only.
-
-## 13. Remove it
-
-- [ ] `docker compose down --remove-orphans`. Confirm `./config` still holds the settings
-      and the journal.
-- [ ] Bring it back up and confirm everything is where it was.
+No target deletion checklist is authorized while P0/P1 findings remain. PLAN's ladder E
+requires A–D evidence, operator approval, one deliberately bounded plan and a matching
+rollback image/config archive. General scheduling requires a separate decision after the
+canary review. Follow PLAN's release/rollback and scoped-cleanup gates; a documentation
+cleanup, healthy page or successful read-only smoke does not meet them.

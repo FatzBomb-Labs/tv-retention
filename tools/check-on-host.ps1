@@ -26,7 +26,7 @@ $remote = $remote -replace "`r`n", "`n"
 # `trap "rm -rf $staging"` and leaves bash reading `-rf` as a signal name. Base64 is
 # alphanumerics, `+`, `/` and `=`, so nothing on the command line needs quoting at all.
 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remote))
-$remotePath = '/tmp/tvr-check.sh'
+$remotePath = '/tmp/tvr-check-' + [guid]::NewGuid().ToString('N') + '.sh'
 
 # The tarball travels as a file rather than through a pipe. Under `powershell -File`,
 # which is how this is invoked, a native-to-native pipe is not a byte stream: PowerShell
@@ -48,6 +48,9 @@ try {
     & $env:ComSpec /c "ssh $target `"$run`" < `"$archive`""
     $code = $LASTEXITCODE
 } finally {
+    # Also cover interrupted staging/execution; this path belongs only to this run.
+    ssh -n $target ('rm -f ' + $remotePath)
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not clean up $remotePath on $target" }
     Pop-Location
     Remove-Item $archive -ErrorAction SilentlyContinue
 }
