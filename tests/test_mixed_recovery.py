@@ -129,6 +129,172 @@ class MixedRecovery(unittest.TestCase):
             self.assertEqual(f.sonarr.mutations, [])
             f.sonarr.assert_finished()
 
+    def test_failed_staging_read_retries_live_request_and_finishes(self):
+        with IsolatedWorker() as f:
+            settings = f.settings(test_mode=False)
+            request_id = settings['rules'][0]['queue']['removal']['request_id']
+            f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
+                query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            first = f.main.run()
+            old = f.store.load_intent(settings)
+            self.assertEqual(first['status'], 'incomplete')
+            self.assertEqual(old['operations'], [])
+            self.assertIn('staging unavailable', first['errors'][0])
+            self.assertEqual(f.sonarr.mutations, [])
+            f.sonarr.assert_finished()
+
+            # Connectivity returns. The still-live queue is fresh operator intent;
+            # no operation from the first run was dispatched or can be replayed.
+            f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            f.sonarr.expect('PUT', 'episode/monitor',
+                body={'episodeIds': [101], 'monitored': False})
+            second = f.main.run()
+            self.assertEqual(second['status'], 'complete')
+            self.assertEqual(second['errors'], [])
+            self.assertEqual(f.store.load_settings()['rules'], [])
+            ledger = f.store.load_removal_ledger(settings)
+            operations = ledger['batches'][0]['operations']
+            self.assertEqual(len(operations), 1)
+            self.assertEqual(operations[0]['request_id'], request_id)
+            self.assertEqual(operations[0]['status'], 'done')
+            self.assertEqual(operations[0]['attempts'], 1)
+            self.assertEqual(len(f.sonarr.mutations), 1)
+            archives = list((f.root / 'state' / 'run-history').glob('*.json'))
+            self.assertIn(old, [json.loads(path.read_text()) for path in archives])
+            third = f.main.run()
+            self.assertEqual(third['removals'], [])
+            self.assertEqual(len(f.sonarr.mutations), 1)
+            f.sonarr.assert_finished()
+
+    def test_record_only_cancellation_releases_hold_without_success(self):
+        for deleted in (False, True):
+            with self.subTest(deleted=deleted), IsolatedWorker() as f:
+                settings = f.settings(test_mode=False)
+                f.sonarr.expect('GET', 'series', [SERIES])
+                f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
+                    query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                f.main.run()
+                current = f.store.load_settings()
+                if deleted:
+                    current['rules'] = []
+                else:
+                    current['rules'][0]['queue'] = {}
+                f.store.save_settings(current)
+                if not deleted:
+                    f.sonarr.expect('GET', 'series', [SERIES])
+                    f.sonarr.expect('GET', 'episode', [episode_payload(file_id=None)], query={
+                        'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                    f.sonarr.expect('PUT', 'episode/monitor',
+                        body={'episodeIds': [101], 'monitored': False})
+                result = f.main.run()
+                self.assertEqual(result['status'], 'incomplete')
+                self.assertIn('staging unavailable', result['errors'][0])
+                self.assertIn('canceled or rule removed', result['errors'][0])
+                self.assertEqual(len(f.store.load_settings()['rules']), 0 if deleted else 1)
+                self.assertEqual(len(f.sonarr.mutations), 0 if deleted else 1)
+                batch = f.store.load_removal_ledger(settings)['batches'][0]
+                self.assertEqual(batch['operations'], [])
+                self.assertTrue(batch['removals'][0]['retired_without_operation'])
+                if not deleted:
+                    f.sonarr.expect('GET', 'series', [SERIES])
+                    f.sonarr.expect('GET', 'episode', [episode_payload(file_id=None, monitored=False)],
+                        query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                self.assertEqual(f.main.run()['removals'], [])
+                f.sonarr.assert_finished()
+
+    def test_restage_checkpoint_failure_prevents_dispatch(self):
+        with IsolatedWorker() as f:
+            settings = f.settings(test_mode=False)
+            f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
+                query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            f.main.run()
+            f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            save, calls = f.main.save_removal_ledger, []
+
+            def fail_restage(settings, ledger):
+                calls.append(1)
+                if len(calls) == 2:
+                    raise OSError('restage checkpoint unavailable')
+                save(settings, ledger)
+
+            with patch.object(f.main, 'save_removal_ledger', side_effect=fail_restage):
+                with self.assertRaisesRegex(OSError, 'restage checkpoint'):
+                    f.main.run()
+            self.assertEqual(f.sonarr.mutations, [])
+            self.assertEqual(f.store.load_removal_ledger(settings)['batches'][0]['operations'], [])
+            f.sonarr.assert_finished()
+
+    def test_record_only_restage_requires_current_original_target(self):
+        for change in ('unavailable', 'replacement', 'legacy'):
+            with self.subTest(change=change), IsolatedWorker() as f:
+                settings = f.settings(test_mode=False)
+                f.sonarr.expect('GET', 'series', [SERIES])
+                f.sonarr.expect('GET', 'episode', urllib.error.URLError('staging unavailable'),
+                    query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                f.main.run()
+                if change == 'legacy':
+                    old = f.store.load_intent(settings)
+                    old['removals'][0].pop('request_id')
+                    f.store.save_intent(settings, old)
+                response = (urllib.error.URLError('catalogue unavailable') if change == 'unavailable'
+                            else [dict(SERIES, id=2)] if change == 'replacement' else [SERIES])
+                f.sonarr.expect('GET', 'series', response)
+                f.sonarr.expect('GET', 'series', response)
+                result = f.main.run()
+                self.assertEqual(result['status'], 'incomplete')
+                self.assertIn('target cannot be verified', result['errors'][0])
+                self.assertEqual(f.sonarr.mutations, [])
+                self.assertEqual(f.store.load_removal_ledger(settings)['batches'][0]['operations'], [])
+                f.sonarr.assert_finished()
+
+    def test_record_only_replacement_respects_other_target_owner_in_any_order(self):
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse), IsolatedWorker() as f:
+                settings, old = self.seed_mixed(f)
+                settings['rules'][0]['id'] = 'replacement'
+                f.store.save_settings(settings)
+                record = dict(old['removals'][0], rule_id='replacement', instance_id='fake', series_id=1,
+                    request_id=settings['rules'][0]['queue']['removal']['request_id'])
+                batches = [{key: old[key] for key in ('id', 'operations', 'removals')},
+                           {'id': 'unstaged', 'operations': [], 'removals': [record]}]
+                f.store.save_removal_ledger(settings, {'version': 1, 'batches': batches[::-1] if reverse else batches})
+                f.sonarr.expect('GET', 'series', [SERIES])
+                f.sonarr.expect('GET', 'series', [SERIES])
+                f.sonarr.expect('GET', 'series', [SERIES])
+                result = f.main.run()
+                self.assertEqual(result['status'], 'incomplete')
+                self.assertTrue(any('Target held' in error for error in result['errors']))
+                self.assertEqual(f.sonarr.mutations, [])
+                f.sonarr.assert_finished()
+
+    def test_changed_record_only_action_reports_current_staging_failure(self):
+        with IsolatedWorker() as f:
+            settings = f.settings(test_mode=False)
+            f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'episode', urllib.error.URLError('old staging failure'),
+                query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            f.main.run()
+            old = f.store.load_intent(settings)
+            current = f.store.load_settings()
+            current['rules'][0]['queue']['removal'] = {'action': 'delete-series-files'}
+            f.store.save_settings(current)
+            f.sonarr.expect('GET', 'series', [SERIES])
+            f.sonarr.expect('GET', 'series/1', urllib.error.URLError('new staging failure'))
+            f.sonarr.expect('GET', 'series', [SERIES])
+            result = f.main.run()
+            self.assertEqual(result['removals'][0]['action'], 'delete-series-files')
+            self.assertIn('new staging failure', result['errors'][0])
+            self.assertEqual(f.sonarr.mutations, [])
+            archives = list((f.root / 'state' / 'run-history').glob('*.json'))
+            self.assertIn(old, [json.loads(path.read_text()) for path in archives])
+            f.sonarr.assert_finished()
+
     def seed_mixed(self, f, status='failed', records=True):
         settings = f.settings(test_mode=False)
         operation = f.main._operation('set-monitored', settings['rules'][0],

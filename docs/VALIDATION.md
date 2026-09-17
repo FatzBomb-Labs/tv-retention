@@ -3,8 +3,10 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **629 Python tests in 6.126s**, all
-passing, plus **22 frontend tests**, all passing. The preceding finalization checkpoint
+`tools/check-on-host.ps1` on `fatzserver-host` ran **638 Python tests in 6.221s**, all
+passing, plus **22 frontend tests**, all passing. The preceding unified-routing checkpoint
+passed **632 Python tests in 5.144s** and **22 frontend tests**. The preceding ledger checkpoint
+passed **629 Python tests in 6.126s** and **22 frontend tests**. The preceding finalization checkpoint
 passed **621 Python tests in 5.020s** and **22 frontend tests**. The preceding mixed-replan checkpoint
 passed **620 Python tests in 5.514s** and **22 frontend tests**. The preceding identity checkpoint passed
 **618 Python tests in 4.996s** and **22 frontend tests**. The preceding legacy-retirement checkpoint
@@ -23,7 +25,38 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
-- `test_mixed_recovery.py` adds eight tests for the bounded mixed-retry ledger. The first
+- Removal-only routing (`09ac1dc`) now uses the ledger rather than resuming a whole old
+  intent. The unrelated-subset regression failed before the patch: `run(rule_ids=['r2'])`
+  attempted an episode read for `r1`; **630 tests in 5.657s** had that one failure. After
+  routing changed, six failures exposed five existing test contracts (the recovery-read
+  test has two subcases). Cancellation and unavailable/malformed recovery now return an
+  incomplete result with errors, not a raised exception; tests still require no additional
+  mutations and unchanged checkpoints. Cancel/requeue also checks preservation of the new
+  request. The two-removal test now checks per-request read/write order and ledger attempts
+  `[2, 1]`, with exactly three writes including the initial failed one. It was renamed to
+  describe persisted retry, not restart. Finalization now checks a new run ID, exact archive
+  and unchanged acknowledged ledger operation instead of reusing the old run ID. Two tests
+  for inconsistent completed intents were added after implementation, not observed fail-first.
+  Review found no introduced routing regression. The gate passed **632 in 5.144s**.
+- Record-only staging retry: the first public-run regression was observed failing before
+  the patch (**1 test in 0.031s**): after a failed staging read produced no operation, retry
+  skipped staging and reached the catalogue refresh instead of the expected episode read.
+  That strict request mismatch proves the missing restage path, not a destructive write.
+  It now completes the live request once, archives the original error, and sends no repeat
+  write or completion report on the third call. Post-implementation tests cover canceled
+  and deleted rules retiring without success, released ordinary retention, and failed
+  restage checkpoint persistence preventing dispatch. Review identified target-owner and
+  binding gaps plus stale action labels; fixes and additional tests require a fresh matched
+  original target, hold legacy records, respect another rule's uncertain target in either
+  batch order, and report the current action on a new staging failure. These review tests
+  were added after the fixes, not demonstrated failing beforehand. The full gate passed
+  **638 in 6.218s**, with **22 frontend tests**. No process-kill/restart evidence is claimed.
+  Restaging records now retain request ID and instance/series identity. Existing records
+  lacking this evidence remain held for review. Operation-backed canceled requests are
+  unchanged; remote URL/series replacement identity, settings transactions and ledger
+  lifecycle remain open. Successful ordinary-run history policy is unchanged: this work
+  does not archive and force-refresh every completed ordinary run.
+- `test_mixed_recovery.py` originally added eight tests for the bounded mixed-retry ledger. The first
   regression was observed failing before implementation in all four subcases: unavailable
   removal, cancellation, a new ordinary exclusion and an unrelated requested subset. All
   aborted in legacy recovery. After the change, the focused baseline plus regression

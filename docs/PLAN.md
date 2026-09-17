@@ -160,10 +160,16 @@ back into the run intent. Independent series may continue after a removal recove
 failure; the selected blocked removal remains an error in the overall result. Both its
 rule ID and old Sonarr target are held. Ordinary execution still stops on its first failed
 operation. This is a retry policy, not general dependency-aware parallel execution.
-Removal-only intents still use legacy recovery and can block newly added ordinary work;
-records whose initial staging read failed before an operation existed remain held and
-need a safe restaging policy. Canceled/replaced requests remain historical holds, with no
-resolution workflow yet. Ledger lifecycle/compaction, full shape validation, process-crash
+Removal-only history now uses the same scope-aware ledger, including inconsistent completed
+intents with outstanding operation checkpoints or queue finalization. Recovery errors are
+reported per request rather than aborting the entire run. Record-only staging failures now
+retry a live queue after a fresh successful binding to the recorded instance/series; the
+new operation is checkpointed before dispatch. Legacy records without target evidence stay
+held. Another rule's uncertain target ownership blocks restaging in either batch order.
+Canceled/deleted record-only requests retire without claiming success and release their
+hold; the original error is reported on retirement and the original intent remains archived.
+Operation-backed canceled/replaced requests remain historical holds, with no resolution
+workflow yet. Ledger lifecycle/compaction, full shape validation, process-crash
 coverage, remote target identity and transaction safety remain open. Finalization is
 request-aware but not transactional: a save racing the run can still be overwritten.
 Archive lifecycle, crash-history finalization and durability remain Phase 2 work.

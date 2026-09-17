@@ -574,7 +574,9 @@ def _removal_stage(settings: dict, rules: list, tmdb, enrich: bool = True) -> tu
         action = queued['action']
         record = {'rule_id': rule['id'], 'series_title': rule.get('series_title') or rule['path'],
                   'action': action, 'label': REMOVAL_ACTIONS.get(action, action),
-                  'queued_at': queued.get('created_at'), 'dry_run': False, 'ok': True, 'error': ''}
+                  'queued_at': queued.get('created_at'), 'dry_run': False, 'ok': True, 'error': '',
+                  'request_id': queued.get('request_id'), 'instance_id': rule.get('instance_id'),
+                  'series_id': rule.get('series_id')}
         try:
             client = client_for(settings, rule['instance_id'])
             if action in ('monitor-all', 'unmonitor-all'):
@@ -803,8 +805,8 @@ def _finish_removals(settings: dict, intent: dict) -> None:
 
 
 def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
-                               rule_ids=None) -> tuple[list, set, set]:
-    """Hand off mixed checkpoints before replacing ordinary work; isolate failures.
+                               rule_ids=None, tmdb=None) -> tuple[list, set, set]:
+    """Hand off removal checkpoints before replacing ordinary work; isolate failures.
 
     An exact archive precedes the ledger handoff. The source run ID makes that handoff
     idempotent after interruption. Only the ledger owns migrated removal checkpoints;
@@ -828,6 +830,14 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
             if key in owners and owners[key] != batch['id']:
                 raise Rejected('Removal request has overlapping recovery batches; refusing ambiguous ownership.')
             owners[key] = batch['id']
+    # Restaging runs before the ordinary eligibility filter. Precompute target owners
+    # across all batches so a replacement cannot bypass a later batch's hold.
+    target_owners = {}
+    for batch in ledger['batches']:
+        for op in batch['operations']:
+            if op.get('status') != 'done':
+                target = (op.get('instance_id'), op.get('series_id'))
+                target_owners.setdefault(target, set()).add(op.get('rule_id'))
     records, held, targets = [], set(), set()
     scope = set(rule_ids) if rule_ids else None
     for batch in ledger['batches']:
@@ -843,6 +853,8 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
             rule_id = record.get('rule_id')
             matching = [op for op in operations if op.get('rule_id') == rule_id
                         and op.get('removal_action') == record.get('action')]
+            if not matching and record.get('retired_without_operation'):
+                continue
             # An acknowledged request still present needs cleanup, not restaging.
             queued = next((r for r in settings.get('rules') or [] if r['id'] == rule_id), {})
             request_id = ((queued.get('queue') or {}).get('removal') or {}).get('request_id')
@@ -855,10 +867,49 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
             if scope is not None and rule_id not in scope:
                 continue
             report = dict(record)
+            freshly_staged = False
             if not matching:
-                report.update(ok=False, error=record.get('error') or 'Removal has no operation checkpoint')
-                records.append(report)
-                continue
+                # No operation ever existed: there is no uncertain external effect to
+                # reconcile. Only the live queue can authorize a fresh decision.
+                if not (queued.get('queue') or {}).get('removal'):
+                    record['retired_without_operation'] = True
+                    save_removal_ledger(settings, ledger)
+                    if not any(key[0] == rule_id for key in owners):
+                        held.discard(rule_id)
+                    report.update(ok=False, error=(record.get('error') or 'Removal was not staged')
+                                  + '; request canceled or rule removed before staging')
+                    records.append(report)
+                    continue
+                if any(key[0] == rule_id for key in owners):
+                    report.update(ok=False, error='Another removal checkpoint owns this rule; recovery requires review.')
+                    records.append(report)
+                    continue
+                bind_rules(settings, force=True)
+                target = (queued.get('instance_id'), queued.get('series_id'))
+                if target_owners.get(target, set()) - {rule_id}:
+                    report.update(ok=False, error='Target held by another removal checkpoint')
+                    records.append(report)
+                    continue
+                if (queued.get('match_status') != 'matched'
+                        or not record.get('request_id')
+                        or target != (record.get('instance_id'), record.get('series_id'))):
+                    report.update(ok=False, error='Unstaged removal target cannot be verified; recovery requires review.')
+                    records.append(report)
+                    continue
+                staged_records, matching = _removal_stage(settings, [queued], tmdb)
+                if not matching:
+                    report.update(staged_records[0])
+                    records.append(report)
+                    continue
+                record.update(staged_records[0])
+                report = dict(record)
+                operations.extend(matching)
+                for op in matching:
+                    owners[(rule_id, op.get('request_id'))] = batch['id']
+                    target_owners.setdefault(target, set()).add(rule_id)
+                    targets.add((op.get('instance_id'), op.get('series_id')))
+                save_removal_ledger(settings, ledger)
+                freshly_staged = True
             view = {'id': batch['id'], 'operations': matching, 'removals': [record]}
 
             def checkpoint(_settings, _intent):
@@ -872,7 +923,8 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
                     if (op.get('instance_id'), op.get('series_id')) != (
                             queued.get('instance_id'), queued.get('series_id')):
                         raise Rejected('Saved removal target changed; recovery requires review.')
-                _resume_intent(settings, view, checkpoint=checkpoint)
+                if not freshly_staged:
+                    _resume_intent(settings, view, checkpoint=checkpoint)
             except (Rejected, SonarrError) as error:
                 report.update(ok=False, error=str(error))
             else:
@@ -943,7 +995,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     separate = bool(ledger['batches']) or bool(
         unresolved_removals or awaiting_finalization)
     if separate:
-        reports, held, targets = _separate_removal_recovery(settings, stored, ledger, rule_ids)
+        reports, held, targets = _separate_removal_recovery(settings, stored, ledger, rule_ids, tmdb)
         settings = load_settings()
         bind_rules(settings, force=True)
         eligible = [rule for rule in settings.get('rules') or []
@@ -963,7 +1015,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         intent['separate_removals'] = True
         save_intent(settings, intent)
     else:
-        if stored:
+        if stored and stored.get('status') != 'complete':
             archive_intent(settings, stored)
             # Catalogue caching must not lend stale identity to a fresh retry plan.
             bind_rules(settings, force=True)
