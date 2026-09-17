@@ -29,6 +29,15 @@ delete lists, and AniList overwriting a Sonarr date; those remain open. Other fi
 source-inspected; concurrency, DST, container permissions and browser timing consequences
 need targeted validation. Test counts are evidence, not release criteria.
 
+### Progress baseline
+
+**OVERALL PLAN (0/94 complete)** uses the 94 unchecked implementation items present at
+this recovery-policy checkpoint as a fixed remaining-work baseline. Earlier completed
+work is recorded in VALIDATION and is not reconstructed into this denominator. Increment
+only when an entire baseline item is retired with evidence; partial fixes do not count.
+If scope changes, record the denominator change explicitly. This is checklist progress,
+not a production-readiness percentage.
+
 ### Non-negotiable boundaries
 
 - Sonarr owns media and deletion. No media mounts, path mappings or direct media access.
@@ -99,8 +108,25 @@ checks below remain open; no operator recovery-resolution workflow exists yet. R
 uses structured HTTP status for absent series and stops on failed reads rather than
 replaying writes after an unavailable or malformed episode-list response.
 
-- [ ] Restrict execution to pending, currently eligible operations; revalidate recovery
-      permission rather than assuming the saved intent remains authorized.
+**Agreed unattended recovery policy:** keep confirmed completed work, preserve failures
+and uncertainty, and calculate ordinary retention anew from current settings and fresh
+Sonarr readings at the next manual/scheduled run. Never replay unfinished ordinary
+operations or require routine operator acknowledgement after an outage. Missing files
+are not newly reclaimed space. No rollback of completed retention is attempted.
+Explicit queued removals remain separate one-time intent: persist request identity, verify
+current target and queue generation, reconcile uncertain results, and never revive a
+cancellation or transfer old confirmation to a replacement series.
+
+Ordinary-only unfinished intents now follow that policy: exact checkpoints are archived
+under `state/run-history/` before replacement, and retries refresh the catalogue and
+re-evaluate current rules. Archive failure stops replacement/writes. VALIDATION records
+the bounded coverage. Mixed/removal intents still use the legacy recovery path above;
+they can still block ordinary work and are not evidence of the full accepted policy.
+Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
+
+- [ ] Restrict execution to currently eligible operations. Separate mixed-run removal
+      recovery from newly planned ordinary retention so failed/canceled explicit work
+      cannot globally block unattended retention or revive its old decisions.
 - [ ] Define explicit operation states and dependencies. Failed or uncertain unmonitoring
       prevents the dependent file deletion. Independent series may continue only under a
       documented policy that preserves the failure in the overall result.
@@ -109,11 +135,11 @@ replaying writes after an unavailable or malformed episode-list response.
       propagation is covered, but process crashes and multi-operation durability remain open.
 - [ ] Report actual rather than planned byte totals, including partial success and retry,
       without counting failed, unattempted or already-completed work as newly reclaimed space.
-- [ ] Before resuming, verify current instance/series/file identity and current safety
-      permission. Changed configuration, new exclusions, disabled rules, canceled queues,
-      changed instance URLs or a different requested run scope must not silently revive
-      old work. Freeze the original decision for audit, but require re-planning or explicit
-      resolution when it no longer matches current permission.
+- [ ] Before explicit removal retries, verify current instance/series/file identity and
+      queue generation. Changed instance URLs, same-action cancel/requeue and a different
+      requested run scope must not silently revive old work. Freeze original decisions for
+      audit. Ordinary retention always re-plans; special operator resolution is reserved
+      for unprovable one-time removal permission, not routine retention failures.
 - [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
       including malformed individual rows and changed file membership. HTTP status is now
       structured, but a proxy-generated 404 must not substitute for verified target identity.

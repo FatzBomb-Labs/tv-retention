@@ -33,7 +33,7 @@ from migrate import migrate
 from sonarr import Sonarr, SonarrError, match_rule
 import schedules
 from store import (CONFIG, NAME, RUNTIME, SCHEMA,
-                   age_seconds, cache_path, clear_progress, episode_cache, forget_episodes,
+                   age_seconds, archive_intent, cache_path, clear_progress, episode_cache, forget_episodes,
                    invalidate_catalogue, job_state, journal, load_health, load_settings,
                    load_intent, load_state, log_line, now_iso, read_cache, read_log, read_progress,
                    save_job_state, save_settings, save_state, set_progress, state_dir,
@@ -795,12 +795,19 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         return summary
 
     stored = load_intent(settings)
-    if stored and stored.get('status') != 'complete':
-        # Resume the frozen decision. The operation checkpoints make retries targeted;
-        # no rule is re-evaluated and no completed call is repeated blindly.
+    unfinished = stored and stored.get('status') != 'complete'
+    # Explicit removals remain one-time intent, not ordinary retention permission.
+    # Mixed/removal recovery still needs its own queue-identity migration; do not drop it.
+    has_removals = stored and (stored.get('removals') or any(
+        op.get('removal_action') for op in stored.get('operations') or []))
+    if unfinished and has_removals:
         intent = stored
         _resume_intent(settings, intent)
     else:
+        if unfinished:
+            archive_intent(settings, stored)
+            # Catalogue caching must not lend stale identity to a fresh retry plan.
+            bind_rules(settings, force=True)
         intent = _stage_intent(settings, selected, queued, tmdb)
         save_intent(settings, intent)
     for operation in intent.get('operations') or []:

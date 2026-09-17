@@ -3,8 +3,9 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **610 Python tests in 5.420s**, all
-passing, plus **22 frontend tests**, all passing. The preceding recovery-error checkpoint
+`tools/check-on-host.ps1` on `fatzserver-host` ran **613 Python tests in 5.964s**, all
+passing, plus **22 frontend tests**, all passing. The preceding legacy-retirement checkpoint
+passed **610 Python tests in 5.420s** and **22 frontend tests**. The preceding recovery-error checkpoint
 passed **610 Python tests in 5.937s** and **22 frontend tests**. The canceled-removal checkpoint
 also passed (**606 Python tests in 5.913s**, repeated in **5.912s**). Earlier gates for
 persisted-intent retry (**605 in 5.406s**) and reporting fixes (**604 in 5.398s**) also passed,
@@ -19,6 +20,26 @@ Before/after checkpoint failures propagate rather than permitting another write.
 are partial fixes, not evidence of safe recovery authorization or shared-file deletion.
 
 Evidence:
+- Ordinary-only unfinished runs now archive exact operation checkpoints before staging a
+  new intent, force a current series catalogue read and re-evaluate current settings. The
+  first regression failed in `_resume_intent`: recovery requested episodes where the fresh
+  catalogue request was expected. The unchanged baseline run/recovery/queue suites passed
+  **27 tests in 0.040s**. After the patch, the initial regression passed **1 in 0.031s**;
+  expanded coverage passed in the full gate above. Five subcases cover widened keep window,
+  new manual exclusion, disabled rule, different requested subset and a file now absent.
+  They assert no additional mutation, a different run ID, zero new deletion/byte counts
+  and an exact archived copy of the prior failed intent. Archive-failure injection preserves
+  the old intent and sends no mutation. Tests use consecutive calls, not process restart.
+  Existing explicit-removal tests are unchanged. Mixed/removal recovery is NOT fixed by
+  this checkpoint; queue identity, uncertain deletion reconciliation, unavailable/malformed
+  fresh rows, archive retention, crash finalization and concurrent durability remain open.
+  The original strict-request failure proves entry into the old recovery path, not an
+  observed second deletion: the fixture deliberately stopped before that write.
+  A subsequent read-order-independent outcome regression was run unchanged against both
+  patched and HEAD (`d2acdc7`) worker sources in disposable Linux staging. Patched: **1 test
+  passed in 0.029s**, no mutation. Baseline: **1 failed in 0.028s**, recording an attempted
+  `DELETE /api/v3/episodefile/99` despite the new exclusion. The final full gate above
+  includes this regression. No original removal-test expectations were changed.
 - Legacy run execution is retired: the unused `apply_removals` helper was removed after
   caller checks (including Pylance references); `process_rule` now refuses `dry_run=False`
   before any Sonarr call. Its deletion/monitoring helpers only describe candidates.

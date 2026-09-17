@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import os
 import sys
@@ -139,9 +140,9 @@ def save_state(settings: dict, state: dict) -> None:
 def load_intent(settings: dict) -> dict | None:
     """The last staged run, if a real run was interrupted before it finished.
 
-    This is deliberately separate from the append-only journal.  The journal says what a
-    completed run decided; the intent is the small, replaceable work record that lets a
-    restart know precisely which writes are still owed.
+    This is deliberately separate from the append-only journal. The intent records
+    operation checkpoints, not continuing permission: unfinished ordinary-only decisions
+    are archived before fresh planning. Explicit/mixed removal recovery is separate.
     """
     path = state_dir(settings) / 'run-intent.json'
     try:
@@ -154,6 +155,17 @@ def load_intent(settings: dict) -> dict | None:
 def save_intent(settings: dict, intent: dict) -> None:
     """Durably replace the run intent before or after one external write."""
     atomic_json(state_dir(settings) / 'run-intent.json', intent)
+
+
+def archive_intent(settings: dict, intent: dict) -> None:
+    """Preserve exact checkpoints before replacing abandoned ordinary work.
+
+    Content addressing makes repeated attempts idempotent without trusting an intent ID
+    as a path. Errors propagate: losing audit evidence must stop replacement and writes.
+    This is historical data only, never an executable queue or a success summary.
+    """
+    digest = hashlib.sha256(json.dumps(intent, sort_keys=True).encode('utf-8')).hexdigest()
+    atomic_json(state_dir(settings) / 'run-history' / f'{digest}.json', intent)
 
 
 def journal(settings: dict, record: dict) -> None:
