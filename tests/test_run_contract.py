@@ -106,6 +106,40 @@ class PublicRunContract(unittest.TestCase):
             self.assertFalse(result['removals'][1]['ok'])
             self.assertEqual(result['status'], 'incomplete')
 
+    def test_restart_after_failed_write_retries_only_the_failed_operation(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False)
+            settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
+                                          path='/tv/Second', series_title='Second'))
+            fixture.store.save_settings(settings)
+            fixture.sonarr.expect('GET', 'series', [SERIES, dict(
+                SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)])
+            for series_id in (1, 2):
+                fixture.sonarr.expect('GET', 'episode', [episode_payload(100 + series_id)],
+                    query={'seriesId': [str(series_id)], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('PUT', 'episode/monitor',
+                urllib.error.URLError('fixture write failed'),
+                body={'episodeIds': [101], 'monitored': False})
+            fixture.main.run()
+            # Restart: recovery re-reads both unfinished series (read-only), then the
+            # loop retries only the failed write and runs the never-attempted one once.
+            fixture.sonarr.expect('GET', 'episode', [episode_payload()],
+                query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('GET', 'episode', [episode_payload(102)],
+                query={'seriesId': ['2'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('PUT', 'episode/monitor',
+                body={'episodeIds': [101], 'monitored': False})
+            fixture.sonarr.expect('PUT', 'episode/monitor',
+                body={'episodeIds': [102], 'monitored': False})
+            result = fixture.main.run()
+            fixture.sonarr.assert_finished()
+            self.assertEqual(result['status'], 'complete')
+            intent = fixture.store.load_intent(settings)
+            self.assertEqual(intent['status'], 'complete')
+            self.assertEqual([op['status'] for op in intent['operations']], ['done', 'done'])
+            self.assertEqual([op['attempts'] for op in intent['operations']], [2, 1])
+            self.assertEqual(fixture.store.load_settings()['rules'], [])
+
 
 if __name__ == '__main__':
     unittest.main()
