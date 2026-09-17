@@ -106,7 +106,7 @@ class PublicRunContract(unittest.TestCase):
             self.assertFalse(result['removals'][1]['ok'])
             self.assertEqual(result['status'], 'incomplete')
 
-    def test_restart_after_failed_write_retries_only_the_failed_operation(self):
+    def test_persisted_retry_retries_failed_and_runs_unattempted_removals(self):
         with IsolatedWorker() as fixture:
             settings = fixture.settings(test_mode=False)
             settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
@@ -121,14 +121,14 @@ class PublicRunContract(unittest.TestCase):
                 urllib.error.URLError('fixture write failed'),
                 body={'episodeIds': [101], 'monitored': False})
             fixture.main.run()
-            # Restart: recovery re-reads both unfinished series (read-only), then the
-            # loop retries only the failed write and runs the never-attempted one once.
+            # Same-process retry: the ledger reconciles each request before its write.
+            # The failed request is retried; the never-attempted one executes once.
             fixture.sonarr.expect('GET', 'episode', [episode_payload()],
                 query={'seriesId': ['1'], 'includeEpisodeFile': ['true']})
-            fixture.sonarr.expect('GET', 'episode', [episode_payload(102)],
-                query={'seriesId': ['2'], 'includeEpisodeFile': ['true']})
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [101], 'monitored': False})
+            fixture.sonarr.expect('GET', 'episode', [episode_payload(102)],
+                query={'seriesId': ['2'], 'includeEpisodeFile': ['true']})
             fixture.sonarr.expect('PUT', 'episode/monitor',
                 body={'episodeIds': [102], 'monitored': False})
             result = fixture.main.run()
@@ -136,8 +136,11 @@ class PublicRunContract(unittest.TestCase):
             self.assertEqual(result['status'], 'complete')
             intent = fixture.store.load_intent(settings)
             self.assertEqual(intent['status'], 'complete')
-            self.assertEqual([op['status'] for op in intent['operations']], ['done', 'done'])
-            self.assertEqual([op['attempts'] for op in intent['operations']], [2, 1])
+            self.assertEqual(intent['operations'], [])
+            operations = fixture.store.load_removal_ledger(settings)['batches'][0]['operations']
+            self.assertEqual([op['status'] for op in operations], ['done', 'done'])
+            self.assertEqual([op['attempts'] for op in operations], [2, 1])
+            self.assertEqual(len(fixture.sonarr.mutations), 3)
             self.assertEqual(fixture.store.load_settings()['rules'], [])
 
     def test_canceled_removal_is_not_revived_by_recovery(self):
@@ -154,11 +157,14 @@ class PublicRunContract(unittest.TestCase):
             current = fixture.store.load_settings()
             current['rules'][0]['queue'] = {}
             fixture.store.save_settings(current)
-            with self.assertRaisesRegex(fixture.main.Rejected, 'removal.*changed|removal.*canceled'):
-                fixture.main.run()
+            fixture.sonarr.expect('GET', 'series', [SERIES])
+            result = fixture.main.run()
+            self.assertEqual(result['status'], 'incomplete')
+            self.assertRegex('; '.join(result['errors']), 'removal.*changed|removal.*canceled')
             fixture.sonarr.assert_finished()
             self.assertEqual(len(fixture.sonarr.mutations), 1)
-            self.assertEqual(fixture.store.load_intent(settings), before)
+            ledger = fixture.store.load_removal_ledger(settings)
+            self.assertEqual(ledger['batches'][0]['operations'], before['operations'])
             self.assertEqual(len(fixture.store.load_settings()['rules']), 1)
             self.assertFalse(fixture.store.load_settings()['rules'][0]['queue'].get('removal'))
 

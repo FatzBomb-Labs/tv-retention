@@ -42,11 +42,16 @@ class RemovalIdentity(unittest.TestCase):
             requeued = copy.deepcopy(current)
             requeued['rules'][0]['queue']['removal'] = {'action': 'unmonitor-all'}
             actions.action_settings(current, {'settings': requeued})
-            with self.assertRaisesRegex(Rejected, 'removal.*changed|removal.*canceled'):
-                f.main.run()
+            new_request = f.store.load_settings()['rules'][0]['queue']['removal']['request_id']
+            f.sonarr.expect('GET', 'series', [SERIES])
+            result = f.main.run()
+            self.assertEqual(result['status'], 'incomplete')
+            self.assertRegex('; '.join(result['errors']), 'removal.*changed|removal.*canceled')
             f.sonarr.assert_finished()
             self.assertEqual(len(f.sonarr.mutations), 1)
-            self.assertEqual(f.store.load_intent(settings), old)
+            ledger = f.store.load_removal_ledger(settings)
+            self.assertEqual(ledger['batches'][0]['operations'], old['operations'])
+            self.assertEqual(f.store.load_settings()['rules'][0]['queue']['removal']['request_id'], new_request)
 
     def test_stale_settings_cannot_restore_canceled_request_id(self):
         with IsolatedWorker() as f:

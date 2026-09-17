@@ -75,11 +75,14 @@ class RecoveryErrors(unittest.TestCase):
                 before = fixture.store.load_intent(settings)
                 fixture.sonarr.expect('GET', 'episode', response, query={
                     'seriesId': ['1'], 'includeEpisodeFile': ['true']})
-                with self.assertRaises(SonarrError):
-                    fixture.main.run()
+                fixture.sonarr.expect('GET', 'series', [SERIES])
+                result = fixture.main.run()
+                self.assertEqual(result['status'], 'incomplete')
+                self.assertTrue(result['errors'])
                 fixture.sonarr.assert_finished()
                 self.assertEqual(len(fixture.sonarr.mutations), 1)
-                self.assertEqual(fixture.store.load_intent(settings), before)
+                ledger = fixture.store.load_removal_ledger(settings)
+                self.assertEqual(ledger['batches'][0]['operations'], before['operations'])
                 self.assertEqual(len(fixture.store.load_settings()['rules']), 1)
 
 

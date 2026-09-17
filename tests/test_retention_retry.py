@@ -162,8 +162,12 @@ class RetentionRetry(unittest.TestCase):
             self.assertEqual(old['operations'][0]['status'], 'done')
             # No further external read/write is needed to finalize acknowledged work.
             second = fixture.main.run()
-            self.assertEqual(second['id'], old['id'])
+            self.assertNotEqual(second['id'], old['id'])
             self.assertEqual(second['status'], 'complete')
+            ledger = fixture.store.load_removal_ledger(settings)
+            self.assertEqual(ledger['batches'][0]['operations'], old['operations'])
+            archives = list((fixture.root / 'state' / 'run-history').glob('*.json'))
+            self.assertIn(old, [json.loads(path.read_text()) for path in archives])
             self.assertEqual(len(fixture.sonarr.mutations), 1)
             self.assertEqual(fixture.store.load_settings()['rules'], [])
             fixture.sonarr.assert_finished()

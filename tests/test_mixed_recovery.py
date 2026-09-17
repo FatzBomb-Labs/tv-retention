@@ -70,6 +70,65 @@ class MixedRecovery(unittest.TestCase):
                 archives = list((f.root / 'state' / 'run-history').glob('*.json'))
                 self.assertIn(old, [json.loads(path.read_text()) for path in archives])
 
+    def test_removal_only_history_does_not_capture_unrelated_subset(self):
+        with IsolatedWorker() as f:
+            settings, old = self.seed_mixed(f)
+            old['rules'] = []
+            f.store.save_intent(settings, old)
+            settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
+                path='/tv/Second', series_title='Second', queue={}))
+            f.store.save_settings(settings)
+            series = [SERIES, dict(SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)]
+            f.sonarr.expect('GET', 'series', series)
+            f.sonarr.expect('GET', 'series', series)
+            f.sonarr.expect('GET', 'episode', [dict(episode_payload(102, file_id=None), seriesId=2)],
+                query={'seriesId': ['2'], 'includeEpisodeFile': ['true']})
+            f.sonarr.expect('PUT', 'episode/monitor',
+                body={'episodeIds': [102], 'monitored': False})
+            result = f.main.run(rule_ids=['r2'])
+            self.assertEqual(result['status'], 'complete')
+            self.assertNotEqual(result['id'], old['id'])
+            ledger = f.store.load_removal_ledger(settings)
+            self.assertEqual(ledger['batches'][0]['operations'], old['operations'])
+            self.assertEqual(result['removals'], [])
+            f.sonarr.assert_finished()
+
+    def test_completed_intent_with_unresolved_removal_uses_ledger(self):
+        with IsolatedWorker() as f:
+            settings, old = self.seed_mixed(f)
+            old['status'] = 'complete'
+            old['rules'] = []
+            f.store.save_intent(settings, old)
+            settings['rules'].append(dict(settings['rules'][0], id='r2', series_id=2,
+                path='/tv/Second', series_title='Second', queue={}))
+            f.store.save_settings(settings)
+            series = [SERIES, dict(SERIES, id=2, title='Second', path='/tv/Second', tvdbId=20)]
+            f.sonarr.expect('GET', 'series', series)
+            f.sonarr.expect('GET', 'series', series)
+            f.sonarr.expect('GET', 'episode', [dict(episode_payload(102, file_id=None), seriesId=2)],
+                query={'seriesId': ['2'], 'includeEpisodeFile': ['true']})
+            f.sonarr.expect('PUT', 'episode/monitor',
+                body={'episodeIds': [102], 'monitored': False})
+            result = f.main.run(rule_ids=['r2'])
+            self.assertEqual(result['status'], 'complete')
+            self.assertEqual(result['removals'], [])
+            ledger = f.store.load_removal_ledger(settings)
+            self.assertEqual(ledger['batches'][0]['operations'], old['operations'])
+            f.sonarr.assert_finished()
+
+    def test_completed_intent_with_awaiting_finalization_finalizes_locally(self):
+        with IsolatedWorker() as f:
+            settings, old = self.seed_mixed(f, status='done')
+            old['status'] = 'complete'
+            old['rules'] = []
+            f.store.save_intent(settings, old)
+            f.sonarr.expect('GET', 'series', [SERIES])
+            result = f.main.run()
+            self.assertEqual(result['status'], 'complete')
+            self.assertEqual(f.store.load_settings()['rules'], [])
+            self.assertEqual(f.sonarr.mutations, [])
+            f.sonarr.assert_finished()
+
     def seed_mixed(self, f, status='failed', records=True):
         settings = f.settings(test_mode=False)
         operation = f.main._operation('set-monitored', settings['rules'][0],

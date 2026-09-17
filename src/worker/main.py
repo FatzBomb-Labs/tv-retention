@@ -919,10 +919,9 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         return summary
 
     stored = load_intent(settings)
-    unfinished = stored and stored.get('status') != 'complete'
     # Completed removals are historical outcomes, not permission to replay ordinary
-    # work. Unfinished operations and removal records without confirmed completion
-    # still require the guarded recovery path until separate request ledgers land.
+    # work. Outstanding one-time requests have the same ledger owner regardless of
+    # whether the original run also contained ordinary retention or was marked done.
     removal_operations = [op for op in (stored or {}).get('operations') or []
                           if op.get('removal_action')]
     completed_removals = {(op.get('rule_id'), op['removal_action'])
@@ -942,7 +941,7 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     if (stored or {}).get('separate_removals') and not ledger['batches']:
         raise Rejected('Removal recovery ledger is missing; refusing to restage handed-off requests.')
     separate = bool(ledger['batches']) or bool(
-        unfinished and stored.get('rules') and (unresolved_removals or awaiting_finalization))
+        unresolved_removals or awaiting_finalization)
     if separate:
         reports, held, targets = _separate_removal_recovery(settings, stored, ledger, rule_ids)
         settings = load_settings()
@@ -963,11 +962,8 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         intent['recovery_removals'] = reports
         intent['separate_removals'] = True
         save_intent(settings, intent)
-    elif unfinished and (unresolved_removals or awaiting_finalization):
-        intent = stored
-        _resume_intent(settings, intent)
     else:
-        if unfinished:
+        if stored:
             archive_intent(settings, stored)
             # Catalogue caching must not lend stale identity to a fresh retry plan.
             bind_rules(settings, force=True)
