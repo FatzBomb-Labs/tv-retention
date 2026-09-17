@@ -15,7 +15,7 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 
 | Check | Result |
 |---|---|
-| `python3 -m unittest discover -s tests` | 586 tests, all pass |
+| `python3 -m unittest discover -s tests` | 588 tests, all pass |
 | Worker imports | every module loads, server.py included |
 | `node --input-type=module --check` over every `src/assets/*.js` | no syntax errors across all 19 shipped ES modules |
 | `node --test tests/frontend/*.test.js` | 22 tests, all pass |
@@ -25,14 +25,35 @@ It installs nothing, touches no `/boot` path, reads no media, and contacts no So
 The source now presents Series (including Presets and Exclusion Rules), Settings
 (including Schedule), System (including Stats and Backup), and Help. Test Mode is a
 separate prominent card above the Schedule controls. The focused local checks for this
-pass are `test_build.py` (162 tests) and the frontend runtime suite (22 tests), both
-passing. Re-run the host gate before publishing the next build.
+pass are `test_build.py` (164 tests) and the frontend runtime suite (22 tests), both
+passing. The host gate below has also passed for the deployed Build 18.
+
+### Build 18 acceptance smoke (read-only, 2026-09-16)
+
+The target container `tv-retention-demo` on `fatzserver-host` was checked without
+turning Test Mode off and without invoking a run or any write action. There is exactly
+one running TV Retention container, it is healthy, and it serves `tv-retention:dev-build18`.
+
+| Check | Result |
+|---|---|
+| `GET /health` | HTTP 200, `{"ok": true}` |
+| `GET /` without a session | HTTP 303 to `/login` |
+| Login flow | Wrong password HTTP 401; configured credentials land on the page |
+| Authenticated snapshot | version `0.3.0`, build `18`, build date present |
+| Test Mode | `true` in the live settings and snapshot; no deletion was attempted |
+| Navigation | Series, Settings, System and Help views present; Schedule and Backup in their new locations |
+| Removed/replaced UI | Exclusion Rules present; no automatic-search control; Alerts and Safety are not standalone tabs |
+| Container logs | healthy startup line only; no traceback, permission error or HTTP 500 |
+
+This is the safe portion of [ACCEPTANCE.md](ACCEPTANCE.md). The first live deletion,
+monitoring write, optional-provider calls, and backup/restore remain intentionally
+unchecked until an operator chooses them.
 
 ### Coverage by area
 
 | File | Tests | What it holds |
 |---|---|---|
-| `test_build.py` | 158 | The interface, checked statically |
+| `test_build.py` | 164 | The interface, checked statically |
 | `test_monitoring.py` | 36 | The two modes, the keep frame, and what each one asks Sonarr to do |
 | `test_freshness.py` | 62 | Reading ages, staleness, provider gates, what may be shown as current, the one-read-per-rule guarantee, and recycle-bin wiring |
 | `test_migration.py` | 45 | Settings v1 → v13, each step and the whole chain |

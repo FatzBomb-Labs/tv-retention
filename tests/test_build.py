@@ -958,6 +958,42 @@ class Interface(unittest.TestCase):
         self.assertNotIn('data-view="media-radarr"', self.html)
         self.assertNotIn('id="tvr-alerts-system-empty"', self.html)
 
+    def test_legacy_view_names_are_rehomed_on_load(self):
+        """A browser can remember a view name across an upgrade.
+
+        Renaming a tab without a landing map leaves an operator on the library with no
+        explanation.  Keep the map explicit and make sure each former destination lands
+        on one of the current pages.
+        """
+        navigation = module_js('navigation.js')
+        expected = {
+            'media-stats': 'system-stats',
+            'media-presets': 'series-presets',
+            'media-automation': 'series-exclusions',
+            'media-schedule': 'settings-schedule',
+            'general-alerts': 'system-status',
+            'general-connections': 'settings-connections',
+            'general-air-dates': 'settings-air-dates',
+            'general-safety': 'system-status',
+            'general-logging': 'settings-general',
+            'general-backup': 'system-backup',
+        }
+        for old, new in expected.items():
+            self.assertIn(f"'{old}': '{new}'", navigation)
+            self.assertIn(f"name = LEGACY_VIEWS[name] || name;", navigation)
+            self.assertIn(f"data-view=\"{new}\"", self.html)
+
+    def test_automatic_search_is_removed_but_legacy_setting_remains_readable(self):
+        """Sonarr RSS owns discovery; old settings still load without doing a search."""
+        worker = (ROOT / 'src' / 'worker' / 'main.py').read_text(encoding='utf-8')
+        migration = (ROOT / 'src' / 'worker' / 'migrate.py').read_text(encoding='utf-8')
+        settings = module_js('settings.js')
+        self.assertNotIn('search_episodes', worker)
+        self.assertNotIn('tvr-auto-search', self.html)
+        self.assertNotIn('SEARCH_QUESTION', settings)
+        self.assertIn('search_after_monitor', migration)
+        self.assertIn('Object.assign({}, settings().automation || {}, {', settings)
+
     def test_alert_attention_is_contextual_not_a_global_header_total(self):
         self.assertNotIn('tvr-alert-header', self.html)
         self.assertNotIn('header_worthy', self.js)
