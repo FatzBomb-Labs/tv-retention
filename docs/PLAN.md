@@ -89,16 +89,21 @@ access, and the required validation matrix is documented and repeatable.
 Primary areas: `src/worker/main.py`, `actions.py`, `sonarr.py`, executor tests.
 
 Dispatch/completion now belongs to the executor, with explicit intent and read-only
-recovery reconciliation. Failed operations stop the current run conservatively.
+recovery reconciliation. Failed operations stop the current run conservatively. Run
+summaries now expose incomplete operations and failed/unattempted removals. Persisted-intent
+retry is covered through a second public run with unchanged settings, not a process restart
+or recovery-authorization test; evidence is in VALIDATION.
 
 - [ ] Restrict execution to pending, currently eligible operations; revalidate recovery
       permission rather than assuming the saved intent remains authorized.
 - [ ] Define explicit operation states and dependencies. Failed or uncertain unmonitoring
       prevents the dependent file deletion. Independent series may continue only under a
       documented policy that preserves the failure in the overall result.
-- [ ] Record before/after checkpoints durably; if a required checkpoint cannot be saved,
-      do not send the next write. Report incomplete runs, partial success and failures
-      honestly, including removal errors and actual rather than planned byte totals.
+- [ ] Prove durable before/after checkpoints through public-run interruption tests; if a
+      required checkpoint cannot be saved, do not send the next write. Helper-level failure
+      propagation is covered, but process crashes and multi-operation durability remain open.
+- [ ] Report actual rather than planned byte totals, including partial success and retry,
+      without counting failed, unattempted or already-completed work as newly reclaimed space.
 - [ ] Before resuming, verify current instance/series/file identity and current safety
       permission. Changed configuration, new exclusions, disabled rules, canceled queues,
       changed instance URLs or a different requested run scope must not silently revive

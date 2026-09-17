@@ -3,8 +3,9 @@
 ## Latest implementation — 2026-09-17
 
 **The Linux gate passes; deployment remains blocked by PLAN's remaining P0 work.**
-`tools/check-on-host.ps1` on `fatzserver-host` ran **603 Python tests in 5.366s**, all
-passing (a preceding run also passed in 5.395s), plus **22 frontend tests**, all passing.
+`tools/check-on-host.ps1` on `fatzserver-host` ran **605 Python tests in 5.406s**, all
+passing, plus **22 frontend tests**, all passing. The preceding reporting-fix gate
+also passed: **604 Python tests in 5.398s** and **22 frontend tests**.
 Every shipped worker module was
 separately imported and syntax-checked; every shipped JavaScript module was syntax-checked.
 No deployment, live Sonarr request, or media access occurred; staging was disposable.
@@ -24,6 +25,16 @@ Evidence:
   both Test Mode values using the real client mapping and persistence. Queued unmonitoring
   sends exactly one PUT when enabled; Test Mode sends none and creates no state directory.
   This does not exercise the scheduler loop, CLI, or every removal disposition.
+- `4ca3483` fixes run-result reporting: a failed first write leaves the next operation
+  pending, preserves both queued rules, and returns `incomplete` with errors and neither
+  removal reported successful. The new regression first failed on an empty `errors` list.
+  Actual-versus-planned byte accounting remains open.
+- `90cfcd8` adds persisted-intent retry coverage. A second `main.run()` in the same process
+  re-reads both unfinished series before sending either write; it retries the failed write
+  and executes the pending one, recording attempts `[2, 1]` and completion. All **7 focused
+  public-run/transport tests passed in 0.022s**. This is not a process-restart or crash test,
+  nor evidence of recovery permission revalidation; settings remain unchanged. The initial
+  expected request order was corrected to match read-only reconciliation before dispatch.
 - `tests/fake_sonarr.py` records exact method/path/query/body, rejects unexpected requests,
   blocks socket access, and supports changed/shared/fileless payloads and lost responses.
   Its first run exposed an invalid synthetic key; that fixture error was corrected before
@@ -37,8 +48,9 @@ Evidence:
 | Surface | Current evidence |
 |---|---|
 | Public run, manual/scheduled flag | Queued unmonitor-all with Test Mode on/off; exact requests |
+| Public run failure and retry | Failed-first-write reporting; second call reuses persisted intent with unchanged settings; no process restart |
 | Executor/recovery helper | Mocked checkpoint/dispatch failures and read-only reconciliation |
-| Scheduler loop, CLI, picker, scope pass, recycle-bin, other removals, restart, restore | Full mode/permission/failure matrix remains open |
+| Scheduler loop, CLI, picker, scope pass, recycle-bin, other removals, process restart, restore | Full mode/permission/failure matrix remains open |
 
 ## Historical review — 2026-09-17, before the executor fix
 
