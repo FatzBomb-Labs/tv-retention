@@ -1,5 +1,37 @@
 # Validation record
 
+## Build 22 deployment — 2026-09-18
+
+The committed source checkpoint is `a18d758` (`Refresh UI after runs and fix specials
+saves`) with `BUILD=22` and `VERSION=0.3.0`. The authoritative Linux host gate passed
+**684 Python tests in 9.926s** and **31 frontend tests**; all required checks passed.
+The build-contract test slice also passed **165 tests** after updating the assertions for
+the optional forced-sync request.
+
+The candidate passed disposable preflight as `tv-retention:dev-build22` with no network,
+a copied config, scheduling disabled and Test Mode forced on. The preflight verified build
+22 metadata, the corrected executor signature, the Sonarr file-delete method and a valid
+settings snapshot containing 32 rules.
+
+The candidate was deployed as `tv-retention:dev-build22`, image ID
+`sha256:29e9c3b1017985673dbb50e5fca01d032afb169df646453bef09bcd04ea2d5d`.
+The container uses the existing `/tmp/tvr-demo/config` volume and runtime settings, is
+healthy, uses `unless-stopped`, and serves `GET /health` as `{"ok": true}`. Exactly one
+`tv-retention-demo` container is running. The live image contains the new sync-status and
+post-run refresh assets.
+
+The live config remained intact: Test Mode is enabled, the configured schedule remains
+enabled, and the last completed run `6c6c556a9cbf` still reports **7 deleted** with no
+errors. Its completed intent was preserved through replacement; no incomplete recovery
+intent was replayed at startup.
+
+Build 21 is retained as the rollback image under both `tv-retention:rollback` and
+`tv-retention:dev-build21`. The matching config archive is
+`/tmp/tvr-demo/rollback-build21-config-20260918T094425Z.tar.gz` with SHA-256
+`330e58d07228c7a3ea1b23e0c75de2a3303adb5591e272523d210e5bf67898d2`. Superseded TV
+Retention image tags and the older build-20 rollback archive were removed; no global
+container or image cleanup was used.
+
 ## Executor image correction — 2026-09-18
 
 The source executor fix is present at workspace revision `7b2ae77`: staged operations

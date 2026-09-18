@@ -32,12 +32,11 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered change:** sync auto-reenable now merges only its owned rule fields into
-the latest settings document, preserving a newer user retention edit made during the Sonarr
-read. The Phase 2 checkpoint passed **684 Python and 29 frontend tests**. Settings
-revision/transaction work is committed in `5e409b3` and `97abd58`; the binding merge is
-committed in `b44b1c6`; this sync merge checkpoint follows them. Broader background writers,
-commit-time version rechecks and safe restore remain open.
+**Latest delivered change:** build 22 is deployed with forced post-run Sonarr refresh,
+visible page-open sync progress, the series-editor settings-response fix, and clear result
+dialog dismissal. Commit `a18d758` passed **684 Python and 31 frontend tests** and the
+candidate preflight before deployment. Broader background writers, commit-time version
+rechecks and safe restore remain open.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
