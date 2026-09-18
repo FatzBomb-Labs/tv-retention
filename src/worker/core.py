@@ -145,11 +145,12 @@ def atomic_json(path: Path, value) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, path)
-        directory = os.open(path.parent, os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        if hasattr(os, 'O_DIRECTORY'):
+            directory = os.open(path.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         if temp.exists():
             temp.unlink(missing_ok=True)

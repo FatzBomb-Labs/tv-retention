@@ -37,6 +37,8 @@ browser saves must echo the current revision and are rejected when stale, while 
 settings writes advance the revision. The Phase 2 checkpoint passed **681 Python and 29
 frontend tests**. Atomic-write evidence is committed in `fc7dd6b`; transactions, owned-field
 merges and safe restore remain open. See VALIDATION.
+The current checkpoint also adds a short cross-process settings lock around the central
+read/validate/write action; post-save health and Sonarr work remains outside that lock.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
@@ -310,9 +312,10 @@ Primary areas: `core.atomic_json`, `store.py`, `actions.py`, `main.py`, frontend
 - [x] Allocate a unique temporary file per write, retain same-filesystem atomic replacement,
       file/directory fsync and cleanup. The concurrent-writer regression proves the unique
       staging path; injected write-failure coverage remains a separate test gap.
-- [ ] Introduce short serialized read/validate/merge/write transactions. Define lock order
-      and cover both HTTP/worker threads and supported CLI processes. Keep Sonarr reads
-      outside transaction locks and re-check the state version before committing results.
+- [ ] Introduce short serialized read/validate/merge/write transactions. The central
+      whole-document settings action now has a bounded cross-process lock and Linux
+      concurrent-save coverage; internal writers, owned-field merges, lock-order coverage
+      across all entry points and version rechecks before background commits remain open.
 - [x] Add a monotonic settings revision and reject stale whole-document submissions with a
       useful conflict response. Preserve masked-secret behavior and migrated settings.
       The revision check protects the whole-document settings action; serialized merge

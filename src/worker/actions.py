@@ -31,7 +31,7 @@ from sonarr import SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_state, log_line, now_iso, read_cache,
                    read_journal, read_log, read_progress, save_settings, save_state,
-                   trim_health, write_cache)
+                   save_settings_unlocked, settings_transaction, trim_health, write_cache)
 from tmdb import TMDB, TMDBError
 
 
@@ -636,10 +636,19 @@ def stamp_reenable_watermarks(previous, updated) -> None:
 
 
 def action_settings(settings, request):
-    draft = copy.deepcopy(request.get('settings') or {})
-    revision = draft.get('settings_revision')
-    if revision != settings.get('settings_revision', 0):
-        raise Rejected('Settings changed elsewhere; reload before saving.')
+    with settings_transaction():
+        settings = load_settings()
+        draft = copy.deepcopy(request.get('settings') or {})
+        revision = draft.get('settings_revision')
+        if revision != settings.get('settings_revision', 0):
+            raise Rejected('Settings changed elsewhere; reload before saving.')
+        updated = _prepare_settings_update(settings, draft)
+        save_settings_unlocked(updated)
+
+    return _finish_settings_update(settings, updated)
+
+
+def _prepare_settings_update(settings, draft):
     current_rules = {rule['id']: rule for rule in settings.get('rules') or []}
     # Snapshot fields are server-owned, including on echoes and legacy queues.
     # Strip client values before validation so neither edits nor malformed snapshots
@@ -672,7 +681,10 @@ def action_settings(settings, request):
                             or removal['action'] != current.get('action')):
             raise Rejected('Saved removal was changed or canceled; reload before saving.')
     stamp_reenable_watermarks(settings, updated)
-    save_settings(updated)
+    return updated
+
+
+def _finish_settings_update(settings, updated):
     main.log_settings_change(updated, settings, updated)
     # A changed URL, key or mapping makes the cached series list wrong in a way no
     # timestamp would catch, so it is dropped rather than aged out.

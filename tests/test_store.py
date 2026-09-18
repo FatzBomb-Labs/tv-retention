@@ -3,6 +3,7 @@
 Both touch no network and import no `fcntl`, so this runs locally as well as on the host.
 """
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -202,6 +203,7 @@ class RunIntent(unittest.TestCase):
         self.assertEqual(store.load_intent(self.settings), second)
         self.assertFalse((Path(self.settings['state_dir']) / 'run-intent.json.tmp').exists())
 
+    @unittest.skipUnless(hasattr(os, 'O_DIRECTORY'), 'atomic directory fsync is Linux-only')
     def test_concurrent_atomic_writes_use_distinct_temporary_files(self):
         path = Path(self.settings['state_dir']) / 'shared.json'
         barrier = threading.Barrier(2)

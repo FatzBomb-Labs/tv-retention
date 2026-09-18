@@ -1,6 +1,7 @@
 """Whole-document settings saves reject stale revisions."""
 import copy
 import json
+import threading
 import unittest
 
 import context  # noqa: F401
@@ -35,3 +36,29 @@ class SettingsRevision(unittest.TestCase):
             draft = copy.deepcopy(loaded)
             result = actions.action_settings(loaded, {'settings': draft})
             self.assertEqual(result['settings']['settings_revision'], 1)
+
+    def test_concurrent_document_saves_allow_one_revision_and_reject_the_other(self):
+        with IsolatedWorker() as fixture:
+            current = fixture.settings(test_mode=True, removal=None)
+            fixture.store.save_settings(current)
+            first = copy.deepcopy(current)
+            second = copy.deepcopy(current)
+            first['rules'][0]['keep_days'] = 60
+            second['rules'][0]['keep_days'] = 90
+            results, errors = [], []
+
+            def save(document):
+                try:
+                    results.append(actions.action_settings(current, {'settings': document}))
+                except Rejected as error:
+                    errors.append(error)
+
+            threads = [threading.Thread(target=save, args=(document,))
+                       for document in (first, second)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(len(errors), 1)
+            self.assertIn(fixture.store.load_settings()['rules'][0]['keep_days'], (60, 90))

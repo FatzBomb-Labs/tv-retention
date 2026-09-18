@@ -19,8 +19,14 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # Windows filesystem-only tests; the container path is Linux.
+    fcntl = None
 
 from core import CACHE_SCHEMA, DEFAULTS, Rejected, atomic_json, validate_settings
 from migrate import migrate
@@ -38,6 +44,23 @@ CONFIG_DIR = Path(os.environ.get('TVR_CONFIG_DIR', '/config'))
 CONFIG = Path(os.environ.get('TVR_CONFIG', CONFIG_DIR / 'settings.json'))
 RUNTIME = Path(os.environ.get('TVR_RUNTIME', '/tmp/tv-retention'))
 DEVELOPMENT = os.environ.get('TVR_DEVELOPMENT') == '1'
+_settings_thread_lock = threading.RLock()
+
+
+@contextlib.contextmanager
+def settings_transaction():
+    """Serialize short settings read/validate/write transactions across worker processes."""
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:
+        with _settings_thread_lock:
+            yield
+        return
+    with open(RUNTIME / 'settings.lock', 'a') as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 # ---------------------------------------------------------------------------
 # Configuration and state
@@ -85,6 +108,12 @@ def load_settings() -> dict:
 def save_settings(settings: dict) -> None:
     # The flag is retained for test fixtures and local diagnostics; it never changes the
     # write contract (Test Mode is a settings value, not an environment shortcut).
+    with settings_transaction():
+        save_settings_unlocked(settings)
+
+
+def save_settings_unlocked(settings: dict) -> None:
+    """Write settings while the caller already owns settings_transaction()."""
     if DEVELOPMENT:
         pass
     settings['settings_revision'] = int(settings.get('settings_revision') or 0) + 1

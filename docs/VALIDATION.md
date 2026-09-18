@@ -1,5 +1,23 @@
 # Validation record
 
+## Latest implementation — 2026-09-18 (bounded settings transaction)
+
+The full host gate passed **682 Python tests in 8.727s** and **29 frontend tests**, with
+all worker imports and shipped syntax checks passing. No deployment, live Sonarr call or
+media access occurred.
+
+The central whole-document settings action now holds a short `settings.lock` transaction
+only while it reloads, checks `settings_revision`, validates and atomically writes the
+document. Logging, cache invalidation, health refresh and any Sonarr reads occur after the
+lock is released. Linux coverage passed **32 focused tests**, including concurrent saves
+where one revision succeeds and the stale writer is rejected. Windows filesystem-only
+store tests pass; Linux directory-fsync tests are explicitly skipped there because the
+platform lacks `O_DIRECTORY`.
+
+This is bounded coordination, not the complete Phase 2 model: internal settings writers,
+owned-field/background merges, a uniform lock order and commit-time version rechecks for
+all background updates remain open.
+
 ## Latest implementation — 2026-09-18 (settings revisions)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **681 Python tests in 9.017s**,
