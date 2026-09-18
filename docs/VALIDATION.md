@@ -1,5 +1,23 @@
 # Validation record
 
+## Latest implementation — 2026-09-18 (atomic writes and validation boundary)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **679 Python tests in 9.018s**,
+**29 frontend tests**, all passing. Worker imports and shipped Python/JavaScript syntax
+checks passed. No deployment, live Sonarr call or media access occurred.
+
+`core.atomic_json` now gives every write a UUID-suffixed temporary path instead of sharing
+one PID-based path. The fail-first Linux regression reproduced concurrent writers deleting
+one another's temporary file (`FileNotFoundError`), then passed after the change. The
+focused atomic-write and existing round-trip cleanup tests passed **2 tests**; the complete
+gate passed **679 Python and 29 frontend tests**.
+
+Phase 0 validation evidence also includes two complete host gates run concurrently. Each
+passed **678 Python and 29 frontend tests** with independent disposable staging and cleanup.
+An attempted interruption completed normally, so no SSH-loss or interrupted-cleanup claim
+is made. Injected fsync/replace failure coverage and serialized transactions remain open
+in Phase 2; safe restore remains intentionally disabled until Phase 3.
+
 ## Latest implementation — 2026-09-18 (Phase 1 safety checkpoint)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **678 Python tests in 9.538s**,

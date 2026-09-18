@@ -32,12 +32,11 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered change:** ordinary file-delete recovery now freezes and verifies complete
-shared-file episode membership before reconciling an uncertain deletion. The final Phase 1
-gate passed **678 Python and 29 frontend tests**. Operator resolution for held removals is
-committed in `5c209eb`; this membership checkpoint follows it. The bounded Phase 1 safety
-work is now implemented; atomic transitions, transactions and safe restore remain in the
-later phases. See VALIDATION.
+**Latest delivered change:** `atomic_json` now gives every write a unique temporary path,
+so concurrent writers cannot delete one another's staging file. The Phase 2 checkpoint
+passed **679 Python and 29 frontend tests**. The bounded Phase 1 safety work is committed
+in `0600f98`; atomic-write evidence is the first Phase 2 increment. Transactions, revisions
+and safe restore remain open. See VALIDATION.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
@@ -80,8 +79,8 @@ Delivered and verified (evidence and limits in VALIDATION):
   evidence, corrupt ledgers and ambiguous ownership fail closed.
 
 Remaining phase status:
-- **Phase 0 — partial:** full mutation matrix, fixture isolation audit and validation
-  interruption/cleanup evidence remain.
+- **Phase 0 — partial:** concurrent host gates now pass with unique staging and cleanup;
+      interrupted-SSH cleanup evidence and the safe-restore portion of the matrix remain.
 - **Phase 1 — bounded P0 safety work complete:** dispatch, incomplete-result reporting, fresh
       ordinary replanning, separate scoped removal ownership, request-aware finalization,
       guarded record-only retry, Test Mode write enforcement, target authorization, subprocess
@@ -138,16 +137,17 @@ Primary areas: `tests/`, `tools/check-on-host.*`, `docs/VALIDATION.md`.
 The normal-import executor tests, public-run coverage, scripted Sonarr fixture and
 mandatory checks are in place; evidence and current matrix limits are in VALIDATION.
 
-- [ ] Complete process-restart and safe-restore mutation evidence. The bounded both-mode
-      matrix now covers manual/scheduled run, CLI, due tick, picker, scope pass, recycle-bin,
-      series removal, preview and restore refusal with exact fake requests. Due/connectivity
-      decisions are stubbed for tick; persisted retry is same-process, not restart.
-      See VALIDATION for the current coverage and limitations.
-- [ ] Use fresh temporary config/state for every backend test and isolated schedules.
+- [ ] Complete safe-restore mutation evidence. The bounded both-mode matrix covers
+      manual/scheduled run, CLI, due tick, picker, scope pass, recycle-bin, series removal,
+      preview and restore refusal with exact fake requests. Safe archive activation remains
+      intentionally disabled until Phase 3.
+- [x] Use fresh temporary config/state for every backend test and isolated schedules.
       Continue the Linux host gate; do not patch Linux path or `fcntl` behavior to make
       the Windows box impersonate the container.
-- [ ] Fault-test concurrent and interrupted host validations: script/source paths are
-      now unique and cleanup is scoped, but SSH loss and cleanup failures need evidence.
+- [x] Fault-test concurrent host validations: two complete gates ran simultaneously, each
+      passing **678 Python and 29 frontend tests** with independent staging paths and cleanup.
+- [ ] Fault-test interrupted host validations and cleanup failures. A validation launch
+      completed normally during the attempted interruption, so no SSH-loss evidence is claimed.
 
 **Exit gate:** the regression harness detects the known failures without external service
 access, and the required validation matrix is documented and repeatable.
@@ -307,8 +307,9 @@ without Phase 2's checkpoint and concurrency guarantees.
 
 Primary areas: `core.atomic_json`, `store.py`, `actions.py`, `main.py`, frontend transport.
 
-- [ ] Allocate a unique temporary file per write, retain same-filesystem atomic replacement,
-      file/directory fsync and cleanup. Verify errors do not silently masquerade as success.
+- [x] Allocate a unique temporary file per write, retain same-filesystem atomic replacement,
+      file/directory fsync and cleanup. The concurrent-writer regression proves the unique
+      staging path; injected write-failure coverage remains a separate test gap.
 - [ ] Introduce short serialized read/validate/merge/write transactions. Define lock order
       and cover both HTTP/worker threads and supported CLI processes. Keep Sonarr reads
       outside transaction locks and re-check the state version before committing results.

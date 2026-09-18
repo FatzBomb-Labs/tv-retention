@@ -2,7 +2,9 @@
 
 Both touch no network and import no `fcntl`, so this runs locally as well as on the host.
 """
+import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -199,4 +201,31 @@ class RunIntent(unittest.TestCase):
         store.save_intent(self.settings, second)
         self.assertEqual(store.load_intent(self.settings), second)
         self.assertFalse((Path(self.settings['state_dir']) / 'run-intent.json.tmp').exists())
+
+    def test_concurrent_atomic_writes_use_distinct_temporary_files(self):
+        path = Path(self.settings['state_dir']) / 'shared.json'
+        barrier = threading.Barrier(2)
+        original_replace = store.atomic_json.__globals__['os'].replace
+
+        def synchronized_replace(source, destination):
+            barrier.wait(timeout=5)
+            return original_replace(source, destination)
+
+        errors = []
+
+        def write(value):
+            try:
+                store.atomic_json(path, {'value': value})
+            except Exception as error:  # pragma: no cover - assertion reports the failure
+                errors.append(error)
+
+        with mock.patch.object(store.atomic_json.__globals__['os'], 'replace', synchronized_replace):
+            threads = [threading.Thread(target=write, args=(value,)) for value in ('one', 'two')]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+
+        self.assertFalse(errors, errors)
+        self.assertIn(json.loads(path.read_text())['value'], ('one', 'two'))
 

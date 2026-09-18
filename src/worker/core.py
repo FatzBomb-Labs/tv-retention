@@ -136,7 +136,7 @@ def atomic_json(path: Path, value) -> None:
     """Write JSON so a crash or a power loss can never leave a half-written config."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + f'.tmp{os.getpid()}')
+    temp = path.with_suffix(path.suffix + f'.tmp{os.getpid()}.{uuid.uuid4().hex}')
     try:
         with open(temp, 'w', encoding='utf-8') as handle:
             json.dump(value, handle, indent=2, ensure_ascii=False)
