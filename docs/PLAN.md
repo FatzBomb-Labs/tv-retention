@@ -32,11 +32,12 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered change:** background rule binding now merges only backend-owned binding
-fields into the latest settings document, preserving newer user retention edits. The Phase 2
-checkpoint passed **683 Python and 29 frontend tests**. Settings revision/transaction work
-is committed in `5e409b3` and `97abd58`; this owned-field merge checkpoint follows them.
-Broader background writers, commit-time version rechecks and safe restore remain open.
+**Latest delivered change:** sync auto-reenable now merges only its owned rule fields into
+the latest settings document, preserving a newer user retention edit made during the Sonarr
+read. The Phase 2 checkpoint passed **684 Python and 29 frontend tests**. Settings
+revision/transaction work is committed in `5e409b3` and `97abd58`; the binding merge is
+committed in `b44b1c6`; this sync merge checkpoint follows them. Broader background writers,
+commit-time version rechecks and safe restore remain open.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
@@ -318,10 +319,10 @@ Primary areas: `core.atomic_json`, `store.py`, `actions.py`, `main.py`, frontend
       useful conflict response. Preserve masked-secret behavior and migrated settings.
       The revision check protects the whole-document settings action; serialized merge
       transactions and background-owned-field reconciliation remain separate items below.
-- [x] Merge background binding updates by owned rule fields/ID, preserving newer retention
-      settings during a Sonarr read. Broader cache/health writers, acknowledgements,
-      suppression state and commit-time version rechecks remain open for the full transaction
-      model.
+- [x] Merge background binding and sync auto-reenable updates by owned rule fields/ID,
+      preserving newer retention settings during Sonarr reads. Broader cache/health writers,
+      acknowledgements, suppression state and commit-time version rechecks remain open for
+      the full transaction model.
 - [ ] Distinguish authoritative state from disposable caches. Fail closed on damaged
       settings or intent; do not silently reset an unsafe configuration or replay unknown
       work. Expose storage failures in Status.

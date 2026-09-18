@@ -1,5 +1,21 @@
 # Validation record
 
+## Latest implementation — 2026-09-18 (sync owned-field merge)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **684 Python tests in 9.698s**,
+**29 frontend tests**, all passing. Worker imports and shipped Python/JavaScript syntax
+checks passed. No deployment, live Sonarr call or media access occurred.
+
+`sync_from_sonarr()` now reloads the latest settings after a Sonarr library read and merges
+only auto-reenable-owned rule fields (`enabled`, `auto_reenable` and its watermark) before
+the short settings write. The fail-first regression reproduced a newer user `keep_days=90`
+being overwritten to `30`; it passes with the merge. The broader freshness, revision,
+recovery and retry slice passed **95 tests**.
+
+This closes the bounded sync auto-reenable overwrite path. Other internal settings writers,
+health/cache ownership, commit-time version rechecks and full transaction ordering remain
+open in Phase 2.
+
 ## Latest implementation — 2026-09-18 (owned-field background merge)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **683 Python tests in 9.762s**,

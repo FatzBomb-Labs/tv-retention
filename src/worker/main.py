@@ -38,7 +38,8 @@ from store import (CONFIG, NAME, RUNTIME, SCHEMA,
                    load_intent, load_state, log_line, now_iso, read_cache, read_log, read_progress,
                    save_job_state, save_settings, save_state, set_progress, state_dir,
                    save_intent, load_removal_ledger, save_removal_ledger,
-                   store_episodes, trim_health, write_cache)
+                   save_settings_unlocked, settings_transaction, store_episodes,
+                   trim_health, write_cache)
 from tmdb import TMDB, TMDBError, fill_air_dates
 from tvmaze import TVMaze, TVMazeError
 from anilist import AniList, AniListError
@@ -1449,10 +1450,29 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
 
     write_cache(settings, 'catalogue.json', catalogue)
     refresh_armed_episodes(settings, report)
+    before_reenable = {rule['id']: (
+        rule.get('enabled'), rule.get('auto_reenable'), rule.get('auto_reenable_after'))
+        for rule in settings.get('rules') or []}
     reenabled = reenable_returning_rules(settings, before, after)
     if reenabled:
         report['series_reenabled'] = [title for title, _ in reenabled]
-        save_settings(settings)
+        changed_rules = {rule['id']: {
+            'enabled': rule.get('enabled'),
+            'auto_reenable': rule.get('auto_reenable'),
+            'auto_reenable_after': rule.get('auto_reenable_after'),
+        } for rule in settings.get('rules') or []
+            if before_reenable.get(rule['id']) != (
+                rule.get('enabled'), rule.get('auto_reenable'), rule.get('auto_reenable_after'))}
+        with settings_transaction():
+            latest = load_settings()
+            latest_rules = {rule['id']: rule for rule in latest.get('rules') or []}
+            for rule_id, fields in changed_rules.items():
+                target = latest_rules.get(rule_id)
+                if target and target.get('auto_reenable'):
+                    target.update(fields)
+            settings.clear()
+            settings.update(latest)
+            save_settings_unlocked(settings)
         for title, reason_text in reenabled:
             log_line(settings, 'info', f'{title}: automatically re-enabled because {reason_text}')
 

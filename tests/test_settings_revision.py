@@ -8,7 +8,7 @@ from unittest.mock import patch
 import context  # noqa: F401
 import actions
 from core import Rejected
-from fake_sonarr import IsolatedWorker, SERIES
+from fake_sonarr import IsolatedWorker, SERIES, episode_payload
 
 
 class SettingsRevision(unittest.TestCase):
@@ -83,4 +83,38 @@ class SettingsRevision(unittest.TestCase):
             actual = fixture.store.load_settings()
             self.assertEqual(actual['rules'][0]['keep_days'], 90)
             self.assertEqual(actual['rules'][0]['match_status'], 'matched')
+            fixture.sonarr.assert_finished()
+
+    def test_sync_reenable_merges_owned_fields_into_newer_settings(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False, removal=None)
+            settings['rules'][0]['queue'] = {}
+            fixture.store.save_settings(settings)
+            fixture.sonarr.expect('GET', 'series', [dict(SERIES, ended=True)])
+            fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.main.sync_from_sonarr(settings)
+            current = fixture.store.load_settings()
+            current['rules'][0].update(enabled=False, auto_reenable=True, auto_reenable_after='')
+            fixture.store.save_settings(current)
+            settings = fixture.store.load_settings()
+            fixture.sonarr.expect('GET', 'series', [dict(SERIES, ended=False, status='continuing')])
+            fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            original = fixture.sonarr.urlopen
+
+            def change_during_read(request, **kwargs):
+                response = original(request, **kwargs)
+                if request.get_method() == 'GET' and '/api/v3/series' in request.full_url:
+                    newer = fixture.store.load_settings()
+                    newer['rules'][0]['keep_days'] = 90
+                    fixture.store.save_settings(newer)
+                return response
+
+            with patch('urllib.request.urlopen', side_effect=change_during_read):
+                fixture.main.sync_from_sonarr(settings)
+            actual = fixture.store.load_settings()
+            self.assertEqual(actual['rules'][0]['keep_days'], 90)
+            self.assertTrue(actual['rules'][0]['enabled'])
+            self.assertFalse(actual['rules'][0]['auto_reenable'])
             fixture.sonarr.assert_finished()
