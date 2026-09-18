@@ -1,5 +1,25 @@
 # Validation record
 
+## Executor image correction — 2026-09-18
+
+The source executor fix is present at workspace revision `7b2ae77`: staged operations
+checkpoint before dispatch, call Sonarr, and checkpoint the acknowledged result. The
+authoritative host gate passed **684 Python tests in 9.407s** and **29 frontend tests**;
+all required checks passed.
+
+A corrected candidate image was built and deployed as `tv-retention:dev-build21` with
+image digest `sha256:c2c3d38d57bee3f33d88b5f6deabc707f87ebffe4e077274c66a8dfed866c428`.
+The replacement preserved `/tmp/tvr-demo/config`, used the same port and runtime
+settings, and passed Docker health plus `GET /health` (`{"ok": true}`). The previous
+image remains tagged `tv-retention:rollback`, with config archive
+`/tmp/tvr-demo/rollback-build20-config-20260918T071921Z.tar.gz` and SHA-256
+`4a67c5c993e8d87f6089efc2d9634ccab36b46c3da50cd14c1044d0e90dffe10`.
+
+The incomplete `run-intent.json` from the failed old image was preserved unchanged;
+its nine operations remain held for explicit recovery review. The new worker did not
+replay them at startup, and Test Mode remains enabled. No new Sonarr mutation was
+performed during deployment.
+
 ## Latest implementation — 2026-09-18 (sync owned-field merge)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **684 Python tests in 9.698s**,
