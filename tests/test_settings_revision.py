@@ -3,11 +3,12 @@ import copy
 import json
 import threading
 import unittest
+from unittest.mock import patch
 
 import context  # noqa: F401
 import actions
 from core import Rejected
-from fake_sonarr import IsolatedWorker
+from fake_sonarr import IsolatedWorker, SERIES
 
 
 class SettingsRevision(unittest.TestCase):
@@ -62,3 +63,24 @@ class SettingsRevision(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertEqual(len(errors), 1)
             self.assertIn(fixture.store.load_settings()['rules'][0]['keep_days'], (60, 90))
+
+    def test_background_binding_merges_rule_fields_into_newer_settings(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            settings['rules'][0]['queue'] = {}
+            fixture.store.save_settings(settings)
+            fixture.sonarr.expect('GET', 'series', [SERIES])
+            original_match = fixture.main.match_rule
+
+            def match_and_edit(rule, series):
+                current = fixture.store.load_settings()
+                current['rules'][0]['keep_days'] = 90
+                fixture.store.save_settings(current)
+                return original_match(rule, series)
+
+            with patch.object(fixture.main, 'match_rule', side_effect=match_and_edit):
+                fixture.main.bind_rules(settings, force=True)
+            actual = fixture.store.load_settings()
+            self.assertEqual(actual['rules'][0]['keep_days'], 90)
+            self.assertEqual(actual['rules'][0]['match_status'], 'matched')
+            fixture.sonarr.assert_finished()

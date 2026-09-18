@@ -1,5 +1,21 @@
 # Validation record
 
+## Latest implementation — 2026-09-18 (owned-field background merge)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **683 Python tests in 9.762s**,
+**29 frontend tests**, all passing. Worker imports and shipped Python/JavaScript syntax
+checks passed. No deployment, live Sonarr call or media access occurred.
+
+`bind_rules()` now reloads the latest settings after its Sonarr read and merges only
+backend-owned binding fields by rule ID before saving. The fail-first regression reproduced
+the stale snapshot overwriting a newer user `keep_days` value (`90` became `30`); it passes
+with the merge, preserving the user edit while updating match metadata. The broader
+settings/freshness/recovery/retry slice passed **94 tests**.
+
+This closes the bounded background-binding overwrite path. Other internal settings writers,
+health/cache ownership, commit-time version rechecks and full transaction lock ordering
+remain open in Phase 2.
+
 ## Latest implementation — 2026-09-18 (bounded settings transaction)
 
 The full host gate passed **682 Python tests in 8.727s** and **29 frontend tests**, with

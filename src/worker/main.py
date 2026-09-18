@@ -189,6 +189,10 @@ def bind_rules(settings: dict, force: bool = False) -> list:
     forced, because it is the most expensive call Sonarr offers.
     """
     report = []
+    original_rules = {rule['id']: json.loads(json.dumps(rule))
+                      for rule in settings.get('rules') or []}
+    binding_fields = ('series_id', 'series_title', 'tvdb_id', 'slug', 'path',
+                      'match_status', 'match_error', 'matched_at')
     catalogues = {}
     for rule in settings.get('rules', []):
         try:
@@ -218,6 +222,16 @@ def bind_rules(settings: dict, force: bool = False) -> list:
         else:
             rule.update({'match_status': 'unmatched', 'match_error': outcome['error']})
             report.append({'rule_id': rule['id'], 'ok': False, 'error': outcome['error']})
+    latest = load_settings()
+    latest_rules = {rule['id']: rule for rule in latest.get('rules') or []}
+    for rule in settings.get('rules') or []:
+        target = latest_rules.get(rule['id'])
+        if not target:
+            continue
+        for field in binding_fields:
+            target[field] = rule.get(field, original_rules[rule['id']].get(field))
+    settings.clear()
+    settings.update(latest)
     save_settings(settings)
     return report
 
