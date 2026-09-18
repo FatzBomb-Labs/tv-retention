@@ -163,10 +163,23 @@ function createActivity({ api, refresh, getSnapshot, getSettings }) {
         + (result.dry_run ? ' Nothing was changed.'
            : ` ${bytes(result.freed_bytes)} reclaimed.` + (removed ? ` ${plural(removed, 'series')} removed.` : '')) }));
       (result.removals || []).forEach((record) => {
-        body.append(el('div', { className: 'tvr-change-series' }, [
+        const card = el('div', { className: 'tvr-change-series' }, [
           el('strong', { textContent: record.series_title }),
           el('div', { className: 'tvr-plan delete', textContent: record.label }),
-        ]));
+        ]);
+        if (!record.ok && record.request_id && record.action) {
+          const resolve = el('button', { type: 'button', className: 'tvr-secondary',
+                                         textContent: 'Cancel queued removal' });
+          resolve.addEventListener('click', () => guarded('', async () => {
+            if (!window.confirm('Cancel this queued removal? No Sonarr action will be retried.')) return;
+            await api('resolve-removal', { rule_id: record.rule_id,
+              request_id: record.request_id, removal_action: record.action }, 'Resolving removal…');
+            await refresh();
+            notice('Queued removal canceled. The uncertain Sonarr result remains in history.', 'ok');
+          }));
+          card.append(resolve);
+        }
+        body.append(card);
       });
       result.rules.forEach((rule) => {
         if (!rule.deleted.length && !(rule.monitor_list || []).length

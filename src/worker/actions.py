@@ -910,6 +910,16 @@ def action_preview(settings, request):
     return {'result': main.run(preview=True, rule_ids=ids)}
 
 
+def action_resolve_removal(settings, request):
+    """Close a held removal explicitly, without authorizing another Sonarr request."""
+    rule_id = str(request.get('rule_id') or '')
+    request_id = str(request.get('request_id') or '')
+    removal_action = str(request.get('removal_action') or '')
+    if not rule_id or not request_id or not removal_action:
+        raise Rejected('A rule, request and removal action are required.')
+    return main.resolve_removal(settings, rule_id, request_id, removal_action)
+
+
 def action_run(settings, request):
     with main.run_lock():
         return {'result': main.run(preview=False, rule_ids=request.get('rule_ids') or None)}
@@ -957,6 +967,7 @@ ACTIONS = {
     'series': action_series,
     'match': action_match,
     'preview': action_preview,
+    'resolve-removal': action_resolve_removal,
     'run': action_run,
     'test-tmdb': action_test_tmdb,
     'test-connection': action_test_connection,

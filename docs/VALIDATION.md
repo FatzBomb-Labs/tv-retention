@@ -1,6 +1,25 @@
 # Validation record
 
-## Latest implementation — 2026-09-17 (explicit removal target authorization)
+## Latest implementation — 2026-09-17 (operator resolution)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **677 Python tests in 9.483s**,
+**29 frontend tests**, all passing. Worker imports and shipped Python/JavaScript syntax
+checks passed. No deployment, live Sonarr call or media access occurred.
+
+Held queued removals now have a cancel-only operator action. `resolve-removal` requires
+the current rule ID, request ID and action; it clears only a matching current queue, marks
+unresolved ledger/intent operations as `resolved` with an explicit uncertainty note, and
+never sends a Sonarr request. A stale request cannot cancel a requeued removal. Review
+state is persisted before queue removal, and a local settings-save failure leaves the
+queue available for retry. The focused regression passed **3 tests in 0.007s**.
+
+The report exposes this action for failed removal records and states that no Sonarr retry
+will occur. `resolved` is terminal for recovery but remains distinct from successful
+`done` work. This closes the operator-resolution item in Phase 1; atomic mode/dispatch,
+cross-document saves, full ledger lifecycle and authoritative file membership remain open
+for later durability work.
+
+## Previous implementation — 2026-09-17 (explicit removal target authorization)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **665 Python tests in
 6.525s**, **29 frontend tests** (390.432708 ms), all passing. Worker imports and shipped

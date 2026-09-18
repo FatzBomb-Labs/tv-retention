@@ -32,14 +32,12 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered change (uncommitted):** server-owned explicit removal target snapshots
-and shared current-target verification before staging, reconciliation and dispatch. Legacy
-external requests without evidence stay held; bare 404 cannot complete uncertain deletion.
-The final gate passed **665 Python and 29 frontend tests**. Initial authorization regressions
-were observed failing before the fix; expanded record-only, legacy-operation, fresh-client
-and finalization coverage was added afterward. Prior uncommitted request-time Test Mode
-work is retained. Atomic transitions, transactions and safe restore remain open; see
-VALIDATION for exact evidence and limits.
+**Latest delivered change:** operator resolution for held removals (`resolve-removal`) now
+cancels only the matching current queue, records the reviewed uncertainty and prevents a
+retry or false success. The final gate passed **677 Python and 29 frontend tests**. Earlier
+target-authorization, Test Mode and interruption work is committed in `67c7d03`; this
+resolution checkpoint is the next small increment. Atomic transitions, transactions,
+authoritative file membership and safe restore remain open; see VALIDATION.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
@@ -86,11 +84,12 @@ Remaining phase status:
 - **Phase 1 — partial, with substantial executor/retry work delivered:** dispatch,
   incomplete-result reporting, fresh ordinary replanning, separate scoped removal ownership,
   request-aware finalization and guarded record-only retry are verified in bounded fixtures.
-  Latest additions cover simple shared-file protection and frontend exclusion/queue
-  preservation, the request-time Test Mode boundary and explicit removal target authorization.
-  Remaining blockers include cross-tab settings conflicts, atomic mode transitions,
-  operation-backed recovery resolution, authoritative file readings and interruption evidence.
-  Concurrency/durability also needs Phase 2.
+      Latest additions cover simple shared-file protection and frontend exclusion/queue
+      preservation, the request-time Test Mode boundary, explicit removal target authorization,
+      subprocess interruption evidence and cancel-only operator resolution for held work.
+      Remaining blockers include cross-tab settings conflicts, atomic mode transitions,
+      authoritative file readings and full ledger durability. Concurrency/durability also needs
+      Phase 2.
 - **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
   interface correctness, container/HTTP operation and release acceptance gates remain.
 
@@ -212,10 +211,11 @@ new operation is checkpointed before dispatch. Legacy records without target evi
 held. Another rule's uncertain target ownership blocks restaging in either batch order.
 Canceled/deleted record-only requests retire without claiming success and release their
 hold; the original error is reported on retirement and the original intent remains archived.
-Operation-backed canceled/replaced requests remain historical holds, with no resolution
-workflow yet. Ledger lifecycle/compaction, full shape validation, process-crash
-coverage, authoritative file membership and transaction safety remain open. Finalization is
-request-aware but not transactional: a save racing the run can still be overwritten.
+Operation-backed canceled/replaced requests can now be explicitly canceled after review;
+the resolution is recorded as uncertain and never claims Sonarr success. Ledger
+lifecycle/compaction, full shape validation, authoritative file membership and transaction
+safety remain open. Finalization is request-aware but not transactional: a save racing the
+run can still be overwritten.
 Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
 
 - [ ] Restrict execution to currently eligible operations. Separate mixed-run removal
@@ -229,10 +229,11 @@ Archive lifecycle, crash-history finalization and durability remain Phase 2 work
       propagation is covered, but process crashes and multi-operation durability remain open.
 - [ ] Report actual rather than planned byte totals, including partial success and retry,
       without counting failed, unattempted or already-completed work as newly reclaimed space.
-- [ ] Provide explicit operator resolution for unprovable operation-backed removal
+- [x] Provide explicit operator resolution for unprovable operation-backed removal
       permission, including uncertain series deletion whose fresh lookup returns 404.
-      Preserve original decisions/checkpoints for audit; do not turn a review action into
-      authorization for a replacement target. Ordinary retention continues to re-plan.
+      The cancel-only action preserves original decisions/checkpoints for audit, clears
+      only the matching current queue and never authorizes a replacement target. Ordinary
+      retention continues to re-plan.
 - [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
       including malformed individual rows and changed file membership. Fresh series identity
       and conservative refusal of proxy-style 404 do not establish file-level authority.

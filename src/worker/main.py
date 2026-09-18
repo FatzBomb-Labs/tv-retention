@@ -608,6 +608,13 @@ def _run_error(rule: dict, error: Exception) -> dict:
             'freed_bytes': 0, 'unmonitored': 0, 'preset': '', 'note': ''}
 
 
+TERMINAL_OPERATION_STATUSES = {'done', 'resolved'}
+
+
+def operation_terminal(operation: dict) -> bool:
+    return operation.get('status') in TERMINAL_OPERATION_STATUSES
+
+
 def _operation(kind: str, rule: dict, **detail) -> dict:
     if detail.get('removal_action'):
         queued = ((rule.get('queue') or {}).get('removal') or {})
@@ -616,6 +623,67 @@ def _operation(kind: str, rule: dict, **detail) -> dict:
     return dict({'id': new_id(), 'kind': kind, 'rule_id': rule['id'],
                  'instance_id': rule['instance_id'], 'series_id': rule['series_id'],
                  'status': 'pending', 'attempts': 0, 'error': ''}, **detail)
+
+
+def resolve_removal(settings: dict, rule_id: str, request_id: str, removal_action: str) -> dict:
+    """Cancel a reviewed removal without retrying or claiming Sonarr success."""
+    current = load_settings()
+    rule = next((row for row in current.get('rules') or [] if row.get('id') == rule_id), None)
+    queued = ((rule or {}).get('queue') or {}).get('removal') or {}
+    if not rule or queued.get('request_id') != request_id or queued.get('action') != removal_action:
+        raise Rejected('That removal request changed or was canceled; reload before resolving it.')
+
+    intent = load_intent(current)
+    ledger = load_removal_ledger(current)
+    operation_refs = []
+    record_refs = []
+    for operation in (intent or {}).get('operations') or []:
+        if (operation.get('rule_id') == rule_id
+                and operation.get('request_id') == request_id
+                and operation.get('removal_action') == removal_action):
+            operation_refs.append(operation)
+    for key in ('removals', 'recovery_removals'):
+        for record in (intent or {}).get(key) or []:
+            if (record.get('rule_id') == rule_id
+                    and record.get('request_id') == request_id
+                    and record.get('action') == removal_action):
+                record_refs.append(record)
+    for batch in ledger.get('batches') or []:
+        for operation in batch.get('operations') or []:
+            if (operation.get('rule_id') == rule_id
+                    and operation.get('request_id') == request_id
+                    and operation.get('removal_action') == removal_action):
+                operation_refs.append(operation)
+        for record in batch.get('removals') or []:
+            if (record.get('rule_id') == rule_id
+                    and record.get('request_id') == request_id
+                    and record.get('action') == removal_action):
+                record_refs.append(record)
+
+    unresolved = [operation for operation in operation_refs if not operation_terminal(operation)]
+    already_resolved = [operation for operation in operation_refs
+                        if operation.get('status') == 'resolved']
+    unresolved_records = [record for record in record_refs
+                          if not record.get('resolved') and not record.get('retired_without_operation')]
+    already_resolved_records = [record for record in record_refs if record.get('resolved')]
+    if not unresolved and not unresolved_records and not already_resolved and not already_resolved_records:
+        raise Rejected('That removal is not awaiting operator review.')
+
+    note = 'Canceled by operator after review; no Sonarr result was claimed.'
+    stamp = now_iso()
+    for operation in unresolved:
+        operation.update(status='resolved', resolved_at=stamp, resolution='operator-canceled',
+                         error=((operation.get('error') or '') + '; ' + note).strip('; '))
+    for record in unresolved_records:
+        record.update(ok=False, resolved=True, resolved_at=stamp, resolution='operator-canceled',
+                      error=((record.get('error') or '') + '; ' + note).strip('; '))
+    if intent and (operation_refs or record_refs):
+        save_intent(current, intent)
+    if ledger.get('batches') and (operation_refs or record_refs):
+        save_removal_ledger(current, ledger)
+    rule['queue'] = dict(rule.get('queue') or {}, removal=None)
+    save_settings(current)
+    return {'resolved': True, 'message': note}
 
 
 def _removal_stage(settings: dict, rules: list, tmdb, enrich: bool = True) -> tuple[list, list]:
@@ -777,12 +845,12 @@ def _resume_intent(settings: dict, intent: dict, checkpoint=None) -> None:
     # A saved removal is not permission to resurrect an operator's canceled queue.
     # Check the whole unfinished removal set before reconciliation changes the ledger.
     for operation in intent.get('operations') or []:
-        if operation.get('status') == 'done' or not operation.get('removal_action'):
+        if operation_terminal(operation) or not operation.get('removal_action'):
             continue
         _validate_removal_request(load_settings(), operation)
     fresh = {}
     for operation in intent.get('operations') or []:
-        if operation.get('status') == 'done' or operation.get('kind') == 'remove-rule':
+        if operation_terminal(operation) or operation.get('kind') == 'remove-rule':
             continue
         client = (_verify_removal_target(operation) if operation.get('removal_action')
                   else client_for(settings, operation['instance_id']))
@@ -794,7 +862,7 @@ def _resume_intent(settings: dict, intent: dict, checkpoint=None) -> None:
         # Uncertain reads must abort recovery, not fall through to replaying writes.
         fresh[key] = client.episodes(key[1], files_only=False)
     for operation in intent.get('operations') or []:
-        if operation.get('status') == 'done':
+        if operation_terminal(operation):
             continue
         rows = fresh.get((operation['instance_id'], operation['series_id']))
         if rows is None:
@@ -824,7 +892,7 @@ def _intent_summary(intent: dict, preview: bool, test_mode: bool, scheduled: boo
     dry_run = preview or test_mode
     for operation in intent.get('operations') or []:
         # Pending is expected in a preview, but never counts as applied work in a run.
-        unfinished = not dry_run and operation.get('status') != 'done'
+        unfinished = not dry_run and not operation_terminal(operation)
         error = (operation.get('error') or 'A staged operation was not completed') if unfinished else ''
         if operation.get('removal_action') and unfinished:
             for record in removals:
@@ -925,7 +993,7 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
     target_owners = {}
     for batch in ledger['batches']:
         for op in batch['operations']:
-            if op.get('status') != 'done':
+            if not operation_terminal(op):
                 target = (op.get('instance_id'), op.get('series_id'))
                 target_owners.setdefault(target, set()).add(op.get('rule_id'))
     records, held, targets = [], set(), set()
@@ -943,14 +1011,14 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
             rule_id = record.get('rule_id')
             matching = [op for op in operations if op.get('rule_id') == rule_id
                         and op.get('removal_action') == record.get('action')]
-            if not matching and record.get('retired_without_operation'):
+            if not matching and (record.get('retired_without_operation') or record.get('resolved')):
                 continue
             # An acknowledged request still present needs cleanup, not restaging.
             queued = next((r for r in settings.get('rules') or [] if r['id'] == rule_id), {})
             request_id = ((queued.get('queue') or {}).get('removal') or {}).get('request_id')
             pending_cleanup = any(op.get('request_id') == request_id and request_id
                                   for op in matching)
-            if matching and all(op.get('status') == 'done' for op in matching) and not pending_cleanup:
+            if matching and all(operation_terminal(op) for op in matching) and not pending_cleanup:
                 continue
             held.add(rule_id)
             targets.update((op.get('instance_id'), op.get('series_id')) for op in matching)
@@ -1023,9 +1091,9 @@ def _separate_removal_recovery(settings: dict, stored: dict, ledger: dict,
                 report.update(ok=False, error=str(error))
             else:
                 for op in matching:
-                    if op.get('status') != 'done':
+                    if not operation_terminal(op):
                         _execute_operation(settings, view, op, checkpoint=checkpoint)
-                        if op.get('status') != 'done':
+                        if not operation_terminal(op):
                             break
                 _finish_removals(settings, view)
                 done = all(op.get('status') == 'done' for op in matching)
@@ -1072,8 +1140,10 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
                           if op.get('removal_action')]
     completed_removals = {(op.get('rule_id'), op['removal_action'])
                           for op in removal_operations if op.get('status') == 'done'}
-    unresolved_removals = any(op.get('status') != 'done' for op in removal_operations) or any(
-        not record.get('ok') or (record.get('rule_id'), record.get('action')) not in completed_removals
+    unresolved_removals = any(not operation_terminal(op) for op in removal_operations) or any(
+        (not record.get('ok') and not record.get('resolved'))
+        or ((record.get('rule_id'), record.get('action')) not in completed_removals
+            and not record.get('resolved'))
         for record in (stored or {}).get('removals') or [])
     # An acknowledged operation whose queue is still present needs local finalization,
     # not a freshly staged copy of the same external action (e.g. crash before cleanup).
@@ -1116,10 +1186,10 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         intent = _stage_intent(settings, selected, queued, tmdb)
         save_intent(settings, intent)
     for operation in intent.get('operations') or []:
-        if operation.get('status') in ('done',):
+        if operation_terminal(operation):
             continue
         _execute_operation(settings, intent, operation)
-        if operation.get('status') != 'done':
+        if not operation_terminal(operation):
             # Conservative until explicit dependencies land: a failed unmonitor must
             # never be followed by a deletion, including after an uncertain response.
             break
