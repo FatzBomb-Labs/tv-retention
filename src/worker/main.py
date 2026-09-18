@@ -595,7 +595,10 @@ def process_rule(settings: dict, rule: dict, tmdb, dry_run: bool, remember: bool
                for row in members):
             continue
         deleted_files.add(file_id)
-        outcome['deleted'].append(planned_deletion(episode))
+        planned = planned_deletion(episode)
+        planned['file_episode_ids'] = [row.get('episode_id') for row in members
+                           if row.get('episode_id')]
+        outcome['deleted'].append(planned)
         outcome['freed_bytes'] += int(episode.get('size') or 0)
 
     return outcome
@@ -752,7 +755,8 @@ def _stage_intent(settings: dict, selected: list, queued_rules: list, tmdb,
                                          outcome='unmonitor'))
         for index, episode in enumerate(result.get('deleted') or []):
             operations.append(_operation('delete-episode-file', rule, file_id=episode.get('file_id'),
-                                         episode_id=episode.get('episode_id'), outcome_index=index))
+                                         episode_id=episode.get('episode_id'), outcome_index=index,
+                                         file_episode_ids=episode.get('file_episode_ids') or []))
     return {'version': 1, 'id': new_id(), 'status': 'staged', 'started': now_iso(),
             'rules': results, 'removals': removals, 'operations': operations}
 
@@ -870,7 +874,14 @@ def _resume_intent(settings: dict, intent: dict, checkpoint=None) -> None:
         by_id = {row.get('episode_id'): row for row in rows}
         if operation['kind'] == 'delete-episode-file':
             row = by_id.get(operation.get('episode_id'))
-            if not row or not row.get('has_file') or row.get('file_id') != operation.get('file_id'):
+            if not row or row.get('file_id') != operation.get('file_id'):
+                raise Rejected('Original episode file membership cannot be verified; recovery requires review.')
+            original_members = operation.get('file_episode_ids')
+            current_members = sorted(row_id for row_id, current in by_id.items()
+                                     if current.get('file_id') == operation.get('file_id'))
+            if not original_members or sorted(original_members) != current_members:
+                raise Rejected('Original episode file membership changed; recovery requires review.')
+            if not row.get('has_file'):
                 operation.update(status='done', error='', recovered_at=now_iso())
         elif operation['kind'] == 'set-monitored':
             wanted = bool(operation.get('monitored'))

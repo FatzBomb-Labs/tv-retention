@@ -1,5 +1,23 @@
 # Validation record
 
+## Latest implementation — 2026-09-18 (Phase 1 safety checkpoint)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **678 Python tests in 9.538s**,
+**29 frontend tests**, all passing. Worker imports and shipped Python/JavaScript syntax
+checks passed. No deployment, live Sonarr call or media access occurred.
+
+Ordinary file-delete operations now retain the complete set of episode IDs sharing their
+Sonarr file ID. Recovery requires the original episode row, exact file ID and unchanged
+membership before it can reconcile a lost acknowledgement. Missing, replaced or changed
+membership remains review-required and sends no follow-up mutation. The focused recovery,
+restart and retry slice passed **16 tests in 2.940s**; the new membership regression was
+observed failing before the guard (`Rejected not raised`) and passing after it.
+
+This closes the bounded Phase 1 file-authority item. Together with the preceding Test Mode,
+target-authorization, interruption and operator-resolution checkpoints, the Phase 1 P0
+safety work is complete. Multi-process transaction ordering, atomic Test Mode transition,
+ledger lifecycle/compaction and safe restore remain open in Phases 2 and 3.
+
 ## Latest implementation — 2026-09-17 (operator resolution)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **677 Python tests in 9.483s**,
@@ -13,11 +31,11 @@ never sends a Sonarr request. A stale request cannot cancel a requeued removal. 
 state is persisted before queue removal, and a local settings-save failure leaves the
 queue available for retry. The focused regression passed **3 tests in 0.007s**.
 
-The report exposes this action for failed removal records and states that no Sonarr retry
-will occur. `resolved` is terminal for recovery but remains distinct from successful
+The report exposes this action only for unresolved operation-backed removal records and
+states that no Sonarr retry will occur. Retired record-only failures do not offer a stale
+resolution button. `resolved` is terminal for recovery but remains distinct from successful
 `done` work. This closes the operator-resolution item in Phase 1; atomic mode/dispatch,
-cross-document saves, full ledger lifecycle and authoritative file membership remain open
-for later durability work.
+cross-document saves and full ledger lifecycle remain open for later durability work.
 
 ## Previous implementation — 2026-09-17 (explicit removal target authorization)
 

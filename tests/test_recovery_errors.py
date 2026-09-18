@@ -112,6 +112,27 @@ class RecoveryErrors(unittest.TestCase):
                 self.assertEqual(ledger['batches'][0]['operations'], before['operations'])
                 self.assertEqual(len(fixture.store.load_settings()['rules']), 1)
 
+    def test_file_delete_recovery_requires_the_original_episode_file_membership(self):
+        original = [episode_payload(), episode_payload(102, number=2)]
+        for response in ([], [episode_payload(), episode_payload(102, number=2, file_id=100)],
+                         [episode_payload()]):
+            with self.subTest(response=response), IsolatedWorker() as fixture:
+                settings = fixture.settings(test_mode=False, removal=None)
+                operation = {'kind': 'delete-episode-file', 'instance_id': 'fake',
+                             'series_id': 1, 'episode_id': 101, 'file_id': 99,
+                             'status': 'in-progress', 'attempts': 1, 'error': '',
+                             'file_episode_ids': [row['id'] for row in original]}
+                intent = {'id': 'file-membership', 'status': 'incomplete',
+                          'operations': [operation]}
+                fixture.store.save_intent(settings, intent)
+                fixture.sonarr.expect('GET', 'episode', response, query={
+                    'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+                with self.assertRaisesRegex(Rejected, 'file membership|replaced'):
+                    fixture.main._resume_intent(settings, intent)
+                self.assertEqual(operation['status'], 'in-progress')
+                self.assertEqual(fixture.sonarr.mutations, [])
+                fixture.sonarr.assert_finished()
+
 
 if __name__ == '__main__':
     unittest.main()

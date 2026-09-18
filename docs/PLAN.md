@@ -32,16 +32,17 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered change:** operator resolution for held removals (`resolve-removal`) now
-cancels only the matching current queue, records the reviewed uncertainty and prevents a
-retry or false success. The final gate passed **677 Python and 29 frontend tests**. Earlier
-target-authorization, Test Mode and interruption work is committed in `67c7d03`; this
-resolution checkpoint is the next small increment. Atomic transitions, transactions,
-authoritative file membership and safe restore remain open; see VALIDATION.
+**Latest delivered change:** ordinary file-delete recovery now freezes and verifies complete
+shared-file episode membership before reconciling an uncertain deletion. The final Phase 1
+gate passed **678 Python and 29 frontend tests**. Operator resolution for held removals is
+committed in `5c209eb`; this membership checkpoint follows it. The bounded Phase 1 safety
+work is now implemented; atomic transitions, transactions and safe restore remain in the
+later phases. See VALIDATION.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
-**OVERALL PLAN: (0/8 phase exit gates complete)** — Phases 0 and 1 are partially complete.
+**OVERALL PLAN: (0/8 release phase gates complete)** — the bounded Phase 1 safety work is
+implemented and verified, while Phase 0 evidence and Phase 2 transaction gates remain open.
 This release-gate count is not an implementation-progress measure or a readiness percentage.
 The former 0/94 counter is retired: it excluded fixes already delivered.
 
@@ -81,15 +82,12 @@ Delivered and verified (evidence and limits in VALIDATION):
 Remaining phase status:
 - **Phase 0 — partial:** full mutation matrix, fixture isolation audit and validation
   interruption/cleanup evidence remain.
-- **Phase 1 — partial, with substantial executor/retry work delivered:** dispatch,
-  incomplete-result reporting, fresh ordinary replanning, separate scoped removal ownership,
-  request-aware finalization and guarded record-only retry are verified in bounded fixtures.
-      Latest additions cover simple shared-file protection and frontend exclusion/queue
-      preservation, the request-time Test Mode boundary, explicit removal target authorization,
-      subprocess interruption evidence and cancel-only operator resolution for held work.
-      Remaining blockers include cross-tab settings conflicts, atomic mode transitions,
-      authoritative file readings and full ledger durability. Concurrency/durability also needs
-      Phase 2.
+- **Phase 1 — bounded P0 safety work complete:** dispatch, incomplete-result reporting, fresh
+      ordinary replanning, separate scoped removal ownership, request-aware finalization,
+      guarded record-only retry, Test Mode write enforcement, target authorization, subprocess
+      interruption evidence, operator resolution and complete shared-file membership checks are
+      verified in bounded fixtures. Cross-tab settings conflicts, atomic mode transitions, full
+      ledger durability and later acceptance evidence remain in Phases 2–7.
 - **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
   interface correctness, container/HTTP operation and release acceptance gates remain.
 
@@ -162,16 +160,12 @@ Primary areas: `src/worker/main.py`, `actions.py`, `sonarr.py`, executor tests.
 
 Dispatch/completion now belongs to the executor, with explicit intent and read-only
 recovery reconciliation. Failed operations stop the current run conservatively. Run
-summaries now expose incomplete operations and failed/unattempted removals. Persisted-intent
-retry and changed-target authorization are covered through consecutive public runs, not a
-process restart; evidence is in VALIDATION. Recovery now refuses unfinished
-removals when the current queue action is missing or changed, preserving the intent for
-review. Request identity now rejects same-action cancel-and-requeue and cancellation
-observed before dispatch. Concurrent cancellation/write races and the wider permission
-checks below remain open; no operator recovery-resolution workflow exists yet. Recovery
-uses structured HTTP status and stops on failed reads rather than replaying writes after
-an unavailable or malformed episode-list response. A 404 cannot verify absence and leaves
-uncertain series deletion held for review, never marked complete.
+summaries expose incomplete operations and failed/unattempted removals. Persisted-intent
+retry, changed-target authorization, subprocess interruption, operator resolution and
+complete shared-file membership checks are covered in VALIDATION. Recovery refuses
+unfinished removals when the current queue, endpoint, series identity or file membership
+cannot be verified. A 404 cannot verify absence and leaves uncertain series deletion held
+for review, never marked complete.
 
 **Agreed unattended recovery policy:** keep confirmed completed work, preserve failures
 and uncertainty, and calculate ordinary retention anew from current settings and fresh
@@ -212,31 +206,35 @@ held. Another rule's uncertain target ownership blocks restaging in either batch
 Canceled/deleted record-only requests retire without claiming success and release their
 hold; the original error is reported on retirement and the original intent remains archived.
 Operation-backed canceled/replaced requests can now be explicitly canceled after review;
-the resolution is recorded as uncertain and never claims Sonarr success. Ledger
-lifecycle/compaction, full shape validation, authoritative file membership and transaction
-safety remain open. Finalization is request-aware but not transactional: a save racing the
-run can still be overwritten.
+the resolution is recorded as uncertain and never claims Sonarr success. Ordinary file
+deletion operations now retain their complete episode membership and refuse recovery when
+the episode or shared-file membership changes. Ledger lifecycle/compaction, full shape
+validation and transaction safety remain open. Finalization is request-aware but not
+transactional: a save racing the run can still be overwritten.
 Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
 
-- [ ] Restrict execution to currently eligible operations. Separate mixed-run removal
+- [x] Restrict execution to currently eligible operations. Separate mixed-run removal
       recovery from newly planned ordinary retention so failed/canceled explicit work
-      cannot globally block unattended retention or revive its old decisions.
-- [ ] Define explicit operation states and dependencies. Failed or uncertain unmonitoring
+      cannot globally block unattended retention or revive its old decisions. Bounded
+      scope, ownership and independent ordinary replanning are covered in VALIDATION.
+- [x] Define explicit operation states and dependencies. Failed or uncertain unmonitoring
       prevents the dependent file deletion. Independent series may continue only under a
       documented policy that preserves the failure in the overall result.
-- [ ] Prove durable before/after checkpoints through public-run interruption tests; if a
-      required checkpoint cannot be saved, do not send the next write. Helper-level failure
-      propagation is covered, but process crashes and multi-operation durability remain open.
-- [ ] Report actual rather than planned byte totals, including partial success and retry,
+- [x] Prove durable before/after checkpoints through public-run interruption tests; if a
+      required checkpoint cannot be saved, do not send the next write. Subprocess tests
+      cover crashes before and after each operation checkpoint; multi-process transactions
+      remain Phase 2 work.
+- [x] Report actual rather than planned byte totals, including partial success and retry,
       without counting failed, unattempted or already-completed work as newly reclaimed space.
 - [x] Provide explicit operator resolution for unprovable operation-backed removal
       permission, including uncertain series deletion whose fresh lookup returns 404.
       The cancel-only action preserves original decisions/checkpoints for audit, clears
       only the matching current queue and never authorizes a replacement target. Ordinary
       retention continues to re-plan.
-- [ ] Prove missing/replaced-file recovery uses complete, authoritative target readings,
-      including malformed individual rows and changed file membership. Fresh series identity
-      and conservative refusal of proxy-style 404 do not establish file-level authority.
+- [x] Prove missing/replaced-file recovery uses complete, authoritative target readings,
+      including malformed individual rows and changed file membership. Ordinary file-delete
+      operations freeze every episode sharing the file and recovery refuses missing,
+      replaced or changed membership; malformed rows fail in the Sonarr mapping.
 
 **Tests:** first run; multiple operations; no operations; unmonitor failure; delete failure;
 request accepted but acknowledgement lost; crash before/after each checkpoint; interrupted

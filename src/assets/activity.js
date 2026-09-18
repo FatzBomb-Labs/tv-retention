@@ -167,7 +167,8 @@ function createActivity({ api, refresh, getSnapshot, getSettings }) {
           el('strong', { textContent: record.series_title }),
           el('div', { className: 'tvr-plan delete', textContent: record.label }),
         ]);
-        if (!record.ok && record.request_id && record.action) {
+        if (!record.ok && !record.resolved && !record.retired_without_operation
+          && record.request_id && record.action) {
           const resolve = el('button', { type: 'button', className: 'tvr-secondary',
                                          textContent: 'Cancel queued removal' });
           resolve.addEventListener('click', () => guarded('', async () => {
