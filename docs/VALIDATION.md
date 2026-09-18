@@ -1,5 +1,24 @@
 # Validation record
 
+## Latest implementation — 2026-09-18 (settings revisions)
+
+Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **681 Python tests in 9.017s**,
+**29 frontend tests**, all passing. Worker imports and shipped Python/JavaScript syntax
+checks passed. No deployment, live Sonarr call or media access occurred.
+
+Settings documents now carry `settings_revision`, defaulting to `0` for older documents.
+Whole-document settings saves must echo the current revision; a stale document is rejected
+before validation or mutation. Successful settings writes and internal settings writes
+advance the revision, and the frontend already resubmits the current document through its
+existing `Object.assign(settings(), ...)` collector. The focused revision/settings/queue/
+removal slice passed **69 tests**. The stale-save regression was observed failing before
+the guard because the older document could overwrite the newer keep window, then passed
+after the guard.
+
+This is conflict detection, not the complete Phase 2 transaction model: concurrent reads
+and writes are not yet serialized, background updates are not merged by owned fields, and
+an authorization check is not atomic with the final replace. Those remain open.
+
 ## Latest implementation — 2026-09-18 (atomic writes and validation boundary)
 
 Final `tools/check-on-host.ps1` gate on `fatzserver-host`: **679 Python tests in 9.018s**,

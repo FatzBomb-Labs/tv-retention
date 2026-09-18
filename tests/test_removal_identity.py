@@ -63,7 +63,7 @@ class RemovalIdentity(unittest.TestCase):
             canceled['rules'][0]['queue']['removal'] = None
             actions.action_settings(current, {'settings': canceled})
             current = f.store.load_settings()
-            with self.assertRaisesRegex(Rejected, 'removal.*changed|removal.*canceled'):
+            with self.assertRaisesRegex(Rejected, 'Settings changed elsewhere|removal.*changed|removal.*canceled'):
                 actions.action_settings(current, {'settings': stale})
             self.assertIsNone(f.store.load_settings()['rules'][0]['queue']['removal'])
             self.assertEqual(f.sonarr.mutations, [])
@@ -136,6 +136,7 @@ class RemovalIdentity(unittest.TestCase):
                 actual = f.store.load_settings()
                 if change == 'unrelated':
                     expected['rules'] = [r for r in expected['rules'] if r['id'] != 'r1']
+                expected['settings_revision'] = actual['settings_revision']
                 self.assertEqual(actual, expected)
                 self.assertEqual(len(f.sonarr.mutations), 1)
                 f.sonarr.assert_finished()

@@ -35,6 +35,7 @@ COMBINE_MODES = ['any', 'all']
 
 DEFAULTS = {
     'settings_version': SETTINGS_VERSION,
+    'settings_revision': 0,
     'schedule': {'enabled': False,
                  # On by default, so enabling a schedule cannot delete anything until the
                  # operator has watched a run go through and switched this off.
@@ -971,6 +972,8 @@ def validate_settings(raw, previous=None) -> dict:
     state_path = validate_state_dir(raw.get('state_dir') or DEFAULTS['state_dir'])
     settings = {
         'settings_version': SETTINGS_VERSION,
+        'settings_revision': _whole(raw.get('settings_revision', 0), 'Settings revision', 0,
+                                    2 ** 63 - 1, allow_none=False),
         'schedule': dict(validate_schedule(schedule_raw, 'Schedule'),
                          test_mode=_flag(schedule_raw.get('test_mode', True))),
         'health': {

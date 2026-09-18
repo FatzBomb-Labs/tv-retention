@@ -32,11 +32,11 @@ need targeted validation. Test counts are evidence, not release criteria.
 
 ### Progress
 
-**Latest delivered change:** `atomic_json` now gives every write a unique temporary path,
-so concurrent writers cannot delete one another's staging file. The Phase 2 checkpoint
-passed **679 Python and 29 frontend tests**. The bounded Phase 1 safety work is committed
-in `0600f98`; atomic-write evidence is the first Phase 2 increment. Transactions, revisions
-and safe restore remain open. See VALIDATION.
+**Latest delivered change:** settings documents now carry a monotonic revision. Whole-document
+browser saves must echo the current revision and are rejected when stale, while internal
+settings writes advance the revision. The Phase 2 checkpoint passed **681 Python and 29
+frontend tests**. Atomic-write evidence is committed in `fc7dd6b`; transactions, owned-field
+merges and safe restore remain open. See VALIDATION.
 
 **Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
 of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
@@ -313,8 +313,10 @@ Primary areas: `core.atomic_json`, `store.py`, `actions.py`, `main.py`, frontend
 - [ ] Introduce short serialized read/validate/merge/write transactions. Define lock order
       and cover both HTTP/worker threads and supported CLI processes. Keep Sonarr reads
       outside transaction locks and re-check the state version before committing results.
-- [ ] Add a monotonic settings revision and reject stale whole-document submissions with a
+- [x] Add a monotonic settings revision and reject stale whole-document submissions with a
       useful conflict response. Preserve masked-secret behavior and migrated settings.
+      The revision check protects the whole-document settings action; serialized merge
+      transactions and background-owned-field reconciliation remain separate items below.
 - [ ] Merge background updates by owned fields/rule ID, preserving newer settings, other
       shows' results, acknowledgements and suppression state. Never let cache refresh
       overwrite user-owned fields.

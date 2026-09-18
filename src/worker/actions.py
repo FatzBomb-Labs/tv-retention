@@ -637,6 +637,9 @@ def stamp_reenable_watermarks(previous, updated) -> None:
 
 def action_settings(settings, request):
     draft = copy.deepcopy(request.get('settings') or {})
+    revision = draft.get('settings_revision')
+    if revision != settings.get('settings_revision', 0):
+        raise Rejected('Settings changed elsewhere; reload before saving.')
     current_rules = {rule['id']: rule for rule in settings.get('rules') or []}
     # Snapshot fields are server-owned, including on echoes and legacy queues.
     # Strip client values before validation so neither edits nor malformed snapshots

@@ -87,6 +87,7 @@ def save_settings(settings: dict) -> None:
     # write contract (Test Mode is a settings value, not an environment shortcut).
     if DEVELOPMENT:
         pass
+    settings['settings_revision'] = int(settings.get('settings_revision') or 0) + 1
     atomic_json(CONFIG, settings)
 
 
