@@ -247,7 +247,7 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
       }
       if (!window.confirm(warning)) return;
       const data = await api('run', {}, 'Running…');
-      await refresh();
+      await refresh(true);
       showResult(data.result, 'Run');
     }));
   }

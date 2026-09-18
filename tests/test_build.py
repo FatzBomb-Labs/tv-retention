@@ -193,8 +193,8 @@ class Interface(unittest.TestCase):
         sync = actions.split('def action_sync')[1].split('\ndef _sync_response')[0]
         self.assertIn('with main.run_lock()', sync)
         self.assertIn('main.PAGE_REFRESH_SECONDS', sync)
-        self.assertIn("api('sync', { reason: reason || 'opened' }, '', true)", self.js)
-        self.assertIn("checks.requestFreshness('opened')", self.js)
+        self.assertIn("api('sync', { reason: reason || 'opened', force: !!force }, '', true)", self.js)
+        self.assertIn("checks.requestFreshness(fresh ? 'manual' : 'opened', fresh)", self.js)
         self.assertIn("requestFreshness('visible')", self.js)
         self.assertIn('5 * 60 * 1000', self.js)
 

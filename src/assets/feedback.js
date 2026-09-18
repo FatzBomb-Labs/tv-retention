@@ -25,12 +25,14 @@ async function guarded(label, work) {
 function dialog(title, buildBody, onOk, okLabel) {
   const box = $('tvr-dialog');
   const body = $('tvr-dialog-body');
+  const cancel = box.querySelector('button[value="cancel"]');
   body.replaceChildren(el('h3', { textContent: title }));
   $('tvr-dialog-extra').replaceChildren();
   $('tvr-dialog-ok').disabled = false;
   const context = buildBody(body);
   $('tvr-dialog-ok').textContent = okLabel || 'Save';
   $('tvr-dialog-ok').hidden = !onOk;
+  if (cancel) cancel.textContent = onOk ? 'Cancel' : (okLabel || 'Cancel');
   const handler = async () => {
     box.removeEventListener('close', handler);
     if (box.returnValue !== 'ok' || !onOk) return;

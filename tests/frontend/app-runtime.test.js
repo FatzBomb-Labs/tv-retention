@@ -358,6 +358,50 @@ test('the cached snapshot renders before a quiet page-open freshness request', a
   assert.equal(page.$('tvr-busy').hidden, true, 'background freshness never raises the overlay');
 });
 
+test('page-open freshness shows a non-blocking Sonarr sync banner', async () => {
+  let releaseSync;
+  let initial;
+  const page = await loadPage(() => ({
+    snapshot: initial = snapshotFixture(),
+    sync: () => new Promise((resolve) => { releaseSync = resolve; }),
+  }));
+  await page.flush();
+  const banner = page.$('tvr-checking');
+  assert.equal(banner.hidden, false);
+  assert.ok(collectText(banner).includes('Syncing with Sonarr'));
+  assert.equal(page.$('tvr-busy').hidden, true, 'background freshness remains non-blocking');
+
+  releaseSync({
+    busy: false,
+    report: null,
+    settings: initial.settings,
+    health: initial.health,
+    alerts: [],
+    suppressed_alerts: [],
+    plan: { actionable: 0, trustworthy: true },
+    sync: { synced_at: new Date().toISOString() },
+    sync_due: false,
+  });
+  await page.flush();
+  assert.equal(banner.hidden, true);
+});
+
+test('a read-only run report labels its dismiss button Close', async () => {
+  const page = await loadPage(() => ({
+    snapshot: snapshotFixture({ plan: { actionable: 1, trustworthy: true } }),
+    confirm: () => true,
+    run: () => ({ result: { dry_run: true, planned: 1, deleted: 0, rules: [{
+      series_title: 'Show One', deleted: [], monitor_list: [], unmonitor_list: [], error: '',
+      freed_bytes: 0,
+    }], duration_seconds: 0, freed_bytes: 0, removals: [] } }),
+  }));
+  await page.flush();
+  page.click('tvr-run');
+  await page.flush();
+  const cancel = page.$('tvr-dialog').querySelector('button[value="cancel"]');
+  assert.equal(cancel.textContent, 'Close');
+});
+
 test('sweep polling continues while the sweep runs and stops when it finishes', async () => {
   let running = true;
   const page = await loadPage(() => ({
@@ -421,6 +465,7 @@ test('an actionable Run states the actual plan, and accepting it sends exactly o
   assert.ok(!/will \d+ (series|episodes?) will/.test(text), 'no double verb from two description systems meeting');
 
   assert.equal(page.actions('run'), 1, 'accepting sends exactly one run request');
+  assert.equal(page.sent('sync').at(-1).force, true, 'a completed run forces a fresh Sonarr sync');
   assert.equal(page.actions('stats'), 0);
   assert.equal(page.notice().text, '');
   assert.equal(page.$('tvr-busy').hidden, true, 'the busy overlay settled');

@@ -106,7 +106,7 @@ function start(root) {
     getSnapshot: () => snapshot,
     getMonitoring: () => monitoring,
     getLibrary: () => libraryView.getLibrary(),
-    applySaved,
+    applySaved: (data) => applySaved({ settings: data }),
     saveSettings,
     applyAlerts,
     conditionFields: (rule) => conditionFields(rule),
@@ -192,7 +192,7 @@ function start(root) {
     if (data.status) snapshot.status = data.status;
   }
 
-  async function refresh() {
+  async function refresh(fresh) {
     snapshot = await api('snapshot', {}, 'Loading…');
     settings = snapshot.settings;
     applyHealth(snapshot.health);
@@ -202,7 +202,7 @@ function start(root) {
     const progress = snapshot.progress || {};
     if (progress.running) startPolling();
     else queueChecks(snapshot.stale_rules || []);
-    checks.requestFreshness('opened');
+    checks.requestFreshness(fresh ? 'manual' : 'opened', fresh);
   }
 
   function applyHealth(health) {
@@ -263,7 +263,7 @@ function start(root) {
     applyAlerts,
     applySuppressed,
     forgetLibrary: () => libraryView.forgetLibrary(),
-    refresh: () => refresh(),
+    refresh: (fresh) => refresh(fresh),
     render: () => render(),
     showResult: (result, title) => showResult(result, title),
     testMode: () => testMode(),

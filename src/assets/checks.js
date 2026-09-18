@@ -19,6 +19,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
   let bulkChecking = false;
   let pollTimer = null;
   let syncRunning = false;
+  let lastProgress = {};
   let hiddenAt = Date.now();
 
   const isChecking = (ruleId) => checking.has(ruleId);
@@ -85,6 +86,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
         const data = await api('progress', {}, '', true);
         applyHealth(data.health);
         const progress = data.progress || {};
+        lastProgress = progress;
         checking.clear();
         if (progress.running && progress.current) checking.add(progress.current);
         bulkChecking = !!progress.running;
@@ -115,11 +117,12 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
   // reading, which is what makes a page left open all day still correct about time.
   let watchStamp = '';
 
-  async function requestFreshness(reason) {
+  async function requestFreshness(reason, force) {
     if (syncRunning || !getSnapshot()) return;
     syncRunning = true;
+    renderCheckBanner({ syncing: true });
     try {
-      const data = await api('sync', { reason: reason || 'opened' }, '', true);
+      const data = await api('sync', { reason: reason || 'opened', force: !!force }, '', true);
       if (data.busy) return;
       applySaved(data);
       applyHealth(data.health);
@@ -135,6 +138,7 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
       // its age, and a missed refresh must not interrupt the operator.
     } finally {
       syncRunning = false;
+      renderCheckBanner(lastProgress);
     }
   }
 
@@ -171,9 +175,14 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
   function renderCheckBanner(progress) {
     const box = $('tvr-checking');
     box.replaceChildren();
-    const active = progress && progress.running;
+    const syncing = syncRunning || (progress && progress.syncing);
+    const active = syncing || (progress && progress.running);
     box.hidden = !active;
     if (!active) return;
+    if (syncing) {
+      box.append(el('span', { className: 'tvr-spinner' }), text('Syncing with Sonarr - updating the page.'));
+      return;
+    }
     const phase = CHECK_PHASE[progress.phase] || 'checking';
     let detail = `${progress.scheduled ? 'Scheduled check' : 'Check'} in progress — ${phase}`;
     if (progress.phase === 'rules') {

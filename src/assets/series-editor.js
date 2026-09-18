@@ -611,7 +611,10 @@ export function createSeriesEditor({
           : rules.concat([draft]);
         await saveSettings(null);
         const matched = await api('match', {}, 'Matching against Sonarr…');
-        applySaved(matched.settings);
+        const savedSettings = matched.settings && Array.isArray(matched.settings.rules)
+          ? matched.settings
+          : (await api('snapshot', {}, 'Reloading saved settings…')).settings;
+        applySaved(savedSettings);
 
         render();
         forgetLibrary();           // one more series with a rule
