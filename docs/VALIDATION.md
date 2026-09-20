@@ -14,6 +14,26 @@ Down from 741: the `test_build.py` trim removed 100 assertions about appearance,
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
 document can reach. No behavioral coverage was removed.
 
+## Build 24 deployment — 2026-09-20
+
+Replaced `dev-build23` with `dev-build24`: the upgrade-catch-up seed, the scope-count
+generation guard, the API-key reveal surviving a background render, and the sync-reply
+consolidation. Config already at version 14, so this migrated nothing — a plain image
+swap.
+
+- Preflight against a `/tmp` copy, `--rm`: version 14, `America/Detroit`, 32 rules and
+  4 presets, Test Mode on, `integrity_errors` clean, and `seed_last_occurrence` a
+  confirmed no-op because the occurrence was already recorded.
+- All four fixes verified present in the image before it replaced anything.
+- After replacement: healthy, worker PID 1 running as uid 99, schedule still
+  "Every day at 01:00 (America/Detroit)", and **no catch-up run** — unlike the build 23
+  upgrade, which is the behaviour the seed exists to make permanent.
+- Rollback is `tv-retention:rollback` (build 23) plus `pre-build24-20260920-1733.tar.gz`.
+
+Three config archives are retained rather than pruned to one. A bounded real run with
+Test Mode off is the next step, and pruning the safety net immediately before the first
+deletion this application has ever performed is the wrong order to do things in.
+
 ## Build 23 deployment — 2026-09-20
 
 Replaced `tv-retention:dev-build22` with `dev-build23` on the demo instance: config on
