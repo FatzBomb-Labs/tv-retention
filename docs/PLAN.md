@@ -53,28 +53,26 @@ Left:
 Fix concrete state failures in the existing modules. Do not expand the frontend
 architecture.
 
-### 2. Seed the scheduler's bookkeeping on upgrade
+### 2. Container verification
 
-Upgrading from a build that predates `last_occurrence` makes the scheduler read the most
-recent occurrence as unanswered and fire a catch-up immediately. Build 23 did exactly
-that on the demo instance, harmlessly, because Test Mode was on. With Test Mode off it
-would be an unscheduled real run a minute after start.
+Shown incidentally by the build 23 deployment, on the running instance:
 
-When `jobs.json` has no `last_occurrence` but does have `last_run`, seed it from the
-latest occurrence at or before `last_run` rather than treating it as never answered. An
-absent file on a genuinely fresh install must still mean "no history", not "nothing due".
+- the worker drops to `PUID`/`PGID` — its PID 1 runs as uid 99, gid 100, and everything
+  under `/config` is written `nobody:users`;
+- three `docker stop -t 30` / start cycles recovered with settings, state and queues
+  intact, no run in flight;
+- the health endpoint answers on a remapped port (`18787` → `8787`).
 
-### 3. Container verification
+Still unverified, and none of it is shown by a container that merely stays up:
 
-Run the application in an isolated container and verify:
-
-- root and non-root startup, `PUID`/`PGID`/`UMASK`, `/config` and optional backup permissions;
-- graceful shutdown and restart recover safely;
-- health/readiness and worker failure reporting on a configurable port.
+- `UMASK`, and permissions on an optional separate backup mount;
+- shutdown *during* a run, which is the case restart recovery exists for;
+- readiness as distinct from liveness, and how a failed worker is reported;
+- startup refusing missing or too-short credentials.
 
 Keep the standard-library design. No framework, no database.
 
-### 4. Acceptance
+### 3. Acceptance
 
 Never against a production library. Use a copied configuration throughout. A read-only
 smoke is not permission to run a write-enabled operation.
@@ -116,7 +114,8 @@ and one real run against one real show does what it said it would. That is 1.0.
 
 ## Explicitly unresolved
 
-- Container permissions, graceful shutdown and readiness need an actual image-level check.
+- Readiness, shutdown during a run and backup-mount permissions need an image-level
+  check; the privilege drop and plain restart recovery no longer do.
 - Real-browser interaction and large-library performance need practical evidence. Open a
   browser; do not build a new frontend architecture to obtain it.
 - No live target deletion or production canary is authorized by this document.
