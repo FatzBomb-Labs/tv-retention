@@ -15,6 +15,22 @@ flooring migration at version 13 removed the tests for twelve upgrade steps no s
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
 
+## Build 25 deployment — 2026-09-20
+
+Replaced `dev-build24` with `dev-build25`: the timezone control is now a grouped
+dropdown built from the container's own zone database. Config already at version 14,
+so this migrated nothing.
+
+- Preflight against a `/tmp` copy, `--rm`: version 14, `America/Detroit` still resolvable
+  from the offered list (482 zones, America/Detroit among them), 32 rules and 4 presets,
+  Test Mode on, schedule off, `integrity_errors` clean.
+- The dropdown code confirmed present in the built image (`available_zones`,
+  `renderTimezones`, the `<select id="tvr-timezone">` element) before it replaced
+  anything.
+- After replacement: healthy, worker uid 99, safety posture unchanged (Test Mode on,
+  schedule disabled) — the deploy touched behaviour, not configuration.
+- Rollback is `tv-retention:rollback` (build 24) plus `pre-build25-20260920-1752.tar.gz`.
+
 ## First operator-approved live run — 2026-09-20
 
 Run `63b8ab8c8b96`, 21:43:19 UTC, on build 24 against the operator's real Sonarr with a
