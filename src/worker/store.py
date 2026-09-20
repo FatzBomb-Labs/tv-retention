@@ -135,13 +135,6 @@ def load_settings_strict() -> dict:
     return _load_settings(strict=True)
 
 
-def settings_error() -> str:
-    """Return the current structural settings error without replacing the document."""
-    try:
-        _load_settings(strict=True)
-    except Rejected as error:
-        return str(error)
-    return ''
 
 
 def save_settings(settings: dict) -> None:
@@ -250,13 +243,6 @@ def load_state_strict(settings: dict) -> dict:
     return value
 
 
-def state_error(settings: dict) -> str:
-    """Return an authoritative run-history error without changing the document."""
-    try:
-        load_state_strict(settings)
-    except Rejected as error:
-        return str(error)
-    return ''
 
 
 def save_state(settings: dict, state: dict, required: bool = True) -> None:
@@ -395,13 +381,6 @@ def _validate_intent(intent: dict) -> None:
                 raise Rejected('a removal operation has no target snapshot')
 
 
-def intent_error(settings: dict) -> str:
-    """Return an executable-intent storage error without changing the record."""
-    try:
-        load_intent_strict(settings)
-    except Rejected as error:
-        return str(error)
-    return ''
 
 
 def save_intent(settings: dict, intent: dict) -> None:
@@ -635,13 +614,6 @@ def load_health_strict(settings: dict) -> dict:
     return value
 
 
-def health_error(settings: dict) -> str:
-    """Return a health-cache integrity error without changing the stored document."""
-    try:
-        load_health_strict(settings)
-    except Rejected as error:
-        return str(error)
-    return ''
 
 
 # ---------------------------------------------------------------------------
@@ -791,14 +763,36 @@ def job_state_strict(settings: dict) -> dict:
                 last_occurrence=value.get('last_occurrence'))
 
 
-def jobs_error(settings: dict) -> str:
-    """Return a scheduler-state error without changing the stored document."""
-    try:
-        job_state_strict(settings)
-    except Rejected as error:
-        return str(error)
-    return ''
 
 
 def save_job_state(settings: dict, state: dict) -> None:
     write_cache(settings, 'jobs.json', state, required=True)
+
+
+def integrity_errors(settings: dict) -> dict:
+    """Every authoritative document that will not load, keyed by its alert kind.
+
+    Five near-identical `*_error` helpers used to sit next to the five strict readers,
+    each wrapping one in the same try/except, and the single caller repeated the same
+    three lines five times to turn them into alerts. The readers genuinely differ —
+    what a damaged run history looks like is not what a damaged health cache looks
+    like — but asking them does not, and neither does reporting the answer.
+
+    Returning the alert kind rather than a bare string is what removes the last of the
+    repetition at the call site, and it puts the document-to-kind mapping somewhere a
+    test can see it.
+    """
+    readers = (
+        ('settings-invalid', lambda _: load_settings_strict()),
+        ('intent-invalid', load_intent_strict),
+        ('state-invalid', load_state_strict),
+        ('jobs-invalid', job_state_strict),
+        ('health-invalid', load_health_strict),
+    )
+    found = {}
+    for kind, read in readers:
+        try:
+            read(settings)
+        except Rejected as error:
+            found[kind] = str(error)
+    return found

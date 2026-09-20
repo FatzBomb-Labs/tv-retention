@@ -35,11 +35,12 @@ import schedules
 from store import (CONFIG, NAME, RUNTIME, SCHEMA,
                    age_seconds, archive_intent, cache_path, clear_progress, episode_cache, forget_episodes,
                    invalidate_catalogue, job_state, journal, load_health, load_settings, load_settings_strict,
-                   intent_error, load_intent, load_intent_strict, load_state, load_state_strict, log_line, now_iso, read_cache, read_log, read_progress,
+                   load_intent, load_intent_strict, load_state, load_state_strict, log_line,
+                   now_iso, read_cache, read_log, read_progress,
                    save_job_state, save_settings, save_state, set_progress, state_dir,
                    save_intent, load_removal_ledger, save_removal_ledger,
-                   record_run, save_settings_unlocked, settings_error, settings_transaction, state_error, store_episodes,
-                   health_error, job_state_strict, jobs_error, save_settings_if_current,
+                   record_run, save_settings_unlocked, settings_transaction, store_episodes,
+                   job_state_strict, integrity_errors, save_settings_if_current,
                    trim_health, write_cache)
 from tmdb import TMDB, TMDBError, fill_air_dates
 from tvmaze import TVMaze, TVMazeError
@@ -1335,6 +1336,16 @@ def episodes_for(settings: dict, rule: dict, force: bool = False, offline: bool 
     return episodes, series, read_at, False
 
 
+# What a re-enable pass owns on a rule. Named once: the sync path compares this state
+# before and after, writes only the rules where it moved, and declares exactly these
+# fields as its own so a concurrent operator edit to anything else still commits.
+REENABLE_FIELDS = ('enabled', 'auto_reenable', 'auto_reenable_after')
+
+
+def _reenable_state(rule: dict) -> dict:
+    return {field: rule.get(field) for field in REENABLE_FIELDS}
+
+
 def reenable_returning_rules(settings: dict, before: dict, after: dict) -> list:
     """Re-enable armed, disabled rules when an ended series becomes active again.
 
@@ -1458,23 +1469,15 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
 
     write_cache(settings, 'catalogue.json', catalogue)
     refresh_armed_episodes(settings, report)
-    before_reenable = {rule['id']: (
-        rule.get('enabled'), rule.get('auto_reenable'), rule.get('auto_reenable_after'))
-        for rule in settings.get('rules') or []}
+    before_reenable = {rule['id']: _reenable_state(rule) for rule in settings.get('rules') or []}
     reenabled = reenable_returning_rules(settings, before, after)
     if reenabled:
         report['series_reenabled'] = [title for title, _ in reenabled]
-        changed_rules = {rule['id']: {
-            'enabled': rule.get('enabled'),
-            'auto_reenable': rule.get('auto_reenable'),
-            'auto_reenable_after': rule.get('auto_reenable_after'),
-        } for rule in settings.get('rules') or []
-            if before_reenable.get(rule['id']) != (
-                rule.get('enabled'), rule.get('auto_reenable'), rule.get('auto_reenable_after'))}
-        owned_fields = [(rule_id, field, before_reenable[rule_id][
-            ('enabled', 'auto_reenable', 'auto_reenable_after').index(field)])
-                        for rule_id in changed_rules
-                        for field in ('enabled', 'auto_reenable', 'auto_reenable_after')]
+        changed_rules = {rule['id']: _reenable_state(rule)
+                         for rule in settings.get('rules') or []
+                         if before_reenable.get(rule['id']) != _reenable_state(rule)}
+        owned_fields = [(rule_id, field, before_reenable[rule_id][field])
+                        for rule_id in changed_rules for field in REENABLE_FIELDS]
         latest = load_settings()
         latest_rules = {rule['id']: rule for rule in latest.get('rules') or []}
         for rule_id, fields in changed_rules.items():
@@ -1542,22 +1545,8 @@ def status_snapshot(settings: dict, health=None) -> dict:
     backup_path = Path(backup_cfg.get('path')) if backup_cfg.get('path') else None
     backup_ok = bool(backup_path and backup_path.exists() and
                      os.access(backup_path, os.R_OK | os.W_OK))
-    status_alerts = []
-    invalid_settings = settings_error()
-    if invalid_settings:
-        status_alerts.append(alerts.make('settings-invalid', detail=invalid_settings))
-    invalid_intent = intent_error(settings)
-    if invalid_intent:
-        status_alerts.append(alerts.make('intent-invalid', detail=invalid_intent))
-    invalid_state = state_error(settings)
-    if invalid_state:
-        status_alerts.append(alerts.make('state-invalid', detail=invalid_state))
-    invalid_jobs = jobs_error(settings)
-    if invalid_jobs:
-        status_alerts.append(alerts.make('jobs-invalid', detail=invalid_jobs))
-    invalid_health = health_error(settings)
-    if invalid_health:
-        status_alerts.append(alerts.make('health-invalid', detail=invalid_health))
+    status_alerts = [alerts.make(kind, detail=detail)
+                     for kind, detail in integrity_errors(settings).items()]
     if not config_ok or not state_ok:
         status_alerts.append(alerts.make('state-unavailable', detail=str(state_path)))
     if backup_cfg.get('last_error'):

@@ -203,7 +203,8 @@ class RunIntent(unittest.TestCase):
         path.write_text('{not-json')
         with self.assertRaisesRegex(Exception, 'Saved run intent is unreadable'):
             store.load_intent_strict(self.settings)
-        self.assertIn('Saved run intent is unreadable', store.intent_error(self.settings))
+        self.assertIn('Saved run intent is unreadable',
+                      store.integrity_errors(self.settings)['intent-invalid'])
 
     def test_non_object_intent_is_reported_by_the_strict_loader(self):
         path = Path(self.settings['state_dir']) / 'run-intent.json'
@@ -281,7 +282,8 @@ class RunIntent(unittest.TestCase):
         path.write_text('{not-json')
         with self.assertRaisesRegex(Exception, 'Saved run history is unreadable'):
             store.load_state_strict(self.settings)
-        self.assertIn('Saved run history is unreadable', store.state_error(self.settings))
+        self.assertIn('Saved run history is unreadable',
+                      store.integrity_errors(self.settings)['state-invalid'])
 
     def test_malformed_state_cannot_be_overwritten_by_run_finalization(self):
         path = Path(self.settings['state_dir']) / 'state.json'
@@ -299,7 +301,8 @@ class RunIntent(unittest.TestCase):
         path.write_text('{not-json')
         with self.assertRaisesRegex(Exception, 'Saved scheduler state is unreadable'):
             store.job_state_strict(self.settings)
-        self.assertIn('Saved scheduler state is unreadable', store.jobs_error(self.settings))
+        self.assertIn('Saved scheduler state is unreadable',
+                      store.integrity_errors(self.settings)['jobs-invalid'])
 
     def test_scheduler_state_with_a_non_timestamp_is_rejected(self):
         path = Path(self.settings['state_dir']) / 'jobs.json'
@@ -314,7 +317,8 @@ class RunIntent(unittest.TestCase):
         path.write_text('{not-json')
         with self.assertRaisesRegex(Exception, 'Saved health cache is unreadable'):
             store.load_health_strict(self.settings)
-        self.assertIn('Saved health cache is unreadable', store.health_error(self.settings))
+        self.assertIn('Saved health cache is unreadable',
+                      store.integrity_errors(self.settings)['health-invalid'])
         with self.assertRaisesRegex(Exception, 'Saved health cache is unreadable'):
             store.write_cache(self.settings, 'health.json', {'rules': {}})
         self.assertEqual(path.read_text(), '{not-json')
@@ -355,3 +359,56 @@ class RunIntent(unittest.TestCase):
         self.assertFalse(errors, errors)
         self.assertIn(json.loads(path.read_text())['value'], ('one', 'two'))
 
+
+
+class IntegrityReport(unittest.TestCase):
+    """One reader for "which authoritative document will not load", by alert kind.
+
+    There were five `*_error` wrappers and a caller that repeated the same three lines
+    five times. Reporting by kind keeps the document-to-alert mapping in one place that
+    a test can read, which the five wrappers never had.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = {'state_dir': str(Path(self.temp.name) / 'state')}
+        Path(self.settings['state_dir']).mkdir(parents=True, exist_ok=True)
+        store._writable_since.clear()
+
+    def tearDown(self):
+        store._writable_since.clear()
+        self.temp.cleanup()
+
+    def test_a_healthy_configuration_reports_nothing(self):
+        original = store.CONFIG
+        store.CONFIG = Path(self.temp.name) / 'absent.json'   # missing is a fresh install
+        try:
+            self.assertEqual(store.integrity_errors(self.settings), {})
+        finally:
+            store.CONFIG = original
+
+    def test_unreadable_settings_are_reported_under_their_own_kind(self):
+        # The one document the five wrappers covered that no test ever exercised.
+        path = Path(self.temp.name) / 'settings.json'
+        path.write_text('{not-json')
+        original = store.CONFIG
+        store.CONFIG = path
+        try:
+            found = store.integrity_errors(self.settings)
+        finally:
+            store.CONFIG = original
+        self.assertIn('settings-invalid', found)
+        self.assertIn('unreadable', found['settings-invalid'])
+
+    def test_every_damaged_document_is_named_at_once(self):
+        """A caller showing one alert per problem needs all of them, not the first."""
+        for name in ('run-intent.json', 'state.json', 'jobs.json', 'health.json'):
+            (Path(self.settings['state_dir']) / name).write_text('{not-json')
+        original = store.CONFIG
+        store.CONFIG = Path(self.temp.name) / 'absent.json'
+        try:
+            found = store.integrity_errors(self.settings)
+        finally:
+            store.CONFIG = original
+        self.assertEqual(sorted(found), ['health-invalid', 'intent-invalid',
+                                         'jobs-invalid', 'state-invalid'])
