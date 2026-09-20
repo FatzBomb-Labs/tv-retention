@@ -188,5 +188,48 @@ class Description(unittest.TestCase):
         self.assertEqual(schedules.WEEKDAY_NAMES[6], 'Saturday')
 
 
+class OneMatcher(unittest.TestCase):
+    """Every check in this file reads `day_matches`, which is what the scheduler runs.
+
+    It was two implementations: `occurs_at`, which every frequency test above exercises,
+    and the day-at-a-time reader behind `last_occurrence`, which nothing tested and the
+    worker actually used. They had drifted — an unrecognised frequency raised in the
+    tested one and silently fired as daily in the live one.
+    """
+
+    def test_both_readers_refuse_a_frequency_neither_understands(self):
+        broken = schedule(frequency='Daily')      # a capitalised typo in a stored document
+        with self.assertRaises(ScheduleError):
+            occurs_at(broken, at(2026, 9, 20, 4))
+        with self.assertRaises(ScheduleError):
+            due_occurrence(broken, at(2026, 9, 20, 12), None)
+        with self.assertRaises(ScheduleError):
+            last_occurrence(broken, at(2026, 9, 20, 12))
+
+    def test_the_predicate_agrees_with_the_day_reader_everywhere(self):
+        """`occurs_at` must stay a thin reading of `day_matches` rather than a rival."""
+        for fields in ({'frequency': 'hourly'},
+                       {'frequency': 'daily'},
+                       {'frequency': 'weekly', 'weekday': 1},
+                       {'frequency': 'monthly', 'monthly_mode': 'day', 'monthly_day': 15},
+                       {'frequency': 'custom', 'cron': '30 4 * * 1'}):
+            current = schedule(minute=30, hour=4, **fields)
+            for day in range(1, 29):
+                for hour in (0, 4, 13, 23):
+                    moment = at(2026, 9, day, hour, 30)
+                    hours, minutes = schedules.day_matches(current, moment.date())
+                    self.assertEqual(occurs_at(current, moment),
+                                     moment.hour in hours and moment.minute in minutes,
+                                     f'{fields} disagreed at {moment}')
+
+    def test_a_bad_cron_expression_is_refused_by_the_validator(self):
+        # core calls this to validate a stored expression; it used to call the matcher
+        # against a hard-coded date purely to make it raise.
+        schedules.check_cron('0 4 * * *')
+        for bad in ('nightly', '0 99 * * *', '0 4 * *'):
+            with self.assertRaises(ScheduleError):
+                schedules.check_cron(bad)
+
+
 if __name__ == '__main__':
     unittest.main()

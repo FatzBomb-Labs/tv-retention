@@ -18,7 +18,12 @@ Raising the floor again is the same move: re-base the fixture, delete the step.
 """
 from __future__ import annotations
 
+import os
+from zoneinfo import ZoneInfo
+
 SETTINGS_VERSION = 14
+
+DEFAULT_TIMEZONE = 'Etc/UTC'
 
 # The oldest document shape this release can still read. See the module docstring before
 # lowering it — and re-base tests/fixtures/settings-v13-live.json before raising it.
@@ -60,7 +65,34 @@ def migrate(raw: dict) -> dict:
 
 
 def _to_v14(document: dict) -> dict:
-    """Add an explicit civil-time zone while preserving existing UTC behavior."""
+    """Pin the zone the schedule has been running in, rather than assuming UTC.
+
+    Before this version there was no timezone field, and the worker scheduled against
+    container-local time — `datetime.now().astimezone()`, with `zone_for` falling back
+    to whatever that carried. Writing `Etc/UTC` here would keep the stored hour and
+    silently change the instant it means: a 01:00 run on a US Eastern container becomes
+    21:00 the previous day. A migration is the one place that must not do that.
+
+    The container's own `TZ` is the name of the zone it has been running in, so an
+    upgraded schedule keeps firing when it always did. A fresh install never reaches
+    this step and still starts at `Etc/UTC` through validation.
+    """
     schedule = dict(document.get('schedule') or {})
-    schedule.setdefault('timezone', 'Etc/UTC')
+    schedule.setdefault('timezone', _container_timezone())
     return {'schedule': schedule}
+
+
+def _container_timezone() -> str:
+    """The container's IANA zone name, or UTC when it is unset or unusable.
+
+    A `TZ` the zone database cannot resolve must not be written into settings: it would
+    migrate the document into a state validation then refuses.
+    """
+    name = (os.environ.get('TZ') or '').strip()
+    if not name or name in ('UTC', 'GMT', 'Etc/UTC'):
+        return DEFAULT_TIMEZONE
+    try:
+        ZoneInfo(name)
+    except Exception:
+        return DEFAULT_TIMEZONE
+    return name

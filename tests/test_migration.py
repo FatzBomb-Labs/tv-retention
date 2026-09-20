@@ -10,8 +10,10 @@ below it: a refusal that names the version, not a silent reshape. When the floor
 re-base the fixture with the step that is about to be deleted, then delete it.
 """
 import json
+import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import context  # noqa: F401
 from core import validate_settings
@@ -68,20 +70,47 @@ class TheFloor(unittest.TestCase):
 class ToTheCurrentVersion(unittest.TestCase):
     """The one remaining step, and the scrub that runs at the current version."""
 
-    def test_a_schedule_without_a_zone_gains_utc(self):
-        document = migrate({'settings_version': MINIMUM_VERSION,
-                            'schedule': {'enabled': True, 'hour': 4}})
-        self.assertEqual(document['schedule']['timezone'], 'Etc/UTC')
-        self.assertEqual(document['schedule']['hour'], 4, 'the rest of the schedule survives')
+    def _migrated(self, tz, resolvable=True, **schedule):
+        """Migrate with a chosen container TZ, independent of the host's zone database.
+
+        Windows has no system tzdata, so a real ZoneInfo lookup would decide this test
+        by which machine ran it. What is under test is the rule — use the container's
+        zone when the database knows it, fall back when it does not — so the lookup is
+        stubbed and the rule is asserted on both branches.
+        """
+        def lookup(name):
+            if not resolvable:
+                raise KeyError(name)
+            return object()
+
+        with mock.patch.dict(os.environ, {'TZ': tz} if tz is not None else {}, clear=(tz is None)), \
+                mock.patch('migrate.ZoneInfo', lookup):
+            return migrate({'settings_version': MINIMUM_VERSION, 'schedule': schedule})
+
+    def test_the_upgrade_keeps_the_zone_the_schedule_was_already_running_in(self):
+        """Before v14 the worker used container-local time, so writing UTC here would
+        keep the hour and change the instant — a 01:00 Eastern run becoming 21:00."""
+        document = self._migrated('America/Detroit', enabled=True, hour=1)
+        self.assertEqual(document['schedule']['timezone'], 'America/Detroit')
+        self.assertEqual(document['schedule']['hour'], 1, 'the rest of the schedule survives')
+
+    def test_an_unset_container_zone_falls_back_to_utc(self):
+        self.assertEqual(self._migrated(None, hour=4)['schedule']['timezone'], 'Etc/UTC')
+
+    def test_a_container_zone_the_database_cannot_resolve_falls_back_to_utc(self):
+        """A TZ that does not resolve must not be written: it would migrate the document
+        into a state validation then refuses, which is worse than a wrong-but-valid zone."""
+        self.assertEqual(self._migrated('Mars/Olympus', resolvable=False)['schedule']['timezone'],
+                         'Etc/UTC')
 
     def test_an_existing_zone_is_never_overwritten(self):
-        document = migrate({'settings_version': MINIMUM_VERSION,
-                            'schedule': {'timezone': 'America/New_York'}})
-        self.assertEqual(document['schedule']['timezone'], 'America/New_York')
+        document = self._migrated('America/Detroit', timezone='Europe/Berlin')
+        self.assertEqual(document['schedule']['timezone'], 'Europe/Berlin')
 
     def test_a_missing_schedule_still_gets_one(self):
-        self.assertEqual(migrate({'settings_version': MINIMUM_VERSION})['schedule']['timezone'],
-                         'Etc/UTC')
+        with mock.patch.dict(os.environ, {}, clear=True):
+            document = migrate({'settings_version': MINIMUM_VERSION})
+        self.assertEqual(document['schedule']['timezone'], 'Etc/UTC')
 
     def test_a_current_document_is_still_scrubbed_of_notifications(self):
         """A hand-edited current document can carry the retired outbound matrix.

@@ -439,7 +439,7 @@ def validate_schedule(raw, field='Schedule') -> dict:
     }
     if frequency == 'custom':
         try:
-            schedules.cron_matches(result['cron'], dt.datetime(2026, 1, 1))
+            schedules.check_cron(result['cron'])
         except schedules.ScheduleError as error:
             raise Rejected(f'{field}: {error}')
     try:

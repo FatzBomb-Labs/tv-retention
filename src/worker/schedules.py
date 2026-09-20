@@ -113,17 +113,15 @@ def occurrence_id(moment: dt.datetime) -> str:
     return _aware(moment).astimezone(dt.timezone.utc).isoformat(timespec='seconds')
 
 
-def cron_matches(expression: str, moment: dt.datetime) -> bool:
-    """Whether a five-field cron expression fires at this minute.
+def check_cron(expression: str) -> None:
+    """Raise ScheduleError unless this is a five-field cron expression we can read.
 
-    Day-of-month and day-of-week are OR'd when both are restricted, which is what cron
-    itself does. Only the custom option reaches this; the named frequencies do not go
-    anywhere near it.
+    Validation only. This was once `cron_matches`, a third copy of "does this fire at
+    this minute" that its only caller invoked against a hard-coded date purely to make
+    it raise — a parse check wearing a matcher's name, and one more place for the firing
+    rules to drift.
     """
-    parsed = _parse_cron(expression)
-    local = _aware(moment).astimezone(zone_for({}, _aware(moment).tzinfo))
-    return _cron_date_matches(parsed, local) and local.hour in parsed['hour'] \
-        and local.minute in parsed['minute']
+    _parse_cron(expression)
 
 
 def _cron_date_matches(parsed: dict, moment: dt.datetime) -> bool:
@@ -162,30 +160,6 @@ def monthly_day(schedule: dict, year: int, month: int) -> int:
     return nth_weekday(year, month, int(weekday), last=(mode == 'last'))
 
 
-def occurs_at(schedule: dict, moment: dt.datetime) -> bool:
-    """Whether this schedule fires at this exact minute."""
-    zone = zone_for(schedule, _aware(moment).tzinfo)
-    local = _aware(moment).astimezone(zone)
-    frequency = schedule.get('frequency', 'daily')
-    if frequency == 'custom':
-        parsed = _parse_cron(schedule.get('cron', ''))
-        return _cron_date_matches(parsed, local) and local.hour in parsed['hour'] \
-            and local.minute in parsed['minute']
-    if local.minute != int(schedule.get('minute', 0)):
-        return False
-    if frequency == 'hourly':
-        return True
-    if local.hour != int(schedule.get('hour', 0)):
-        return False
-    if frequency == 'daily':
-        return True
-    if frequency == 'weekly':
-        return sunday_index(local) == int(schedule.get('weekday', 0))
-    if frequency == 'monthly':
-        return local.day == monthly_day(schedule, local.year, local.month)
-    raise ScheduleError(f'Unknown frequency "{frequency}"')
-
-
 def _local_candidates(local: dt.datetime, zone) -> list:
     """Convert a civil time to zero, one, or two real instants across DST transitions."""
     found = {}
@@ -198,7 +172,20 @@ def _local_candidates(local: dt.datetime, zone) -> list:
     return sorted(found.values())
 
 
-def _day_matches(schedule: dict, local_date: dt.date) -> tuple[set, set]:
+def day_matches(schedule: dict, local_date: dt.date) -> tuple[set, set]:
+    """The hours and minutes this schedule fires at on one local date.
+
+    The single source of frequency semantics. Both readers go through it: `occurs_at`
+    asks about one minute, `_latest_on_date` asks about a whole day while searching
+    backwards. They used to be two separate implementations of the same five rules, and
+    only one of them was tested — the untested one being the one the scheduler actually
+    ran. They had already drifted: a frequency this code does not recognise raised in
+    `occurs_at` and silently fired as daily here, which is a typo in a stored document
+    quietly deleting things a day at a time.
+
+    Day-of-month and day-of-week are OR'd when both are restricted, which is what cron
+    itself does. Only the custom option reaches that; the named frequencies do not.
+    """
     frequency = schedule.get('frequency', 'daily')
     local = dt.datetime.combine(local_date, dt.time())
     if frequency == 'custom':
@@ -208,6 +195,8 @@ def _day_matches(schedule: dict, local_date: dt.date) -> tuple[set, set]:
         return parsed['hour'], parsed['minute']
     if frequency == 'hourly':
         return set(range(24)), {int(schedule.get('minute', 0))}
+    if frequency not in ('daily', 'weekly', 'monthly'):
+        raise ScheduleError(f'Unknown frequency "{frequency}"')
     if frequency == 'weekly' and sunday_index(local) != int(schedule.get('weekday', 0)):
         return set(), set()
     if frequency == 'monthly' and local.day != monthly_day(schedule, local.year, local.month):
@@ -215,8 +204,20 @@ def _day_matches(schedule: dict, local_date: dt.date) -> tuple[set, set]:
     return {int(schedule.get('hour', 0))}, {int(schedule.get('minute', 0))}
 
 
+def occurs_at(schedule: dict, moment: dt.datetime) -> bool:
+    """Whether this schedule fires at this exact minute.
+
+    A thin reading of `day_matches`, so the frequency rules this asserts are the same
+    ones the scheduler runs.
+    """
+    zone = zone_for(schedule, _aware(moment).tzinfo)
+    local = _aware(moment).astimezone(zone)
+    hours, minutes = day_matches(schedule, local.date())
+    return local.hour in hours and local.minute in minutes
+
+
 def _latest_on_date(schedule: dict, local_date: dt.date, zone, upper: dt.datetime):
-    hours, minutes = _day_matches(schedule, local_date)
+    hours, minutes = day_matches(schedule, local_date)
     latest = None
     for hour in sorted(hours):
         for minute in sorted(minutes):
