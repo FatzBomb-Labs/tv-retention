@@ -6,13 +6,14 @@ or re-run the gate.
 
 ## Current gate — 2026-09-20
 
-Authoritative Linux host gate on `fatzserver-host`: **624 Python tests in 9.717s** and
-**31 frontend tests**, `All required checks passed`, exit code `0`. Worker imports and
+Authoritative Linux host gate on `fatzserver-host`: **631 Python tests in 8.990s** and
+**33 frontend tests**, `All required checks passed`, exit code `0`. Worker imports and
 shipped-module syntax checks passed.
 
 Down from 741: the `test_build.py` trim removed 100 assertions about appearance, and
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
-document can reach. No behavioral coverage was removed.
+document can reach. No behavioral coverage was removed; the count has since risen again
+with the scheduler, integrity and UI-state work.
 
 ## Build 24 deployment — 2026-09-20
 
