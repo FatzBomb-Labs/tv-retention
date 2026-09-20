@@ -85,7 +85,7 @@ function start(root) {
     applyHealth,
     applyAlerts,
     applySuppressed,
-    applySaved,
+    applySync,
     forgetLibrary: () => libraryView.forgetLibrary(),
     render: () => render(),
     renderLibrary: () => libraryView.renderLibrary(),
@@ -200,6 +200,22 @@ function start(root) {
     if (data.status) snapshot.status = data.status;
   }
 
+  // A `sync` reply carries the whole shared state back at once, and the entry owns those
+  // documents, so applying one belongs here rather than in every feature that can ask for
+  // a sync. checks.js and topbar.js held byte-identical copies of this sequence, which is
+  // also why the top bar took four apply capabilities it no longer needs.
+  function applySync(data) {
+    applySaved(data);
+    // Unconditional, unlike the guarded calls inside applySaved: a sync reporting no
+    // alerts is saying there are none, not declining to answer.
+    applyHealth(data.health);
+    applyAlerts(data.alerts);
+    applySuppressed(data.suppressed_alerts || []);
+    snapshot.plan = data.plan;
+    snapshot.sync = data.sync;
+    snapshot.sync_due = !!data.sync_due;
+  }
+
   async function refresh(fresh) {
     snapshot = await api('snapshot', {}, 'Loading…');
     settings = snapshot.settings;
@@ -266,10 +282,7 @@ function start(root) {
     getSnapshot: () => snapshot,
     getSystemAlerts: () => systemAlerts,
     getLibrary: () => libraryView.getLibrary(),
-    applySaved,
-    applyHealth,
-    applyAlerts,
-    applySuppressed,
+    applySync,
     forgetLibrary: () => libraryView.forgetLibrary(),
     refresh: (fresh) => refresh(fresh),
     render: () => render(),

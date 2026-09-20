@@ -18,7 +18,7 @@ import { remember, remembered } from './storage.js';
 // `alerts.js`, and sibling modules cannot import each other here. That is also why the
 // entry has to build `createAlerts` before this.
 export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, getLibrary,
-                               applySaved, applyHealth, applyAlerts, applySuppressed, forgetLibrary,
+                               applySync, forgetLibrary,
                                refresh, render, showResult, testMode, ruleFor, isBlocked,
                                worstSeverity, seriesAlertList, seriesAlertCard,
                                systemAlertCard, getStatus }) {
@@ -211,13 +211,7 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
         notice('A Sonarr read or retention run is already in progress.', 'ok');
         return;
       }
-      applySaved(data);
-      applyHealth(data.health);
-      applyAlerts(data.alerts);
-      applySuppressed(data.suppressed_alerts || []);
-      getSnapshot().plan = data.plan;
-      getSnapshot().sync = data.sync;
-      getSnapshot().sync_due = !!data.sync_due;
+      applySync(data);
       // Sonarr has just been read: what the page is holding is the reading before it.
       forgetLibrary();
       render();
