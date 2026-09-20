@@ -19,14 +19,17 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import re
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 FREQUENCIES = ['hourly', 'daily', 'weekly', 'monthly', 'custom']
 MONTHLY_MODES = ['day', 'first', 'last']
 # 0 is Sunday, matching the weekday order people read in a dropdown.
 WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 CRON_FIELD = re.compile(r'^[0-9*/,\-]+$')
-# A month is the longest gap between occurrences, so a search never needs to look further.
-SEARCH_LIMIT_DAYS = 40
+# Supported custom schedules may be sparse, including an annual date. The search is by
+# civil date rather than minute, so a decade is still cheap and gives a bounded contract.
+SEARCH_LIMIT_DAYS = 3660
+DEFAULT_TIMEZONE = 'Etc/UTC'
 
 
 class ScheduleError(ValueError):
@@ -41,6 +44,8 @@ def sunday_index(moment: dt.datetime) -> int:
 def _field_values(field: str, low: int, high: int) -> set:
     """Expand one cron field into the values it matches."""
     values = set()
+    if not field or any(part == '' for part in field.split(',')):
+        raise ScheduleError(f'Unsupported cron field "{field}"')
     for part in field.split(','):
         step = 1
         if '/' in part:
@@ -48,7 +53,7 @@ def _field_values(field: str, low: int, high: int) -> set:
             if not raw_step.isdigit() or int(raw_step) < 1:
                 raise ScheduleError(f'Unsupported step in "{field}"')
             step = int(raw_step)
-        if part in ('*', ''):
+        if part == '*':
             start, end = low, high
         elif '-' in part:
             first, _, last = part.partition('-')
@@ -65,6 +70,49 @@ def _field_values(field: str, low: int, high: int) -> set:
     return values
 
 
+def _parse_cron(expression: str):
+    """Validate and expand every cron field before evaluating any match."""
+    fields = str(expression or '').split()
+    if len(fields) != 5:
+        raise ScheduleError('A cron expression has five fields, for example "0 4 * * *"')
+    if any(not CRON_FIELD.match(field) for field in fields):
+        raise ScheduleError(f'Unsupported cron field "{next(field for field in fields if not CRON_FIELD.match(field))}"')
+    minute, hour, day, month, weekday = fields
+    return {
+        'minute': _field_values(minute, 0, 59),
+        'hour': _field_values(hour, 0, 23),
+        'day': _field_values(day, 1, 31),
+        'month': _field_values(month, 1, 12),
+        'weekday': _field_values(weekday, 0, 7),
+        'day_restricted': day != '*',
+        'weekday_restricted': weekday != '*',
+    }
+
+
+def zone_for(schedule: dict, fallback=None):
+    """Return the configured IANA timezone, refusing a missing zone database entry."""
+    if not schedule.get('timezone') and fallback is not None:
+        return fallback
+    name = str(schedule.get('timezone') or DEFAULT_TIMEZONE).strip()
+    if name in ('UTC', 'Etc/UTC', 'GMT'):
+        return dt.timezone.utc
+    try:
+        return ZoneInfo(name)
+    except ZoneInfoNotFoundError as error:
+        raise ScheduleError(f'Unknown IANA timezone "{name}"') from error
+
+
+def _aware(moment: dt.datetime) -> dt.datetime:
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=dt.timezone.utc)
+    return moment
+
+
+def occurrence_id(moment: dt.datetime) -> str:
+    """Stable identity for one absolute scheduled instant, including fall-back folds."""
+    return _aware(moment).astimezone(dt.timezone.utc).isoformat(timespec='seconds')
+
+
 def cron_matches(expression: str, moment: dt.datetime) -> bool:
     """Whether a five-field cron expression fires at this minute.
 
@@ -72,29 +120,23 @@ def cron_matches(expression: str, moment: dt.datetime) -> bool:
     itself does. Only the custom option reaches this; the named frequencies do not go
     anywhere near it.
     """
-    fields = str(expression or '').split()
-    if len(fields) != 5:
-        raise ScheduleError('A cron expression has five fields, for example "0 4 * * *"')
-    for field in fields:
-        if not CRON_FIELD.match(field):
-            raise ScheduleError(f'Unsupported cron field "{field}"')
-    minute, hour, day, month, weekday = fields
-    if moment.minute not in _field_values(minute, 0, 59):
+    parsed = _parse_cron(expression)
+    local = _aware(moment).astimezone(zone_for({}, _aware(moment).tzinfo))
+    return _cron_date_matches(parsed, local) and local.hour in parsed['hour'] \
+        and local.minute in parsed['minute']
+
+
+def _cron_date_matches(parsed: dict, moment: dt.datetime) -> bool:
+    if moment.month not in parsed['month']:
         return False
-    if moment.hour not in _field_values(hour, 0, 23):
-        return False
-    if moment.month not in _field_values(month, 1, 12):
-        return False
-    day_restricted = day.strip() != '*'
-    weekday_restricted = weekday.strip() != '*'
-    day_hit = moment.day in _field_values(day, 1, 31)
-    weekday_hit = sunday_index(moment) in _field_values(weekday, 0, 7) or \
-        (sunday_index(moment) == 0 and 7 in _field_values(weekday, 0, 7))
-    if day_restricted and weekday_restricted:
+    day_hit = moment.day in parsed['day']
+    weekday = sunday_index(moment)
+    weekday_hit = weekday in parsed['weekday'] or (weekday == 0 and 7 in parsed['weekday'])
+    if parsed['day_restricted'] and parsed['weekday_restricted']:
         return day_hit or weekday_hit
-    if day_restricted:
+    if parsed['day_restricted']:
         return day_hit
-    if weekday_restricted:
+    if parsed['weekday_restricted']:
         return weekday_hit
     return True
 
@@ -122,22 +164,67 @@ def monthly_day(schedule: dict, year: int, month: int) -> int:
 
 def occurs_at(schedule: dict, moment: dt.datetime) -> bool:
     """Whether this schedule fires at this exact minute."""
+    zone = zone_for(schedule, _aware(moment).tzinfo)
+    local = _aware(moment).astimezone(zone)
     frequency = schedule.get('frequency', 'daily')
     if frequency == 'custom':
-        return cron_matches(schedule.get('cron', ''), moment)
-    if moment.minute != int(schedule.get('minute', 0)):
+        parsed = _parse_cron(schedule.get('cron', ''))
+        return _cron_date_matches(parsed, local) and local.hour in parsed['hour'] \
+            and local.minute in parsed['minute']
+    if local.minute != int(schedule.get('minute', 0)):
         return False
     if frequency == 'hourly':
         return True
-    if moment.hour != int(schedule.get('hour', 0)):
+    if local.hour != int(schedule.get('hour', 0)):
         return False
     if frequency == 'daily':
         return True
     if frequency == 'weekly':
-        return sunday_index(moment) == int(schedule.get('weekday', 0))
+        return sunday_index(local) == int(schedule.get('weekday', 0))
     if frequency == 'monthly':
-        return moment.day == monthly_day(schedule, moment.year, moment.month)
+        return local.day == monthly_day(schedule, local.year, local.month)
     raise ScheduleError(f'Unknown frequency "{frequency}"')
+
+
+def _local_candidates(local: dt.datetime, zone) -> list:
+    """Convert a civil time to zero, one, or two real instants across DST transitions."""
+    found = {}
+    naive = local.replace(tzinfo=None)
+    for fold in (0, 1):
+        candidate = naive.replace(tzinfo=zone, fold=fold)
+        utc = candidate.astimezone(dt.timezone.utc)
+        if utc.astimezone(zone).replace(tzinfo=None) == naive:
+            found[occurrence_id(utc)] = utc
+    return sorted(found.values())
+
+
+def _day_matches(schedule: dict, local_date: dt.date) -> tuple[set, set]:
+    frequency = schedule.get('frequency', 'daily')
+    local = dt.datetime.combine(local_date, dt.time())
+    if frequency == 'custom':
+        parsed = _parse_cron(schedule.get('cron', ''))
+        if not _cron_date_matches(parsed, local):
+            return set(), set()
+        return parsed['hour'], parsed['minute']
+    if frequency == 'hourly':
+        return set(range(24)), {int(schedule.get('minute', 0))}
+    if frequency == 'weekly' and sunday_index(local) != int(schedule.get('weekday', 0)):
+        return set(), set()
+    if frequency == 'monthly' and local.day != monthly_day(schedule, local.year, local.month):
+        return set(), set()
+    return {int(schedule.get('hour', 0))}, {int(schedule.get('minute', 0))}
+
+
+def _latest_on_date(schedule: dict, local_date: dt.date, zone, upper: dt.datetime):
+    hours, minutes = _day_matches(schedule, local_date)
+    latest = None
+    for hour in sorted(hours):
+        for minute in sorted(minutes):
+            local = dt.datetime.combine(local_date, dt.time(hour, minute), tzinfo=zone)
+            for candidate in _local_candidates(local, zone):
+                if candidate <= upper and (latest is None or candidate > latest):
+                    latest = candidate
+    return latest
 
 
 def last_occurrence(schedule: dict, now: dt.datetime, limit_days: int = SEARCH_LIMIT_DAYS):
@@ -147,12 +234,32 @@ def last_occurrence(schedule: dict, now: dt.datetime, limit_days: int = SEARCH_L
     special case per frequency, and the longest gap between occurrences is a month, so the
     walk is bounded. A daily schedule finds its answer within a day of minutes.
     """
-    moment = now.replace(second=0, microsecond=0)
-    for _ in range(limit_days * 24 * 60):
-        if occurs_at(schedule, moment):
-            return moment
-        moment -= dt.timedelta(minutes=1)
+    current = _aware(now)
+    zone = zone_for(schedule, current.tzinfo)
+    upper = current.astimezone(dt.timezone.utc).replace(second=0, microsecond=0)
+    local_date = upper.astimezone(zone).date()
+    for offset in range(limit_days + 1):
+        candidate = _latest_on_date(schedule, local_date - dt.timedelta(days=offset), zone, upper)
+        if candidate is not None:
+            return candidate.astimezone(current.tzinfo or dt.timezone.utc)
     return None
+
+
+def due_occurrence(schedule: dict, now: dt.datetime, last_seen):
+    """Return the latest missed occurrence, or None when that occurrence was answered."""
+    occurrence = last_occurrence(schedule, now)
+    if occurrence is None:
+        return None
+    if last_seen is None:
+        return occurrence
+    if isinstance(last_seen, str):
+        try:
+            last_seen = dt.datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
+        except ValueError:
+            return occurrence
+    last_seen = _aware(last_seen)
+    return occurrence if last_seen.astimezone(dt.timezone.utc) < \
+        occurrence.astimezone(dt.timezone.utc) else None
 
 
 def is_due(schedule: dict, now: dt.datetime, last_run) -> bool:
@@ -164,21 +271,7 @@ def is_due(schedule: dict, now: dt.datetime, last_run) -> bool:
     """
     if not schedule.get('enabled'):
         return False
-    occurrence = last_occurrence(schedule, now)
-    if occurrence is None:
-        return False
-    if last_run is None:
-        return True
-    if isinstance(last_run, str):
-        try:
-            last_run = dt.datetime.fromisoformat(last_run)
-        except ValueError:
-            return True
-    if last_run.tzinfo is None:
-        last_run = last_run.replace(tzinfo=dt.timezone.utc)
-    if occurrence.tzinfo is None:
-        occurrence = occurrence.replace(tzinfo=dt.timezone.utc)
-    return last_run < occurrence
+    return due_occurrence(schedule, now, last_run) is not None
 
 
 def describe(schedule: dict) -> str:
@@ -190,20 +283,25 @@ def describe(schedule: dict) -> str:
     hour = int(schedule.get('hour', 0))
     clock = f'{hour:02d}:{minute:02d}'
     if frequency == 'custom':
-        return f'Custom: {schedule.get("cron", "")}'
-    if frequency == 'hourly':
-        return f'Every hour at {minute:02d} minutes past'
-    if frequency == 'daily':
-        return f'Every day at {clock}'
-    if frequency == 'weekly':
-        return f'Every {WEEKDAY_NAMES[int(schedule.get("weekday", 0))]} at {clock}'
-    if frequency == 'monthly':
+        text = f'Custom: {schedule.get("cron", "")}'
+    elif frequency == 'hourly':
+        text = f'Every hour at {minute:02d} minutes past'
+    elif frequency == 'daily':
+        text = f'Every day at {clock}'
+    elif frequency == 'weekly':
+        text = f'Every {WEEKDAY_NAMES[int(schedule.get("weekday", 0))]} at {clock}'
+    elif frequency == 'monthly':
         mode = schedule.get('monthly_mode', 'day')
         weekday = schedule.get('monthly_weekday')
         if mode == 'day':
-            return f'Day {int(schedule.get("monthly_day", 1))} of each month at {clock}'
-        which = 'first' if mode == 'first' else 'last'
-        if weekday in (None, ''):
-            return f'The {which} day of each month at {clock}'
-        return f'The {which} {WEEKDAY_NAMES[int(weekday)]} of each month at {clock}'
-    return 'Off'
+            text = f'Day {int(schedule.get("monthly_day", 1))} of each month at {clock}'
+        else:
+            which = 'first' if mode == 'first' else 'last'
+            if weekday in (None, ''):
+                text = f'The {which} day of each month at {clock}'
+            else:
+                text = f'The {which} {WEEKDAY_NAMES[int(weekday)]} of each month at {clock}'
+    else:
+        return 'Off'
+    timezone = schedule.get('timezone') or DEFAULT_TIMEZONE
+    return text if timezone == DEFAULT_TIMEZONE else f'{text} ({timezone})'

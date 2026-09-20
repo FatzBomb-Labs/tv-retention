@@ -1,9 +1,11 @@
 import datetime as dt
 import unittest
+from zoneinfo import ZoneInfo
 
 import context  # noqa: F401
 import schedules
-from schedules import ScheduleError, describe, is_due, last_occurrence, occurs_at
+from schedules import (ScheduleError, describe, due_occurrence, is_due, last_occurrence,
+                        occurrence_id, occurs_at)
 
 
 def at(year, month, day, hour=0, minute=0):
@@ -97,6 +99,14 @@ class Custom(unittest.TestCase):
         with self.assertRaises(ScheduleError):
             occurs_at(schedule(frequency='custom', cron='0 99 * * *'), at(2026, 9, 7))
 
+    def test_a_later_invalid_field_is_refused_even_when_an_earlier_field_misses(self):
+        with self.assertRaises(ScheduleError):
+            occurs_at(schedule(frequency='custom', cron='1 99 * * *'), at(2026, 9, 7))
+
+    def test_an_annual_custom_schedule_catches_up_after_forty_days(self):
+        s = schedule(frequency='custom', cron='0 4 1 1 *')
+        self.assertTrue(is_due(s, at(2027, 1, 2, 9), '2026-01-01T04:00:00+00:00'))
+
 
 class LastOccurrence(unittest.TestCase):
     def test_finds_todays_run(self):
@@ -112,6 +122,24 @@ class LastOccurrence(unittest.TestCase):
         s = schedule(frequency='monthly', monthly_mode='day', monthly_day=1, hour=4)
         self.assertEqual(last_occurrence(s, at(2026, 9, 20, 12)).month, 9)
         self.assertEqual(last_occurrence(s, at(2026, 9, 1, 3)).month, 8)
+
+    def test_schedule_uses_its_iana_timezone(self):
+        s = schedule(frequency='daily', hour=1, minute=30, timezone='America/New_York')
+        found = last_occurrence(s, dt.datetime(2026, 9, 7, 6, 0, tzinfo=dt.timezone.utc))
+        self.assertEqual(found, dt.datetime(2026, 9, 7, 5, 30, tzinfo=dt.timezone.utc))
+
+    def test_a_nonexistent_spring_forward_time_is_skipped(self):
+        s = schedule(frequency='daily', hour=2, minute=30, timezone='America/New_York')
+        found = last_occurrence(s, dt.datetime(2026, 3, 8, 7, 0, tzinfo=dt.timezone.utc))
+        self.assertEqual(found, dt.datetime(2026, 3, 7, 7, 30, tzinfo=dt.timezone.utc))
+
+    def test_fall_back_occurrences_have_distinct_durable_identities(self):
+        s = schedule(frequency='daily', hour=1, minute=30, timezone='America/New_York')
+        first = dt.datetime(2026, 11, 1, 5, 30, tzinfo=dt.timezone.utc)
+        second = dt.datetime(2026, 11, 1, 6, 30, tzinfo=dt.timezone.utc)
+        self.assertNotEqual(occurrence_id(first), occurrence_id(second))
+        self.assertEqual(due_occurrence(s, second + dt.timedelta(minutes=5), occurrence_id(first)), second)
+        self.assertIsNone(due_occurrence(s, second + dt.timedelta(minutes=5), occurrence_id(second)))
 
 
 class Due(unittest.TestCase):

@@ -74,6 +74,33 @@ class MissingFolders(unittest.TestCase):
         self.assertEqual([e['path'] for e in not_created], ['/mnt/user/media/TV/Never Imported'])
 
 
+class AcquisitionHistory(unittest.TestCase):
+    def test_first_acquired_uses_import_events_not_grabs_upgrades_or_deletions(self):
+        from sonarr import Sonarr
+
+        client = Sonarr({'id': 'i1', 'name': 'Series', 'url': 'http://sonarr:8989',
+                         'api_key': 'a' * 32})
+        client._request = lambda *args, **kwargs: [
+            {'episodeId': 101, 'eventType': 'grabbed',
+             'date': '2020-01-01T00:00:00Z'},
+            {'episodeId': 101, 'eventType': 'downloadFolderImported',
+             'date': '2020-01-03T00:00:00Z'},
+            {'episodeId': 101, 'eventType': 'episodeFileDeleted',
+             'date': '2020-01-04T00:00:00Z'},
+            {'episodeId': 101, 'eventType': 'downloadFolderImported',
+             'date': '2020-01-05T00:00:00Z'},
+            {'episodeId': 102, 'eventType': 'episodeFileUpgraded',
+             'date': '2020-01-02T00:00:00Z'},
+            {'episodeId': 102, 'eventType': 'manualImport',
+             'date': '2020-01-06T00:00:00Z'},
+        ]
+
+        self.assertEqual(client.first_acquired(1), {
+            101: '2020-01-03T00:00:00Z',
+            102: '2020-01-06T00:00:00Z',
+        })
+
+
 class MediaManagement(unittest.TestCase):
     """The recycle-bin configuration: read publicly, and written back only with the id
     Sonarr itself returned — never a guessed one."""

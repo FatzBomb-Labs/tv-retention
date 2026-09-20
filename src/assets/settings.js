@@ -16,7 +16,8 @@ import { $, el, toggle, options } from './dom.js';
 import { ago, plural, range } from './format.js';
 import { notice, guarded } from './feedback.js';
 
-function createSettings({ api, render, testMode, getSettings, getSnapshot, applySaved }) {
+function createSettings({ api, render, testMode, getSettings, getSnapshot, applySaved,
+                          restoreActivated }) {
   // Read through a getter rather than captured once: every save replaces the document.
   const settings = () => getSettings();
   const snapshot = () => getSnapshot();
@@ -43,6 +44,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     $('tvr-freq').value = schedule.frequency || 'daily';
     $('tvr-monthly-mode').value = schedule.monthly_mode || 'day';
     $('tvr-cron').value = schedule.cron || '0 4 * * *';
+    $('tvr-timezone').value = schedule.timezone || 'Etc/UTC';
     $('tvr-schedule-summary').textContent = snapshot().schedule_text || 'Off';
 
     applyScheduleVisibility();
@@ -75,6 +77,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
       monthly_day: $('tvr-monthly-day').value,
       monthly_weekday: $('tvr-monthly-weekday').value,
       cron: $('tvr-cron').value.trim(),
+      timezone: $('tvr-timezone').value.trim(),
     };
   }
 
@@ -149,10 +152,10 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   const AIR_PROVIDERS = {
     tmdb: { name: 'TMDB', needs: 'Add an API key under Connections' },
     tvmaze: { name: 'TVMaze', needs: 'No key needed' },
-    anilist: { name: 'AniList', needs: 'No key needed' },
+    anilist: { name: 'AniList', needs: 'Not available for retention dates yet' },
     imdb: { name: 'IMDB', needs: 'No public API exists' },
-    plex: { name: 'Plex', needs: 'Needs a Plex connection' },
-    jellyfin: { name: 'Jellyfin', needs: 'Needs a Jellyfin connection' },
+    plex: { name: 'Plex', needs: 'Connectivity check only' },
+    jellyfin: { name: 'Jellyfin', needs: 'Connectivity check only' },
   };
   const AIR_QUESTIONS = [
     ['unresolved', 'tvr-air-unresolved', 'If none of those can resolve an air date', [
@@ -167,10 +170,12 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   let airOrder = [];
   let airEnabled = new Set();
 
-  // A provider can be selected only when its connection is usable. Credential-free
-  // TVMaze and AniList are ready immediately; Plex/Jellyfin require a saved endpoint.
+  // A provider can be selected only when it has a stable per-episode retention contract
+  // and its connection is usable. AniList/Plex/Jellyfin remain visible but cannot affect
+  // retention until their identity/date contracts are defensible.
   const airReady = (name) => {
-    if (name === 'tvmaze' || name === 'anilist') return true;
+    if (name === 'anilist' || name === 'plex' || name === 'jellyfin') return false;
+    if (name === 'tvmaze') return true;
     const connection = ((settings().connections || {})[name]) ||
       (name === 'tmdb' ? (settings().tmdb || {}) : {});
     return !!(connection.enabled && (connection.api_key || connection.token || connection.url));
@@ -244,31 +249,55 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
       result.textContent = configured.last_error || '';
       result.className = configured.last_error ? 'tvr-result bad' : 'tvr-result';
     }
+    const stagedBox = $('tvr-backup-staged');
+    const staged = data && data.staged_restore;
+    if (stagedBox) {
+      stagedBox.replaceChildren();
+      stagedBox.hidden = !staged;
+      if (staged) {
+        const pending = staged.quarantined || [];
+        stagedBox.append(el('h3', { className: 'tvr-card-title', textContent: 'Restore staged' }));
+        stagedBox.append(el('p', { textContent: `${staged.file} is ready to review and activate.` }));
+        stagedBox.append(el('p', { textContent: pending.length
+          ? `Quarantined pending work: ${pending.join(', ')}.`
+          : 'No pending work was quarantined.' }));
+        const activate = el('button', { type: 'button', className: 'tvr-primary',
+                                        textContent: 'Activate restore' });
+        activate.addEventListener('click', () => guarded('', async () => {
+          const answer = window.prompt(
+            `Activate ${staged.file}? This installs the staged settings with Test Mode on and schedules off. Type ACTIVATE to continue.`,
+            '');
+          if (answer !== 'ACTIVATE') return;
+          const activated = await api('backup', {
+            operation: 'activate', confirm: answer, review_pending: true,
+          }, 'Activating restore…');
+          if (restoreActivated) await restoreActivated(activated);
+        }));
+        stagedBox.append(el('div', { className: 'tvr-actions' }, [activate]));
+      }
+    }
     const list = $('tvr-backup-list');
     const empty = $('tvr-backup-empty');
     if (!list || !empty) return;
     const backups = (data && data.backups) || [];
     list.replaceChildren(...backups.map((item) => {
-      const restore = el('button', { type: 'button', className: 'tvr-small tvr-secondary',
-                                    textContent: 'Restore' });
-      restore.addEventListener('click', () => guarded('', async () => {
+      const stage = el('button', { type: 'button', className: 'tvr-small tvr-secondary',
+                                  textContent: 'Stage restore' });
+      stage.addEventListener('click', () => guarded('', async () => {
         const answer = window.prompt(
-          `Restore ${item.file}? This replaces saved settings, state and caches. Type RESTORE to continue.`,
+          `Stage ${item.file} for review? It will not change active settings. Type RESTORE to continue.`,
           '');
         if (answer !== 'RESTORE') return;
-        const restored = await api('backup', { operation: 'restore', file: item.file, confirm: answer },
-                                   'Restoring…');
-        if (result) {
-          result.textContent = 'Restored. Reload the page to use the restored settings.';
-          result.className = 'tvr-result ok';
-        }
-        notice(`Restored ${restored.result?.file || item.file}. Reload the page.`, 'ok');
+        await api('backup', { operation: 'stage', file: item.file, confirm: answer },
+                  'Staging restore…');
+        await renderBackupView();
+        notice(`Restore staged: ${item.file}. Review quarantined work before activating it.`, 'ok');
       }));
       return el('div', { className: 'tvr-inline-row tvr-backup-row' }, [
         el('span', { className: 'tvr-mono', textContent: item.file }),
         el('span', { textContent: item.bytes ? `${item.bytes} bytes` : '' }),
         el('span', { className: 'tvr-alert-age', textContent: item.modified_at || '' }),
-        restore,
+        stage,
       ]);
     }));
     empty.hidden = backups.length > 0;
@@ -278,6 +307,11 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     renderBackup();
     const data = await api('backup', { operation: 'list' }, 'Loading backups…', true);
     renderBackup(data);
+    return data;
+  }
+
+  function discardDrafts() {
+    dirty = false;
   }
 
   // A typed list, one per line or one per comma. Blank lines are how a list is edited, not
@@ -444,6 +478,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   return {
     renderSchedule, renderSettings, renderAbout,
     renderAirProviders, renderBackup, renderBackupView, saveSettings, collectSettings,
+    discardDrafts,
     isDirty: () => dirty, wire,
   };
 }

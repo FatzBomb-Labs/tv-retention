@@ -204,6 +204,7 @@
         <label class="tvr-field" id="tvr-field-minute"><span>Minute</span><select id="tvr-minute"></select></label>
       </div>
       <label class="tvr-field" id="tvr-field-cron"><span>Cron expression</span><input type="text" id="tvr-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
+      <label class="tvr-field"><span>Timezone</span><input type="text" id="tvr-timezone" spellcheck="false" placeholder="Etc/UTC"><small>Use an IANA name, for example America/New_York.</small></label>
       <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity. Sonarr is read again immediately before a run, so nothing acts on a stale reading.</small></p>
     </div>
   </section>
@@ -453,6 +454,7 @@
       <div id="tvr-backup-list" class="tvr-rules"></div>
       <p id="tvr-backup-empty" class="tvr-empty">No backups yet.</p>
     </div>
+    <div id="tvr-backup-staged" class="tvr-card" hidden></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->

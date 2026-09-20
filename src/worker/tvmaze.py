@@ -66,7 +66,8 @@ class TVMaze:
         if show_id:
             episodes = self._get(f'shows/{show_id}/episodes', {'specials': 1}) or []
             for episode in episodes:
-                if int(episode.get('season') or -1) != int(season):
+                raw_season = episode.get('season')
+                if raw_season is None or int(raw_season) != int(season):
                     continue
                 number, date = episode.get('number'), episode.get('airdate')
                 if number and date:

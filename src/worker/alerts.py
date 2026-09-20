@@ -89,6 +89,36 @@ KINDS = {
                 'until the volume is available again.',
         'action': '',
     },
+    'settings-invalid': {
+        'severity': ERROR, 'blocking': True, 'scope': 'system',
+        'title': 'Saved settings are invalid',
+        'help': 'Retention and external writes are paused until the saved settings are repaired.',
+        'action': '',
+    },
+    'intent-invalid': {
+        'severity': ERROR, 'blocking': True, 'scope': 'system',
+        'title': 'Saved run recovery is invalid',
+        'help': 'Retention is paused until the interrupted run record is repaired or removed.',
+        'action': '',
+    },
+    'state-invalid': {
+        'severity': ERROR, 'blocking': True, 'scope': 'system',
+        'title': 'Saved run history is invalid',
+        'help': 'Run history is paused until the saved state document is repaired or removed.',
+        'action': '',
+    },
+    'jobs-invalid': {
+        'severity': ERROR, 'blocking': True, 'scope': 'system',
+        'title': 'Saved scheduler state is invalid',
+        'help': 'Scheduled work is paused until the scheduler state document is repaired or removed.',
+        'action': '',
+    },
+    'health-invalid': {
+        'severity': ERROR, 'blocking': True, 'scope': 'system',
+        'title': 'Saved health cache is invalid',
+        'help': 'Health updates are paused until the saved cache is repaired or removed.',
+        'action': '',
+    },
     'backup-unavailable': {
         'severity': WARNING, 'blocking': False, 'scope': 'system',
         'title': 'Backup destination unavailable',

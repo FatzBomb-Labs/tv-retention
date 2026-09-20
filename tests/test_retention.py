@@ -175,15 +175,22 @@ class InterpolatedDates(unittest.TestCase):
         self.interpolate(episodes)
         self.assertEqual(episodes[1]['air_source'], 'estimated')
 
-    def test_a_leading_gap_borrows_from_the_first_known_episode(self):
+    def test_a_leading_gap_stays_unresolved(self):
         episodes = self.series([None, None, '2015-03-01'])
-        self.interpolate(episodes)
-        self.assertEqual(episodes[0]['air_date'], '2015-03-01')
+        self.assertEqual(self.interpolate(episodes), 0)
+        self.assertIsNone(episodes[0]['air_date'])
+        self.assertIsNone(episodes[1]['air_date'])
 
-    def test_a_trailing_gap_borrows_from_the_last_known_episode(self):
+    def test_a_trailing_gap_stays_unresolved(self):
         episodes = self.series(['2015-03-01', None])
-        self.interpolate(episodes)
-        self.assertEqual(episodes[1]['air_date'], '2015-03-01')
+        self.assertEqual(self.interpolate(episodes), 0)
+        self.assertIsNone(episodes[1]['air_date'])
+
+    def test_a_trailing_gap_is_left_unresolved_for_a_future_episode(self):
+        episodes = self.series(['2015-03-01', None, None])
+        self.assertEqual(self.interpolate(episodes), 0)
+        self.assertIsNone(episodes[1]['air_date'])
+        self.assertIsNone(episodes[2]['air_date'])
 
     def test_a_series_with_no_dates_at_all_is_left_alone(self):
         episodes = self.series([None, None])

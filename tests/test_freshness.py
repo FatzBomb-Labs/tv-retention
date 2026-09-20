@@ -133,6 +133,23 @@ class Freshness(unittest.TestCase):
         main.write_cache(self.settings, 'episodes/r1.json', entry)
         self.assertIsNone(main.episode_cache(self.settings, self.rule)[0])
 
+    def test_a_malformed_episode_cache_is_refetched_not_served_as_empty(self):
+        path = Path(self.settings['state_dir']) / 'episodes' / 'r1.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        episodes, _, _, from_cache = main.episodes_for(self.settings, self.rule)
+        self.assertEqual(len(episodes), 5)
+        self.assertFalse(from_cache)
+        self.assertEqual(self.client.calls, [('episodes', 1), ('series_one', 1)])
+
+    def test_offline_planning_rejects_a_malformed_episode_cache(self):
+        path = Path(self.settings['state_dir']) / 'episodes' / 'r1.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        with self.assertRaisesRegex(Rejected, 'Nothing has been read'):
+            main.episodes_for(self.settings, self.rule, offline=True)
+        self.assertEqual(self.client.calls, [])
+
     def test_the_stored_reading_covers_the_lifecycle_too(self):
         # Otherwise every cached check still costs one call per series to ask "has it ended?"
         main.episodes_for(self.settings, self.rule)

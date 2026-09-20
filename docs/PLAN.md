@@ -1,602 +1,99 @@
-# Production-readiness plan
+# TV Retention Final Plan
 
-Plan of record, revised 2026-09-17 after the application review. This document specifies
-work; it does not authorize changes to a live library or a deployment. Remove completed
-items as they land, recording their evidence in [VALIDATION.md](VALIDATION.md). Keep the
-frontend architecture contracts in [REFACTOR-HANDOFF.md](REFACTOR-HANDOFF.md); this is not
-another module-extraction project.
+Plan of record, updated September 20, 2026. This document tracks the work still needed
+before a release. Completed implementation history belongs in [VALIDATION.md](VALIDATION.md),
+not in this checklist.
 
-## Objective and release policy
+## Current state
 
-Ship a focused Sonarr retention application whose safety, recovery, persistence and UI
-promises are demonstrated by behavior tests and isolated container acceptance. Freeze
-new integrations and optional features until the release blockers below are resolved.
-Do not promote to 1.0 merely because the feature checklist is complete.
+The working baseline is in place:
 
-Priority meanings:
+- Sonarr owns media metadata, monitoring and deletion. The application has no media mounts.
+- Test Mode, queued removals, exclusion protection, shared-file checks and durable recovery
+  are implemented.
+- Backup creation, restore staging and activation are implemented.
+- Provider date safety and civil-time scheduling are implemented. AniList remains disabled
+  for retention dates because its current lookup cannot prove season identity.
+- The authoritative Linux gate passes: **741 Python tests** and **31 frontend tests**.
 
-- **P0:** blocks enabling destructive operation or releasing the corrected executor.
-- **P1:** blocks production release: durability, operational correctness, supported
-  workflows, defensive hardening and usable access to primary controls.
-- **P2:** measured improvements or optional product polish; may be explicitly deferred
-  if they do not conceal incorrect state or weaken safety.
+This is not release approval. No unattended destructive schedule is authorized until the
+remaining acceptance work below is complete.
 
-Evidence baseline and latest implementation results are in [VALIDATION.md](VALIDATION.md).
-The executor dispatch regression is fixed, including explicit intent and read-only recovery
-reconciliation. The current passing gate does not establish the remaining safety contracts.
-Review checks confirmed exclusion-field loss and shared protected/delete files; the
-bounded editor and shared-file fixes are now delivered below. AniList overwriting a
-Sonarr date remains open. Other findings are
-source-inspected; concurrency, DST, container permissions and browser timing consequences
-need targeted validation. Test counts are evidence, not release criteria.
+## Non-negotiable safety
 
-### Progress
+- Sonarr is the only authority for media metadata, monitoring and deletion.
+- A rule must resolve to exactly one current Sonarr series before it can act.
+- Exclusions protect monitoring state and every file containing excluded content.
+- A file cannot be deleted until every affected episode is successfully unmonitored.
+- Ordinary retention never monitors episodes. Monitoring from a queued removal is separate
+  operator intent.
+- Test Mode blocks every external Sonarr mutation, including manual and scheduled paths.
+- Queued removals remain undoable until execution starts and cannot return through stale UI
+  state or recovery data.
+- Stale, partial or unresolved readings never become deletion permission.
 
-**Latest delivered change:** build 22 is deployed with forced post-run Sonarr refresh,
-visible page-open sync progress, the series-editor settings-response fix, and clear result
-dialog dismissal. Commit `a18d758` passed **684 Python and 31 frontend tests** and the
-candidate preflight before deployment. Broader background writers, commit-time version
-rechecks and safe restore remain open.
+## Remaining work
 
-**Previous checkpoint: (4/4 complete)** — unified removal-only recovery and guarded retry
-of requests that failed before staging. Commits `09ac1dc` and `7bd2d1b`.
-**OVERALL PLAN: (0/8 release phase gates complete)** — the bounded Phase 1 safety work is
-implemented and verified, while Phase 0 evidence and Phase 2 transaction gates remain open.
-This release-gate count is not an implementation-progress measure or a readiness percentage.
-The former 0/94 counter is retired: it excluded fixes already delivered.
+### 1. Finish UI state correctness
 
-**Progress since the preceding mixed-run checkpoint (`9d7bbca`):**
-- Removal-only retries now share the durable, scope-aware ledger. A requested subset no
-  longer resumes an unrelated old removal-only intent.
-- Inconsistent completed intents with outstanding removal operations or local finalization
-  are handled without blindly restaging acknowledged work.
-- A failed initial staging read no longer holds a verifiable live request forever: retry
-  checks a fresh binding to the recorded target and saves the new operation before dispatch.
-- Canceled/deleted requests with no operation checkpoint retire without claiming success
-  and release their hold. Operation-backed uncertainty remains protected.
-- Restaging respects another rule's target hold in either ledger order. Missing legacy
-  identity remains blocked; changed-action failures report the action actually attempted.
-- Both initial regressions were observed failing before their fixes. Review-driven coverage
-  was added afterward. The final gate passed 638 Python and 22 frontend tests; a subsequent
-  committed-tree recovery check passed 40 tests. See VALIDATION for timings and limits.
+Required before release:
 
-Delivered and verified (evidence and limits in VALIDATION):
-- Isolated scripted Sonarr fixture, public-run regressions and mandatory Linux checks.
-- Restored executor dispatch and before/after checkpoints; retired legacy run write paths.
-- Failed/unattempted work is reported as incomplete rather than successful.
-- Recovery uses structured HTTP status and stops on failed reads.
-- Ordinary-only retries archive the old intent and re-plan from current settings and
-  fresh readings rather than replaying old deletion decisions. This now also covers mixed
-  intents whose removals completed and no longer await local queue finalization.
-- Removal request IDs prevent same-action cancel/requeue from authorizing old operations,
-  reject stale saves carrying canceled IDs, and are checked again before dispatch. Local
-  finalization now removes only the rule whose current queue request, action and target
-  match the completed operation, reading current settings instead of saving the run's
-  stale copy.
-- Unresolved mixed-run removals now hand off to a separate durable ledger before fresh
-  ordinary planning. Blocked requests and their targets are held while unrelated series
-  continue; scoped runs do not reconcile unrelated migrated requests. Missing handoff
-  evidence, corrupt ledgers and ambiguous ownership fail closed.
+- Keep Run and confirmation tied to a current, complete plan and current source readings.
+- Prevent stale saves, late responses and concurrent tabs from overwriting newer edits.
+- Preserve drafts, one-time API-key display and restore reload behavior through background
+  refreshes.
+- Finish the small accessibility and responsive-layout fixes that affect primary actions.
 
-Remaining phase status:
-- **Phase 0 — partial:** concurrent host gates now pass with unique staging and cleanup;
-      interrupted-SSH cleanup evidence and the safe-restore portion of the matrix remain.
-- **Phase 1 — bounded P0 safety work complete:** dispatch, incomplete-result reporting, fresh
-      ordinary replanning, separate scoped removal ownership, request-aware finalization,
-      guarded record-only retry, Test Mode write enforcement, target authorization, subprocess
-      interruption evidence, operator resolution and complete shared-file membership checks are
-      verified in bounded fixtures. Cross-tab settings conflicts, atomic mode transitions, full
-      ledger durability and later acceptance evidence remain in Phases 2–7.
-- **Phases 2–7 — pending:** concurrency/durability, backup/restore, dates/scheduling,
-  interface correctness, container/HTTP operation and release acceptance gates remain.
+Do not expand the frontend architecture. Fix concrete state or usability failures in the
+existing modules.
 
-Lead progress reports with the delivered change since the previous checkpoint, its commits
-and evidence, followed by the remaining blockers. Name the checkpoint alongside its x/4
-count; keep the phase exit-gate count as secondary release status, not the headline measure
-of work. Do not reconstruct an arbitrary completed-item fraction from a checklist whose
-finished items are removed.
+### 2. Verify the supported container
 
-### Non-negotiable boundaries
+Run the application in an isolated container and verify:
 
-- Sonarr owns media and deletion. No media mounts, path mappings or direct media access.
-- Exactly one confirmed series identity per rule; ambiguous or unavailable identity fails
-  closed, including queued removals and resumed work.
-- Exclusions protect both monitoring state and every file containing excluded content.
-- No deletion proceeds without confirmed unmonitoring of all affected episodes.
-- Ordinary retention runs never decide to monitor. Explicit queued removal dispositions
-  that monitor remain separately identified operator intent, not retention policy.
-- Test Mode prevents external Sonarr mutations on every entry point. Application settings
-  must remain editable; document the precise allowed local operational writes rather than
-  weakening the external-write guarantee. Preview must not create executable intent.
-- Removal remains queued and undoable until execution starts. A canceled or newly
-  protected operation must not return through a stale draft or recovered intent.
-- Cached, stale and partial plans never masquerade as complete current plans.
-- Per-show reads remain background work; transaction safety must not become a global
-  network-length lock or a global busy overlay.
-- Standard-library runtime remains the default. No framework/database rewrite is required
-  by this plan; any added dependency needs a specific benefit and maintenance rationale.
+- login, configurable port, health/readiness and worker failure reporting;
+- malformed HTTP/RPC input is rejected cleanly;
+- graceful shutdown and restart recover safely;
+- root and non-root startup, `PUID`/`PGID`/`UMASK`, `/config` and optional backup permissions;
+- published-image instructions, version/build metadata and base-image renewal.
 
-## Delivery sequence and dependencies
+Keep the existing standard-library design. Do not add a framework or database for this work.
 
-1. **Phase 0:** reproducible baseline and regression harness.
-2. **Phase 1:** P0 execution, protection and mutation-policy fixes.
-3. **Phase 2:** concurrent persistence and durable recovery foundations.
-4. **Phase 3:** safe backup/restore, dependent on Phase 2 transaction controls.
-5. **Phases 4–6:** provider/scheduler correctness, UI state and container/HTTP operation.
-6. **Phase 7:** release evidence, disposable acceptance and controlled deployment.
+### 3. Complete acceptance in order
 
-Small fixes may be developed in parallel, but the executor must not be deployed alone:
-its corrected write path must ship only with the P0 guards and recovery/persistence tests.
-Frontend revision handling depends on backend revision semantics. Cosmetic work does not
-hold up safety work, and no production-media test substitutes for an isolated regression.
+1. **Deterministic fixtures:** run the focused backend/frontend checks and the Linux gate.
+2. **Isolated container:** exercise the UI-to-worker path with fake Sonarr, including saves,
+   restart, recovery, migration and backup/restore. Record exact external requests.
+3. **Disposable Sonarr:** use synthetic media only; Test Mode off is allowed only here.
+   Verify monitoring, recycle-bin behavior, file outcomes and restart recovery.
+4. **Target read-only smoke:** use a copied config under `/tmp`, schedules off and Test Mode
+   on. Verify login, display, freshness, permissions and read-only Sonarr access.
+5. **Operator canary:** only after steps 1-4 and explicit approval. Use one bounded plan,
+   one rollback image and one matching config archive.
 
-## Phase 0 — Establish the test boundary (P0)
+Docker and WSL are unavailable on the current Windows development machine, so steps 2-5
+must run on the Linux host or another approved environment.
 
-Primary areas: `tests/`, `tools/check-on-host.*`, `docs/VALIDATION.md`.
+### 4. Keep documentation aligned
 
-The normal-import executor tests, public-run coverage, scripted Sonarr fixture and
-mandatory checks are in place; evidence and current matrix limits are in VALIDATION.
+- Update README, AGENTS and SECURITY-REVIEW when behavior changes.
+- Keep Test Mode, media-filesystem and notification wording accurate.
+- Record only current validation counts and environment details in VALIDATION.
+- Do not add a new test for every checklist line. Add tests for concrete regressions,
+  safety boundaries or data-loss risks; otherwise use the smallest focused check.
 
-- [ ] Complete safe-restore mutation evidence. The bounded both-mode matrix covers
-      manual/scheduled run, CLI, due tick, picker, scope pass, recycle-bin, series removal,
-      preview and restore refusal with exact fake requests. Safe archive activation remains
-      intentionally disabled until Phase 3.
-- [x] Use fresh temporary config/state for every backend test and isolated schedules.
-      Continue the Linux host gate; do not patch Linux path or `fcntl` behavior to make
-      the Windows box impersonate the container.
-- [x] Fault-test concurrent host validations: two complete gates ran simultaneously, each
-      passing **678 Python and 29 frontend tests** with independent staging paths and cleanup.
-- [ ] Fault-test interrupted host validations and cleanup failures. A validation launch
-      completed normally during the attempted interruption, so no SSH-loss evidence is claimed.
+## Explicitly unresolved
 
-**Exit gate:** the regression harness detects the known failures without external service
-access, and the required validation matrix is documented and repeatable.
+- AniList cannot contribute retention dates until it can prove series, season and episode
+  identity without relying on title similarity.
+- Container permissions, HTTP hardening, graceful shutdown and readiness still need an
+  actual image-level check.
+- Browser reload, real-browser interaction and large-library performance still need practical
+  acceptance evidence; do not build a new frontend architecture to obtain it.
+- No live target deletion, deployment or production canary is authorized by this document.
 
-## Phase 1 — Restore the safety contract (P0)
+## Out of scope
 
-### 1.1 Execute and recover operations correctly
-
-Primary areas: `src/worker/main.py`, `actions.py`, `sonarr.py`, executor tests.
-
-Dispatch/completion now belongs to the executor, with explicit intent and read-only
-recovery reconciliation. Failed operations stop the current run conservatively. Run
-summaries expose incomplete operations and failed/unattempted removals. Persisted-intent
-retry, changed-target authorization, subprocess interruption, operator resolution and
-complete shared-file membership checks are covered in VALIDATION. Recovery refuses
-unfinished removals when the current queue, endpoint, series identity or file membership
-cannot be verified. A 404 cannot verify absence and leaves uncertain series deletion held
-for review, never marked complete.
-
-**Agreed unattended recovery policy:** keep confirmed completed work, preserve failures
-and uncertainty, and calculate ordinary retention anew from current settings and fresh
-Sonarr readings at the next manual/scheduled run. Never replay unfinished ordinary
-operations or require routine operator acknowledgement after an outage. Missing files
-are not newly reclaimed space. No rollback of completed retention is attempted.
-Explicit queued removals remain separate one-time intent: persist request identity, verify
-current target and queue generation, reconcile uncertain results, and never revive a
-cancellation or transfer old confirmation to a replacement series. Queued removals now
-carry a persisted `request_id`; recovery and dispatch require the current queue to hold
-that exact ID and action, and a stale settings save cannot restore a canceled ID.
-New external requests also freeze server-owned instance ID, normalized URL, series ID,
-TVDB ID and canonical path. Echoed requests preserve the server snapshot. Stage records
-retain it before reads, and one shared verifier checks current queue/endpoint plus fresh
-Sonarr identity before staging, reconciliation and dispatch, returning the current client
-for dispatch. Missing legacy evidence holds external work until requeue/review; local
-remove-rule remains local. Finalization checks the same snapshot without rereading a
-successfully deleted series. This is not an atomic authorization/dispatch transaction.
-
-Ordinary-only unfinished intents now follow that policy: exact checkpoints are archived
-under `state/run-history/` before replacement, and retries refresh the catalogue and
-re-evaluate current rules. Archive failure stops replacement/writes. VALIDATION records
-the bounded coverage. Mixed intents now also re-plan ordinary work when all removal
-records have successful operation checkpoints and none still awaits local queue
-finalization. The exact old mixed intent is archived, preserving completed removal history.
-Unresolved mixed intents now archive first, hand removal checkpoints to
-`state/removal-ledger.json`, and re-plan ordinary work without copying ledger operations
-back into the run intent. Independent series may continue after a removal recovery/read
-failure; the selected blocked removal remains an error in the overall result. Both its
-rule ID and old Sonarr target are held. Ordinary execution still stops on its first failed
-operation. This is a retry policy, not general dependency-aware parallel execution.
-Removal-only history now uses the same scope-aware ledger, including inconsistent completed
-intents with outstanding operation checkpoints or queue finalization. Recovery errors are
-reported per request rather than aborting the entire run. Record-only staging failures now
-retry a live queue after a fresh successful binding to the recorded instance/series; the
-new operation is checkpointed before dispatch. Legacy records without target evidence stay
-held. Another rule's uncertain target ownership blocks restaging in either batch order.
-Canceled/deleted record-only requests retire without claiming success and release their
-hold; the original error is reported on retirement and the original intent remains archived.
-Operation-backed canceled/replaced requests can now be explicitly canceled after review;
-the resolution is recorded as uncertain and never claims Sonarr success. Ordinary file
-deletion operations now retain their complete episode membership and refuse recovery when
-the episode or shared-file membership changes. Ledger lifecycle/compaction, full shape
-validation and transaction safety remain open. Finalization is request-aware but not
-transactional: a save racing the run can still be overwritten.
-Archive lifecycle, crash-history finalization and durability remain Phase 2 work.
-
-- [x] Restrict execution to currently eligible operations. Separate mixed-run removal
-      recovery from newly planned ordinary retention so failed/canceled explicit work
-      cannot globally block unattended retention or revive its old decisions. Bounded
-      scope, ownership and independent ordinary replanning are covered in VALIDATION.
-- [x] Define explicit operation states and dependencies. Failed or uncertain unmonitoring
-      prevents the dependent file deletion. Independent series may continue only under a
-      documented policy that preserves the failure in the overall result.
-- [x] Prove durable before/after checkpoints through public-run interruption tests; if a
-      required checkpoint cannot be saved, do not send the next write. Subprocess tests
-      cover crashes before and after each operation checkpoint; multi-process transactions
-      remain Phase 2 work.
-- [x] Report actual rather than planned byte totals, including partial success and retry,
-      without counting failed, unattempted or already-completed work as newly reclaimed space.
-- [x] Provide explicit operator resolution for unprovable operation-backed removal
-      permission, including uncertain series deletion whose fresh lookup returns 404.
-      The cancel-only action preserves original decisions/checkpoints for audit, clears
-      only the matching current queue and never authorizes a replacement target. Ordinary
-      retention continues to re-plan.
-- [x] Prove missing/replaced-file recovery uses complete, authoritative target readings,
-      including malformed individual rows and changed file membership. Ordinary file-delete
-      operations freeze every episode sharing the file and recovery refuses missing,
-      replaced or changed membership; malformed rows fail in the Sonarr mapping.
-
-**Tests:** first run; multiple operations; no operations; unmonitor failure; delete failure;
-request accepted but acknowledgement lost; crash before/after each checkpoint; interrupted
-removal; changed file ID; unavailable Sonarr; changed rule/instance; canceled work; subset
-run with an unrelated old intent; repeated restart. No unsafe replay, false completion,
-empty/global intent corruption or duplicate success reporting is acceptable.
-
-### 1.2 Preserve exclusions and removal intent
-
-Primary areas: `series-editor.js`, `series-removal.js`, `actions.py`, `core.py`.
-
-Delivered: retention edits merge into the latest frontend rule by ID, preserving manual
-exclusions, the current queue and independent metadata. Removed rules are rejected and
-follow-up actions use stable identity rather than array position. Tests cover Undo with
-the editor open, redraw/save/reopen, replaced settings, whole-season markers and
-watermarks. See VALIDATION for the bounded frontend evidence.
-
-- [ ] Add backend revision/conflict protection in Phase 2 so multiple tabs cannot restore
-      removed protection or canceled queues with a stale whole-document save. Frontend
-      lookups do not protect concurrent whole-document writes or stale responses in flight.
-
-**Tests:** exclusion -> edit -> save -> reload; whole-season exclusions including future
-members; Undo -> edit -> save; rule removed during an in-flight operation; reordered rule
-list; existing auto-reenable metadata preserved.
-
-### 1.3 Consolidate episode decisions into safe file operations
-
-Primary areas: `core.py`, `sonarr.py`, `main.py`, mapping and retention tests.
-
-Delivered: the agreed simpler policy replaces the proposed per-episode permission
-matrix. Each file uses its latest episode by the existing date/season/episode ordering
-for condition votes, with episode-count limits still counting episodes. An exclusion on
-any member protects the file. Unknown/future shared members retain protection. Physical
-deletions and byte totals are deduplicated per rule by Sonarr file ID; monitored members
-must be in the unmonitor plan, and a failed unmonitor stops execution. Per-episode rows
-remain available to monitoring and the UI. Evidence and bounded coverage are in VALIDATION.
-No separate complex mapping-reconciliation subsystem is planned for this checkpoint.
-
-### 1.4 Apply Test Mode consistently
-
-Primary areas: `actions.py`, `main.py`, `sonarr.py`, `settings.js`, `series-editor.js`.
-
-Delivered, bounded: every application-created Sonarr client uses one transport guard,
-reloading and strictly validating current saved mode before each non-GET request. Missing
-mode defaults on; load/validation errors refuse writes. Settings remain editable, scope
-passes return explicit skipped/applied counts, and the editor reports skips without
-submitting follow-up picker changes. Picker/recycle writes reject clearly. Standalone
-clients retain their optional guard API. Restore RPC refuses activation in either mode.
-Manual/scheduled/CLI/tick and preview fixture evidence is recorded in VALIDATION.
-
-Allowed local writes under Test Mode include configuration, backup creation/listing,
-caches, health/progress/logs and job bookkeeping. Runs entered in Test Mode/preview do not
-persist executable work or consume queues. A live run toggled mid-flight keeps checkpoints
-and failure bookkeeping for attempted work; Test Mode is not local read-only operation.
-
-- [ ] Coordinate a safe in-progress Test Mode transition: an acknowledged toggle must
-      prevent subsequent dispatch, while reporting requests already in flight. The current
-      check blocks the next checked request but is not atomic with dispatch; a request
-      already past it can still be sent. Stale settings saves can also overwrite the mode.
-      This requires Phase 2 transaction/concurrency work, not another per-action guard.
-- [ ] Prove mode enforcement across process restart and coordinated restore activation.
-      Same-process retry currently preserves the old intent under Test Mode; safe restore
-      remains Phase 3 work. Do not re-enable restore RPC before its activation gates land.
-
-**Exit gate for Phase 1:** all P0 regression paths pass through the real action/run surface
-against fake Sonarr, including zero external mutations under Test Mode. Do not deploy yet
-without Phase 2's checkpoint and concurrency guarantees.
-
-## Phase 2 — Make state durable under concurrency (P1, prerequisite for deployment)
-
-Primary areas: `core.atomic_json`, `store.py`, `actions.py`, `main.py`, frontend transport.
-
-- [x] Allocate a unique temporary file per write, retain same-filesystem atomic replacement,
-      file/directory fsync and cleanup. The concurrent-writer regression proves the unique
-      staging path; injected write-failure coverage remains a separate test gap.
-- [ ] Introduce short serialized read/validate/merge/write transactions. The central
-      whole-document settings action now has a bounded cross-process lock and Linux
-      concurrent-save coverage; internal writers, owned-field merges, lock-order coverage
-      across all entry points and version rechecks before background commits remain open.
-- [x] Add a monotonic settings revision and reject stale whole-document submissions with a
-      useful conflict response. Preserve masked-secret behavior and migrated settings.
-      The revision check protects the whole-document settings action; serialized merge
-      transactions and background-owned-field reconciliation remain separate items below.
-- [x] Merge background binding and sync auto-reenable updates by owned rule fields/ID,
-      preserving newer retention settings during Sonarr reads. Broader cache/health writers,
-      acknowledgements, suppression state and commit-time version rechecks remain open for
-      the full transaction model.
-- [ ] Distinguish authoritative state from disposable caches. Fail closed on damaged
-      settings or intent; do not silently reset an unsafe configuration or replay unknown
-      work. Expose storage failures in Status.
-- [ ] Make run identity/history finalization idempotent across restart so one logical run
-      is not counted as multiple successful runs or duplicated reclaimed space.
-
-**Tests:** simultaneous writers/readers; two tabs; slow binding plus settings save;
-concurrent show checks; CLI plus HTTP; journal/finalization restart; disk-full, permission,
-replace/fsync failures; malformed and interrupted intent. Use deterministic barriers rather
-than timing sleeps. Readers see complete documents and newer user intent is never lost.
-
-## Phase 3 — Backups that can actually restore safely (P1)
-
-Primary areas: `backup.py`, `store.py`, `actions.py`, `settings.js`, Compose and docs.
-
-- [ ] Define and document a separate optional persistent `/backups` mount; `/config` remains
-      the only required volume and no media mounts are added. Make ownership under PUID,
-      PGID and explicit `user:` predictable without unbounded ownership changes.
-- [ ] Stage restore inside an application-writable location. Test actual dropped-privilege
-      container permissions rather than relying on host unit-test permissions.
-- [ ] Create a consistent backup snapshot under transaction coordination. Define included
-      authoritative files, caches, runtime locks and temporary-file exclusions. Either
-      constrain active state to `/config` or explicitly support backing up external state;
-      never silently omit it.
-- [ ] Reserve archive names atomically and order retention by reliable timestamp/sequence
-      metadata, not lexicographic filenames. Never prune the archive just created. Restrict
-      cleanup to owned archives and test concurrent/same-second creation.
-- [ ] Keep path/member checks, and add bounded entry count, expanded bytes and available-space
-      checks. Treat archives as credential-bearing data; avoid secret output and use
-      appropriate permissions. A manifest is structural validation, not authenticity.
-- [ ] Validate format, settings, migrations and file set before activation. Reject unsupported
-      future formats without modifying live files.
-- [ ] Restore under maintenance exclusion with recoverable installation/rollback semantics.
-      Define replacement behavior for absent files, preserve recovery data on failure and
-      handle interruption during activation—not only during extraction.
-- [ ] Quarantine restored/present executable intents and queues until explicitly reviewed;
-      do not replay historical work. Start restored settings with Test Mode on and schedules
-      off until the operator re-arms them.
-- [ ] On restore success, stop frontend polling, discard drafts and reload a fresh snapshot
-      before permitting any action. On failure, report the actual state and recovery path.
-
-**Tests:** fresh container restore as non-root; older archive missing newer files; pending
-intent; enabled schedule in archive; concurrent save/run; partial copy/activation failure;
-restart during restore; corrupt/incompatible archive; same-second backups with keep=1;
-backup persistence after container replacement. Verify secrets remain usable without being
-printed. No restore may contact Sonarr or automatically enable a write.
-
-## Phase 4 — Dates and scheduling with defensible semantics (P1)
-
-### 4.1 Provider identity, precedence and estimates
-
-Primary areas: `anilist.py`, `tvmaze.py`, `tmdb.py`, `sonarr.py`, `main.py`, `core.py`.
-
-- [ ] Fix AniList to fill blanks only. Require unambiguous series/season/episode mapping;
-      title similarity alone must not authorize retention dates. If that mapping cannot be
-      made reliable for 1.0, disable its retention contribution and label the limitation.
-- [ ] Preserve provider precedence and authoritative Sonarr dates. Reject ambiguous TMDB
-      external-ID results instead of taking the first. Confirm cross-provider numbering
-      with Sonarr-shaped fixtures, including anime and specials.
-- [ ] Preserve numeric season zero in TVMaze lookups.
-- [ ] Confirm and fix trailing-date interpolation that can turn unknown forthcoming
-      episodes into historically aired episodes. An undated future season must not consume
-      past retention slots or lose monitoring because of a neighboring date.
-- [ ] Define estimates and provenance explicitly. Verify that acquired-date fallback uses
-      actual acquisition/import events rather than any earliest history event; do not
-      confuse a grab, upgrade or deletion with first acquisition.
-- [ ] Test provider failure, cache persistence/expiry, partial data and unresolved handling.
-      Do not hide a provider mismatch as successful enrichment. Preserve the choice to
-      exclude/block unresolved files rather than inventing dates.
-- [ ] Remove Plex/Jellyfin from active date-provider choices until they supply usable dates;
-      if connection checks remain, label them connectivity-only.
-
-**Gate:** higher-priority dates never change; uncertain identity or dates never produce
-new deletion permission. Tests verify downstream deletion and monitoring, not just fill
-counts. Correct the P0-confirmed AniList overwrite before any release that enables it.
-
-### 4.2 Civil-time scheduling
-
-Primary areas: `schedules.py`, `core.py`, `main.py`, schedule tests/UI.
-
-- [ ] Parse and validate every custom-cron field independently of whether a sample instant
-      happens to match an earlier field.
-- [ ] Use timezone-aware civil-time calculations with an IANA timezone, not the current
-      fixed offset applied retrospectively. Confirm timezone data exists in the image.
-- [ ] Specify spring-forward behavior and one execution per intended fall-back occurrence;
-      keep a durable occurrence identity so repeated wall-clock times do not double-run.
-- [ ] Replace the fixed 40-day catch-up assumption for supported sparse custom schedules,
-      or explicitly bound/reject unsupported schedules with visible migration guidance.
-- [ ] Preserve catch-up and Sonarr-unreachable retry semantics across restart without
-      replaying completed runs. Cover clock changes and long downtime.
-- [ ] Offer Off/Daily/Weekly as the simple UI, but preserve and clearly display existing
-      advanced schedules until an explicit conversion; never silently rewrite them.
-
-**Tests:** real DST transitions, leap years/month ends, annual custom schedule after long
-downtime, invalid later fields, timezone change, repeated tick, interrupted catch-up and
-unavailable Sonarr. Freeze time in fixtures; no real waiting.
-
-## Phase 5 — Make the interface reflect authoritative state (P1 unless marked P2)
-
-Primary areas: `app.js`, `settings.js`, `series-editor.js`, `series-removal.js`, `topbar.js`,
-`connections.js`, `checks.js`, `library.js`, `activity.js`, `dom.js`, markup and CSS.
-
-### State, freshness and write feedback
-
-- [ ] Couple plans to the settings revision and source reading metadata. Invalidate on
-      retention, exclusions, queue, instance and mode changes; never suppress Run with a
-      stale empty plan.
-- [ ] Make confirmation show complete/current versus partial/stale/unknown coverage. Never
-      describe uncertain zero counts as 'no changes expected'. Specify whether confirmation
-      is advisory or authorizes a bounded plan; if fresh execution materially changes the
-      proposed destructive scope, require renewed confirmation rather than silently growing it.
-- [ ] Use one eligibility definition for Run that includes queued removals on disabled
-      rules; keep ordinary disabled-rule retention inactive.
-- [ ] Serialize UI saves, track draft/request generations, and handle backend revision
-      conflicts. An earlier response cannot clear newer edits or overwrite a later save.
-- [ ] Guard asynchronous editor scope/tree/count responses with request generations; ignore
-      responses for old form values, a closed pane or a different series.
-- [ ] Keep backup drafts and loaded archive state through background renders. Distinguish
-      not loaded, loading, failed and truly empty. Apply the same dirty-state discipline
-      to backup settings as other forms.
-- [ ] Bind connection verification to the exact tested URL/key/TLS values. Editing them
-      invalidates verification; stale test responses cannot stamp newer values verified.
-- [ ] Preserve a newly revealed API key until deliberate dismissal/copy acknowledgement;
-      background renders must not erase its one-time display. Do not persist the full key
-      in browser storage.
-- [ ] Remove global library replacement during bulk checks. Update only affected shows,
-      with no global overlay or unrelated-show blocking.
-- [ ] Serialize log polling and invalidate late responses after stopping/changing views.
-      Preserve ordered byte offsets without duplicate/reordered lines.
-- [ ] Show omitted counts or pagination for change lists above the current 300-row cap;
-      summaries must never appear to be a complete list when truncated.
-
-### Accessibility and comprehensibility
-
-- [ ] Give the primary series editor action a native keyboard-accessible control, with
-      visible focus and no nested interactive controls. Test modal focus entry, containment,
-      escape and restoration; preserve focus during background updates.
-- [ ] Set ARIA attributes through actual attributes/appropriate DOM properties, not arbitrary
-      hyphenated properties on elements. Verify expanded state in the accessibility tree.
-- [ ] Correct Any/All help and remove obsolete Earliest/Latest descriptions. Use one set of
-      policy definitions for editor labels, explanations and help.
-- [ ] Fix and visually verify the light-theme menu token/fallback, text contrast, focus and
-      disabled states. Exercise phone-width layout, zoom, long titles and reduced motion.
-- [ ] Verify which automation-panel consolidation is already implemented; finish only the
-      missing clarity around inheritance, per-series values, exclusions and the separately
-      labeled immediate monitoring pass. Keep expandable exclusion trees.
-- [ ] **P2:** add New preset from the editor without losing the draft; move secondary prose
-      into concise accessible help where it improves comprehension.
-
-### Scale and browser evidence
-
-- [ ] Add real-browser workflow tests alongside fake-DOM tests. Exercise selectors/listeners,
-      keyboard behavior, dialogs, dirty forms and delayed/out-of-order responses.
-- [ ] Measure cold load, background refresh, filtering and editor interaction with fixtures
-      representative of the previously measured ~3,000-series library. Establish explicit
-      budgets on a recorded reference machine before calling performance acceptable.
-- [ ] **P2 unless budgets fail:** index rules by bound identity and preserve keyed cards where
-      measurement shows repeated scans/full DOM replacement are costly. Keep lazy posters
-      and bounded rendering; do not replace the architecture merely to optimize it.
-
-**Gate:** browser tests prove exclusion preservation, Undo persistence, current-plan gating,
-conflict-safe saves and restore reload. No silent data loss, misleading destructive
-confirmation, inaccessible primary action or unrelated-show blocking remains.
-
-## Phase 6 — Harden the supported container and HTTP boundary (P1)
-
-Primary areas: `server.py`, `Dockerfile`, `docker-compose.yml`, `tools/`, HTTP tests/docs.
-
-- [ ] Compare credentials as consistently encoded bytes, supporting valid Unicode values
-      through startup/login. Handle invalid comparison inputs as controlled errors.
-- [ ] Validate body framing/size and RPC envelope/action types before dispatch, inside a
-      controlled error boundary. Return structured errors and close unusable connections;
-      do not let malformed input escape as an unhandled handler exception.
-- [ ] Bound accepted-connection timeouts, concurrent work and aggregate login admission.
-      Retain session expiry, CSRF, constant-time comparison, safe asset allowlisting and
-      non-cacheable rejection of unknown release digests.
-- [ ] Document/test the supported trusted-network and HTTPS reverse-proxy deployment modes.
-      Make cookie Secure behavior consistent with configured transport; never trust arbitrary
-      forwarding headers as authentication or TLS evidence. No public exposure by default
-      recommendation, and no security assurance based only on having no dependencies.
-- [ ] Distinguish HTTP liveness, worker heartbeat and operational readiness in health/Status.
-      A dead scheduler thread must not look healthy; Sonarr downtime must not cause a
-      restart loop. Verify health checks honor supported port configuration.
-- [ ] Handle termination deliberately: stop accepting new work, stop scheduling, checkpoint
-      in-flight work and exit within a documented grace period. Forced termination must
-      still recover safely. Test signal delivery and restart in the actual image.
-- [ ] Verify root-start/drop-privileges and explicit `user:` startup, PUID/PGID/UMASK behavior,
-      non-root config/backup permissions and existing volume ownership. Honor UMASK on
-      supported startup paths; never traverse arbitrary host ownership.
-- [ ] Document a tested container-hardening profile where compatible (read-only application
-      filesystem, writable required paths, no-new-privileges, minimal capabilities and
-      resource limits). Verify privilege-drop needs before recommending capability removal.
-- [ ] Establish base-image renewal with an explicit fresh-base build and image scan; floating
-      tags alone do not force updates. Record the resulting base/image digests. Pinning is
-      optional until there is automated digest renewal, not a substitute for patching.
-- [ ] Make published-image versus local-build instructions accurate and verify version,
-      build/date labels, startup refusal and upgrade behavior in the actual release image.
-
-**Gate:** isolated image tests cover login, permissions, configurable port, worker failure,
-TLS-proxy assumptions, graceful/forced shutdown and persistent restore. HTTP tests stay
-local and defensive; no live-target exploitation or load testing is part of acceptance.
-
-## Phase 7 — Evidence, acceptance and controlled release (P1)
-
-### Documentation and CI
-
-- [ ] Update README, AGENTS, SECURITY-REVIEW, acceptance and refactor contracts to match the
-      implemented Test Mode, revisions, recovery, backup mounts and schedules. Remove stale
-      PHP/cron/monitoring-mode comments and unsupported guarantees, not just append caveats.
-- [ ] Reconcile references to deletion-percentage guards with actual behavior. If no such
-      guard exists, make an explicit product decision: implement/test a documented bound,
-      or remove the claim and obsolete acceptance step. Do not imply absent protection.
-- [ ] Clarify 'no filesystem access' as no **media** filesystem access; the app does write
-      config/state. Reconcile notification-removal prose and connected/watching terminology.
-- [ ] Replace hard-coded test-count promises with current recorded runs and checks by area.
-      Mark historical security/validation records as historical, not current assurance.
-- [ ] Add automated Linux CI for behavioral Python/frontend suites, module checks and isolated
-      container smoke, without requiring the private validation host. Keep host scripts as
-      an operator entry point. Add real-browser workflows with dev-only tooling as needed.
-- [ ] Record commit, image/base digest, VERSION/BUILD, test results, browser/environment,
-      migration/restore evidence and remaining limitations in VALIDATION for each candidate.
-
-### Acceptance ladder (do not skip levels)
-
-- [ ] **A — Deterministic fixtures:** all P0/P1 behavioral regressions pass. No expected
-      failures or skipped mandatory checks, including the executor regression.
-- [ ] **B — Isolated container + fake Sonarr:** complete UI-to-HTTP-to-worker-to-Sonarr flow,
-      concurrent saves, restart/checkpoint fault injection, backup/restore and migrations.
-      Keep all config and service endpoints disposable; assert exact external writes.
-- [ ] **C — Disposable real Sonarr/media:** dedicated instance and synthetic expendable files,
-      including a multi-episode file. Explicitly authorize Test Mode off only in this
-      isolated environment; verify actual file outcomes, monitoring, recycle-bin behavior,
-      partial failures and restart without risking a user's library.
-- [ ] **D — Target read-only smoke:** stage under `/tmp`, use a copy of settings away from
-      `/boot`, force schedules off and Test Mode on. Verify upgrade/UI/freshness/permissions
-      and read-only Sonarr behavior. Do not infer write correctness from this level.
-- [ ] **E — Operator-approved canary:** only after A–D, create rollback image/config archive,
-      approve one small plan on a deliberately selected series and disable unrelated work.
-      Explicitly turn Test Mode off, verify outcomes, then return to the safe state while
-      reviewing evidence. Automatic general scheduling requires a separate operator choice.
-
-### Release and rollback gate
-
-- [ ] No unresolved P0/P1 findings. Suspected findings are either verified/fixed with a
-      regression or closed with recorded counter-evidence; no silent omission.
-- [ ] Run a documented soak over repeated schedule, refresh, save and restart cycles; verify
-      bounded resources, no lost edits, no duplicate writes and truthful reporting. Choose
-      cycle counts/duration before running and record them, rather than declaring a single
-      healthy HTTP response a soak test.
-- [ ] Exercise upgrade from supported settings versions and rollback using the matching
-      prior config archive; old binaries must not consume incompatible upgraded state.
-- [ ] Keep exactly one running application container and no stopped predecessors after a
-      successful replacement. Retain one rollback image tag plus matching config archive;
-      clean only TV Retention artifacts and remove preflight containers on success/failure.
-- [ ] Increment BUILD for deployed code changes. Promote VERSION to 1.0.0 only after the
-      release gates pass; a plan or documentation-only edit does not justify a build bump.
-- [ ] Document recovery actions and remaining supported limits so operators can distinguish
-      offline Sonarr, storage failure, incomplete work and intentionally blocked operations.
-
-## Completion rule for every implementation item
-
-1. Confirm the path and add the smallest behavior test that fails for the right reason.
-2. Fix the responsible layer; avoid broad refactors mixed with safety changes.
-3. Run focused checks, then the required Linux gate and relevant browser/container checks.
-4. Review the safety and migration impact, including concurrent and restart behavior.
-5. Record evidence in VALIDATION and remove completed work here. Keep deployed changes
-   behind the release gates, even if an individual development commit passes its tests.
-
-## Explicitly deferred or out of scope
-
-- Radarr/movie management, watched-state retention and new provider integrations.
-- External notifications/webhooks and public API operations beyond the existing lifecycle
-  until their contracts have a separate product decision.
-- Direct media deletion, filesystem auditing or media mounts. Optional folder auditing is
-  deferred beyond 1.0; any future design must remain read-only and never feed deletion.
-- Another frontend decomposition, event bus/service locator or framework rewrite.
-- P2 polish may move to a later release only with explicit documented deferral; this never
-  applies to misleading state, lost protection, keyboard access or failing scale budgets.
+Radarr/movie management, watched-state retention, new provider integrations, outbound
+notifications/webhooks, direct media access, media mounts, filesystem auditing and frontend
+framework rewrites.

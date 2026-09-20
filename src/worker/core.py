@@ -42,7 +42,7 @@ DEFAULTS = {
                  'test_mode': True,
                  'frequency': 'daily', 'minute': 0, 'hour': 4,
                  'weekday': 0, 'monthly_mode': 'day', 'monthly_day': 1,
-                 'monthly_weekday': '', 'cron': '0 4 * * *'},
+                 'monthly_weekday': '', 'cron': '0 4 * * *', 'timezone': 'Etc/UTC'},
     # How old a reading may get before it is read again. The only knob here: the sweep
     # that honours it is spread across the ticks, and confirming Sonarr answers happens on
     # its own fixed interval and before anything that needs it — neither was ever a
@@ -127,6 +127,10 @@ CRON_FIELD = re.compile(r'^[0-9*/,\-]+$')
 
 class Rejected(Exception):
     """A request that failed validation or a guard. Surfaced verbatim in the UI."""
+
+
+class StorageError(Rejected):
+    """A required local persistence operation did not commit."""
 
 
 def canonical_json(value):
@@ -431,12 +435,17 @@ def validate_schedule(raw, field='Schedule') -> dict:
         'monthly_day': _whole(raw.get('monthly_day', 1), f'{field} day of month', 1, 28, allow_none=False),
         'monthly_weekday': monthly_weekday,
         'cron': _text(raw.get('cron'), f'{field} cron', 120) or '0 4 * * *',
+        'timezone': _text(raw.get('timezone'), f'{field} timezone', 64) or 'Etc/UTC',
     }
     if frequency == 'custom':
         try:
             schedules.cron_matches(result['cron'], dt.datetime(2026, 1, 1))
         except schedules.ScheduleError as error:
             raise Rejected(f'{field}: {error}')
+    try:
+        schedules.zone_for(result)
+    except schedules.ScheduleError as error:
+        raise Rejected(f'{field}: {error}')
     return result
 
 
@@ -632,6 +641,10 @@ AIR_DATE_PROVIDERS = {
     'plex': {'name': 'Plex', 'needs': 'a Plex connection', 'built': False},
     'jellyfin': {'name': 'Jellyfin', 'needs': 'a Jellyfin connection', 'built': False},
 }
+# Only providers with a stable, per-episode retention-date contract may affect a run.
+# AniList is title-search based and does not expose the Sonarr season identity needed to
+# distinguish multiple anime seasons; Plex and Jellyfin remain connectivity-only.
+RETENTION_AIR_DATE_PROVIDERS = ('tmdb', 'tvmaze')
 AIR_DATE_ANSWERS = {
     'unresolved': {
         'estimate': 'Estimate the air date from neighbouring episodes or position',
@@ -661,7 +674,8 @@ def validate_air_dates(raw) -> dict:
     # default (TMDB, when a key is present) rather than silently disabling enrichment on
     # first save.  An explicitly supplied empty list still means "disable them all".
     requested = raw['enabled'] if 'enabled' in raw else DEFAULTS['air_dates']['enabled']
-    enabled = [name for name in order if name in set(requested or [])]
+    enabled = [name for name in order
+               if name in set(requested or []) and name in RETENTION_AIR_DATE_PROVIDERS]
     return {
         'providers': order,
         'enabled': enabled,
@@ -1078,7 +1092,9 @@ def interpolate_air_dates(episodes) -> int:
     better quality resets it, so a 2015 episode upgraded last week looks like it arrived
     last week. Its neighbours do not lie that way. An undated episode sits between the
     episodes before and after it in season and episode order, and a date interpolated
-    between their air dates is both stable and close to the truth.
+    between their air dates is both stable and close to the truth. Leading and trailing
+    gaps stay unresolved: copying a neighbouring date into a future episode would make it
+    look historically aired and could authorize deletion.
 
     Specials are left out of the ordering because they do not sit in sequence with the
     numbered episodes, and estimates are marked as such so a preview can show where a
@@ -1095,15 +1111,12 @@ def interpolate_air_dates(episodes) -> int:
             continue
         before = max((position for position in known if position < index), default=None)
         after = min((position for position in known if position > index), default=None)
-        if before is not None and after is not None:
-            start = dt.date.fromisoformat(ordered[before]['air_date'][:10])
-            end = dt.date.fromisoformat(ordered[after]['air_date'][:10])
-            share = (index - before) / (after - before)
-            estimate = start + dt.timedelta(days=round((end - start).days * share))
-        elif before is not None:
-            estimate = dt.date.fromisoformat(ordered[before]['air_date'][:10])
-        else:
-            estimate = dt.date.fromisoformat(ordered[after]['air_date'][:10])
+        if before is None or after is None:
+            continue
+        start = dt.date.fromisoformat(ordered[before]['air_date'][:10])
+        end = dt.date.fromisoformat(ordered[after]['air_date'][:10])
+        share = (index - before) / (after - before)
+        estimate = start + dt.timedelta(days=round((end - start).days * share))
         episode['air_date'] = estimate.isoformat()
         episode['air_source'] = 'estimated'
         filled += 1

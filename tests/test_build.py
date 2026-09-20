@@ -198,16 +198,24 @@ class Interface(unittest.TestCase):
         self.assertIn("requestFreshness('visible')", self.js)
         self.assertIn('5 * 60 * 1000', self.js)
 
+    def test_backup_uses_staging_and_explicit_activation(self):
+        settings = module_js('settings.js')
+        self.assertIn("operation: 'stage'", settings)
+        self.assertIn("operation: 'activate'", settings)
+        self.assertNotIn("operation: 'restore'", settings)
+        self.assertIn('stopPolling()', module_js('app.js'))
+        self.assertIn('discardSettingsDrafts()', module_js('app.js'))
+
     def test_the_tick_asks_what_changed_whether_or_not_anyone_is_looking(self):
         # A problem the page discovers first is a notification that never fired.
         worker = ROOT / 'src' / 'worker'
-        tick = (worker / 'main.py').read_text().split('def tick()')[1].split('\ndef ')[0]
+        tick = (worker / 'main.py').read_text().split('def _tick_locked()')[1].split('\ndef ')[0]
         self.assertIn('sync_from_sonarr', tick)
         self.assertIn("'watch': action_watch", (worker / 'actions.py').read_text())
 
     def test_the_schedule_uses_container_local_time_and_names_test_passes(self):
         worker = ROOT / 'src' / 'worker' / 'main.py'
-        tick = worker.read_text(encoding='utf-8').split('def tick()')[1].split('\ndef ')[0]
+        tick = worker.read_text(encoding='utf-8').split('def _tick_locked()')[1].split('\ndef ')[0]
         self.assertIn('now = dt.datetime.now().astimezone()', tick)
         self.assertIn("'scheduled test run started; Test Mode is on and nothing will change'", tick)
         self.assertIn("'scheduled test run: {summary[\"planned\"]} planned across '", tick)
@@ -745,7 +753,7 @@ class Interface(unittest.TestCase):
         # which is the whole bug repeating.
         import re
         wired = set(re.findall(r"'(tvr-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
-                               r"monthly-mode|monthly-day|monthly-weekday|cron|match-freq|"
+                       r"monthly-mode|monthly-day|monthly-weekday|cron|timezone|match-freq|"
                                r"match-hour|match-minute|connectivity))'", self.js))
         panel = self.html.split('id="tvr-view-settings-schedule"')[1].split('</section>')[0]
         for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):

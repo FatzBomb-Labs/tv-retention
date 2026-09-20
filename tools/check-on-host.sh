@@ -4,11 +4,45 @@
 # and contacts no Sonarr.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+host="${TVR_HOST:-fatzserver-host}"
+lease="/tmp/tv-retention-lease.$$.$RANDOM"
+
 # The source arrives on stdin, so the remote script travels as an argument, not a heredoc.
-tar -C "$ROOT" -cf - src tests tools VERSION BUILD | ssh "${TVR_HOST:-fatzserver-host}" '
+# The lease is refreshed by this process while SSH is alive. The remote watcher removes
+# staging when the lease goes stale, including when the local client is killed abruptly.
+remote_script='
 set -eu
+lease="${TVR_LEASE_PATH:?missing validation lease}"
+lease_timeout="${TVR_LEASE_TIMEOUT:-30}"
 staging=$(mktemp -d /tmp/tv-retention-dev.XXXXXX)
-trap "rm -rf $staging" EXIT
+cleanup() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "${watchdog_pid:-}" ]; then
+    kill "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+  fi
+  rm -rf "$staging" "$lease"
+  exit "$status"
+}
+watchdog() {
+  while :; do
+    sleep 3
+    [ -e "$lease" ] || exit 0
+    now=$(date +%s)
+    updated=$(stat -c %Y "$lease" 2>/dev/null || printf 0)
+    if [ "$updated" -eq 0 ] || [ $((now - updated)) -gt "$lease_timeout" ]; then
+      printf "Validation lease expired; removing staging\n" >&2
+      rm -rf "$staging" "$lease"
+      kill -TERM "$$" 2>/dev/null || true
+      exit 0
+    fi
+  done
+}
+: > "$lease"
+watchdog &
+watchdog_pid=$!
+trap cleanup EXIT HUP INT TERM
 tar -xf - -C "$staging"
 cd "$staging"
 printf "Development staging: %s\n" "$staging"
@@ -38,3 +72,27 @@ else
 fi
 exit "$status"
 '
+
+quote_for_remote_bash() {
+  printf '%q' "$1"
+}
+
+heartbeat() {
+  while kill -0 "$run_pid" 2>/dev/null; do
+    ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$host" "test -e $lease && touch $lease" >/dev/null 2>&1 || true
+    sleep 3
+  done
+}
+
+remote_command="TVR_LEASE_PATH=$lease TVR_LEASE_TIMEOUT=30 bash -c $(quote_for_remote_bash "$remote_script")"
+tar -C "$ROOT" -cf - src tests tools VERSION BUILD | ssh "$host" "$remote_command" &
+run_pid=$!
+heartbeat &
+heartbeat_pid=$!
+set +e
+wait "$run_pid"
+status=$?
+set -e
+kill "$heartbeat_pid" 2>/dev/null || true
+wait "$heartbeat_pid" 2>/dev/null || true
+exit "$status"

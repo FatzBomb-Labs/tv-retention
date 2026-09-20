@@ -232,7 +232,8 @@ class ModeBoundary(unittest.TestCase):
                 fixture.store.save_settings(settings)
                 fixture.store.save_job_state(settings, {'last_connectivity': fixture.store.now_iso()})
                 # Isolate due/connectivity/background sync decisions, not the run or client.
-                with patch.object(fixture.main.schedules, 'is_due', return_value=True), \
+                with patch.object(fixture.main.schedules, 'due_occurrence',
+                                  return_value=fixture.main.dt.datetime.now(fixture.main.dt.timezone.utc)), \
                         patch.object(fixture.main, 'sync_is_due', return_value=False), \
                         patch.object(fixture.main, 'sonarr_reachable', return_value=True), \
                         patch.object(fixture.main, 'sync_from_sonarr', return_value={}):
@@ -247,6 +248,45 @@ class ModeBoundary(unittest.TestCase):
                     self.assertEqual(fixture.main.tick(), 0)
                 self.assertEqual(len(fixture.sonarr.mutations), 0 if mode else 1)
                 fixture.sonarr.assert_finished()
+
+    def test_recovered_pending_run_is_not_scheduled_again_in_the_same_tick(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings()
+            settings['schedule']['enabled'] = True
+            fixture.store.save_settings(settings)
+            pending = '2026-09-20T04:00:00+00:00'
+            fixture.store.save_job_state(settings, {
+                'last_connectivity': None,
+                'pending_run': pending,
+            })
+            with patch.object(fixture.main, 'age_seconds', return_value=999), \
+                    patch.object(fixture.main, 'check_connectivity', return_value=True), \
+                    patch.object(fixture.main, 'sync_is_due', return_value=False), \
+                    patch.object(fixture.main, 'run', return_value={
+                        'test_mode': True, 'planned': 0, 'rules': []}) as recovered, \
+                    patch.object(fixture.main.schedules, 'due_occurrence',
+                                 side_effect=AssertionError('recovery was scheduled twice')):
+                self.assertEqual(fixture.main.tick(), 0)
+            recovered.assert_called_once_with(preview=False, scheduled=True)
+            state = fixture.store.job_state(settings)
+            self.assertIsNone(state['pending_run'])
+            self.assertEqual(state['last_occurrence'], pending)
+            fixture.sonarr.assert_finished()
+
+    def test_tick_does_not_read_or_write_while_another_run_holds_the_lock(self):
+        from core import Rejected
+        with IsolatedWorker() as fixture:
+            fixture.settings()
+            jobs = fixture.root / 'state' / 'jobs.json'
+            before = jobs.read_bytes() if jobs.exists() else None
+            with fixture.main.run_lock():
+                with patch.object(fixture.main, 'load_settings', side_effect=AssertionError(
+                        'tick read settings while the run lock was held')):
+                    with self.assertRaisesRegex(Rejected, 'already in progress'):
+                        fixture.main.tick()
+            self.assertEqual(fixture.sonarr.requests, [])
+            self.assertEqual(jobs.read_bytes() if jobs.exists() else None, before)
+            fixture.sonarr.assert_finished()
 
     def test_scope_toggle_reports_only_acknowledged_writes_as_applied(self):
         import actions

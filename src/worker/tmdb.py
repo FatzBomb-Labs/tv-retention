@@ -59,7 +59,7 @@ class TMDB:
         """Resolve a TVDB id to a TMDB series id via TMDB's external-id lookup."""
         payload = self._get(f'find/{int(tvdb_id)}', {'external_source': 'tvdb_id'})
         results = payload.get('tv_results') or []
-        return results[0].get('id') if results else None
+        return results[0].get('id') if len(results) == 1 else None
 
     def air_dates(self, tvdb_id: int, season: int) -> dict:
         """Air dates for one season, keyed by episode number. Cached for CACHE_DAYS."""

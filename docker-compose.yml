@@ -6,9 +6,13 @@ services:
     ports:
       - "8787:8787"
     volumes:
-      # The only volume. No media mount: this never opens a library file — Sonarr owns
-      # the filesystem, and deletion is an API call.
+      # The only required volume. No media mount: this never opens a library file — Sonarr
+      # owns the filesystem, and deletion is an API call.
       - ./config:/config
+      # Optional persistent backup destination. Set System -> Backup to /backups after
+      # enabling this mount. The host directory must already be writable by PUID:PGID;
+      # the container deliberately does not recursively chown an operator-supplied mount.
+      # - ./backups:/backups
     environment:
       - TVR_USERNAME=admin
       # Shorter than the eight characters TVR_PASSWORD requires, on purpose: the

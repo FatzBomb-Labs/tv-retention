@@ -34,17 +34,18 @@ from sonarr import Sonarr, SonarrError, match_rule
 import schedules
 from store import (CONFIG, NAME, RUNTIME, SCHEMA,
                    age_seconds, archive_intent, cache_path, clear_progress, episode_cache, forget_episodes,
-                   invalidate_catalogue, job_state, journal, load_health, load_settings,
-                   load_intent, load_state, log_line, now_iso, read_cache, read_log, read_progress,
+                   invalidate_catalogue, job_state, journal, load_health, load_settings, load_settings_strict,
+                   intent_error, load_intent, load_intent_strict, load_state, load_state_strict, log_line, now_iso, read_cache, read_log, read_progress,
                    save_job_state, save_settings, save_state, set_progress, state_dir,
                    save_intent, load_removal_ledger, save_removal_ledger,
-                   save_settings_unlocked, settings_transaction, store_episodes,
+                   record_run, save_settings_unlocked, settings_error, settings_transaction, state_error, store_episodes,
+                   health_error, job_state_strict, jobs_error, save_settings_if_current,
                    trim_health, write_cache)
 from tmdb import TMDB, TMDBError, fill_air_dates
 from tvmaze import TVMaze, TVMazeError
 from anilist import AniList, AniListError
 
-OPTIONAL_PROVIDER_KINDS = ('tmdb', 'tvmaze', 'anilist', 'plex', 'jellyfin')
+OPTIONAL_PROVIDER_KINDS = ('tmdb', 'tvmaze')
 
 
 class _MediaDateProvider:
@@ -149,20 +150,20 @@ class TestModeBlocked(SonarrError):
     """A write was skipped because the current saved mode prohibits it."""
 
 
-def require_sonarr_write() -> None:
+def require_sonarr_write(settings=None) -> None:
     """Re-read for every request, never authorize using a run's settings snapshot.
 
     This is not an atomic toggle/dispatch transaction: a request already past this
     check may still be sent. Cross-thread/process transition coordination is Phase 2.
     """
-    try:
-        current = load_settings()
-        # load_settings deliberately tolerates validation failures for the editor.
-        # That tolerance must never become permission to send an external write.
-        validate_settings(current, previous=current)
-    except Exception as error:
-        raise SonarrError('Sonarr write refused: current saved settings could not be '
-                          'loaded and validated.') from error
+    if settings is None:
+        try:
+            current = load_settings_strict()
+        except Exception as error:
+            raise SonarrError('Sonarr write refused: current saved settings could not be '
+                              'loaded and validated.') from error
+    else:
+        current = settings
     if (current.get('schedule') or {}).get('test_mode', True) is not False:
         raise TestModeBlocked('Test Mode is on; Sonarr changes were skipped.')
 
@@ -190,10 +191,14 @@ def bind_rules(settings: dict, force: bool = False) -> list:
     forced, because it is the most expensive call Sonarr offers.
     """
     report = []
+    expected_revision = settings.get('settings_revision', 0)
     original_rules = {rule['id']: json.loads(json.dumps(rule))
                       for rule in settings.get('rules') or []}
     binding_fields = ('series_id', 'series_title', 'tvdb_id', 'slug', 'path',
                       'match_status', 'match_error', 'matched_at')
+    owned_fields = [(rule['id'], field, original_rules[rule['id']].get(field))
+                    for rule in settings.get('rules') or []
+                    for field in binding_fields]
     catalogues = {}
     for rule in settings.get('rules', []):
         try:
@@ -233,7 +238,7 @@ def bind_rules(settings: dict, force: bool = False) -> list:
             target[field] = rule.get(field, original_rules[rule['id']].get(field))
     settings.clear()
     settings.update(latest)
-    save_settings(settings)
+    save_settings_if_current(settings, expected_revision, owned_fields)
     return report
 
 
@@ -458,7 +463,7 @@ def scope_pass(settings: dict, rule: dict, monitor_new: bool = False,
     applied = {'monitored': 0, 'unmonitored': 0}
     # Also report a skipped no-op pass: the editor may have separate picker changes.
     try:
-        require_sonarr_write()
+        require_sonarr_write(settings)
     except TestModeBlocked as error:
         return dict(applied, skipped=True, message=str(error),
                     skipped_monitored=len(result['monitored']),
@@ -646,6 +651,7 @@ def _operation(kind: str, rule: dict, **detail) -> dict:
 def resolve_removal(settings: dict, rule_id: str, request_id: str, removal_action: str) -> dict:
     """Cancel a reviewed removal without retrying or claiming Sonarr success."""
     current = load_settings()
+    expected_revision = current.get('settings_revision', 0)
     rule = next((row for row in current.get('rules') or [] if row.get('id') == rule_id), None)
     queued = ((rule or {}).get('queue') or {}).get('removal') or {}
     if not rule or queued.get('request_id') != request_id or queued.get('action') != removal_action:
@@ -700,7 +706,7 @@ def resolve_removal(settings: dict, rule_id: str, request_id: str, removal_actio
     if ledger.get('batches') and (operation_refs or record_refs):
         save_removal_ledger(current, ledger)
     rule['queue'] = dict(rule.get('queue') or {}, removal=None)
-    save_settings(current)
+    save_settings_if_current(current, expected_revision, writer=save_settings)
     return {'resolved': True, 'message': note}
 
 
@@ -834,8 +840,7 @@ def _verify_removal_target(operation: dict):
     The returned current client is also the dispatch client. This is deliberately not
     an atomic settings/remote transaction; concurrent changes still need Phase 2.
     """
-    current = load_settings()
-    validate_settings(current, previous=current)
+    current = load_settings_strict()
     _validate_removal_request(current, operation)
     if operation.get('removal_action') == 'remove':
         return None
@@ -960,6 +965,7 @@ def _finish_removals(settings: dict, intent: dict) -> None:
     if not any(op.get('status') == 'done' for op in operations):
         return
     current = load_settings()
+    expected_revision = current.get('settings_revision', 0)
     completed = set()
     for rule in current.get('rules') or []:
         queued = (rule.get('queue') or {}).get('removal') or {}
@@ -980,7 +986,7 @@ def _finish_removals(settings: dict, intent: dict) -> None:
     if not completed:
         return
     current['rules'] = [rule for rule in current.get('rules', []) if rule['id'] not in completed]
-    save_settings(current)
+    save_settings_if_current(current, expected_revision)
     health = load_health(current)
     for rule_id in completed:
         health['rules'].pop(rule_id, None)
@@ -1142,6 +1148,12 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
     # one separate operational log line after a scheduled test pass: it records only
     # that the pass happened and its plan count, never a retained run outcome.
     if not dry_run:
+        # Refuse damaged executable recovery state before binding or any Sonarr read.
+        stored = load_intent_strict(settings)
+        load_state_strict(settings)
+        if stored and stored.get('status') == 'complete' and stored.get('summary'):
+            if record_run(settings, stored['summary']):
+                return stored['summary']
         log_line(settings, 'info', ('scheduled ' if scheduled else '') + 'run started')
         bind_rules(settings)
     tmdb = tmdb_provider(settings)
@@ -1158,7 +1170,8 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         summary['duration_seconds'] = round(time.monotonic() - clock, 1)
         return summary
 
-    stored = load_intent(settings)
+    if dry_run:
+        stored = None
     # Completed removals are historical outcomes, not permission to replay ordinary
     # work. Outstanding one-time requests have the same ledger owner regardless of
     # whether the original run also contained ordinary retention or was marked done.
@@ -1225,17 +1238,11 @@ def run(preview: bool = False, rule_ids=None, scheduled: bool = False) -> dict:
         and all(record.get('ok') for record in (intent.get('removals') or [])
                 + (intent.get('recovery_removals') or []))) else 'incomplete'
     intent['finished'] = now_iso()
-    save_intent(settings, intent)
     summary = _intent_summary(intent, preview, test_mode, scheduled, started)
     summary['duration_seconds'] = round(time.monotonic() - clock, 1)
-    state = load_state(settings)
-    state['runs'] = state.get('runs', []) + [{
-        'id': summary['id'], 'started': summary['started'], 'finished': summary['finished'],
-        'scheduled': scheduled, 'dry_run': False, 'planned': summary['planned'],
-        'deleted': summary['deleted'], 'freed_bytes': summary['freed_bytes'], 'errors': summary['errors'][:10]}]
-    state['last_run'] = summary
-    save_state(settings, state)
-    journal(settings, summary)
+    intent['summary'] = summary
+    save_intent(settings, intent)
+    record_run(settings, summary)
     log_line(settings, 'warning', f'run finished: {summary["planned"]} planned, {summary["deleted"]} deleted, '
              f'{summary["freed_bytes"] // 1024 // 1024} MiB')
     if summary['errors']:
@@ -1418,6 +1425,7 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
     since yesterday, which is worth more than the writes it avoids.
     """
     started = now_iso()
+    expected_revision = settings.get('settings_revision', 0)
     report = {'started': started, 'reason': reason, 'series_added': [], 'series_removed': 0,
               'series_changed': 0, 'series_reenabled': [], 'episodes_changed': [], 'errors': []}
     catalogue = read_cache(settings, 'catalogue.json')
@@ -1463,16 +1471,19 @@ def sync_from_sonarr(settings: dict, reason: str = 'scheduled') -> dict:
         } for rule in settings.get('rules') or []
             if before_reenable.get(rule['id']) != (
                 rule.get('enabled'), rule.get('auto_reenable'), rule.get('auto_reenable_after'))}
-        with settings_transaction():
-            latest = load_settings()
-            latest_rules = {rule['id']: rule for rule in latest.get('rules') or []}
-            for rule_id, fields in changed_rules.items():
-                target = latest_rules.get(rule_id)
-                if target and target.get('auto_reenable'):
-                    target.update(fields)
-            settings.clear()
-            settings.update(latest)
-            save_settings_unlocked(settings)
+        owned_fields = [(rule_id, field, before_reenable[rule_id][
+            ('enabled', 'auto_reenable', 'auto_reenable_after').index(field)])
+                        for rule_id in changed_rules
+                        for field in ('enabled', 'auto_reenable', 'auto_reenable_after')]
+        latest = load_settings()
+        latest_rules = {rule['id']: rule for rule in latest.get('rules') or []}
+        for rule_id, fields in changed_rules.items():
+            target = latest_rules.get(rule_id)
+            if target and target.get('auto_reenable'):
+                target.update(fields)
+        settings.clear()
+        settings.update(latest)
+        save_settings_if_current(settings, expected_revision, owned_fields)
         for title, reason_text in reenabled:
             log_line(settings, 'info', f'{title}: automatically re-enabled because {reason_text}')
 
@@ -1532,6 +1543,21 @@ def status_snapshot(settings: dict, health=None) -> dict:
     backup_ok = bool(backup_path and backup_path.exists() and
                      os.access(backup_path, os.R_OK | os.W_OK))
     status_alerts = []
+    invalid_settings = settings_error()
+    if invalid_settings:
+        status_alerts.append(alerts.make('settings-invalid', detail=invalid_settings))
+    invalid_intent = intent_error(settings)
+    if invalid_intent:
+        status_alerts.append(alerts.make('intent-invalid', detail=invalid_intent))
+    invalid_state = state_error(settings)
+    if invalid_state:
+        status_alerts.append(alerts.make('state-invalid', detail=invalid_state))
+    invalid_jobs = jobs_error(settings)
+    if invalid_jobs:
+        status_alerts.append(alerts.make('jobs-invalid', detail=invalid_jobs))
+    invalid_health = health_error(settings)
+    if invalid_health:
+        status_alerts.append(alerts.make('health-invalid', detail=invalid_health))
     if not config_ok or not state_ok:
         status_alerts.append(alerts.make('state-unavailable', detail=str(state_path)))
     if backup_cfg.get('last_error'):
@@ -1754,12 +1780,13 @@ def disable_expired_rule(settings: dict, rule: dict, state: dict) -> bool:
                  f'window. Test Mode, so nothing was changed.')
         return False
     stored = load_settings()
+    expected_revision = stored.get('settings_revision', 0)
     target = next((r for r in stored.get('rules') or [] if r['id'] == rule['id']), None)
     if not target or not target.get('enabled'):
         return False
     target['enabled'] = False
     rule['enabled'] = False
-    save_settings(stored)
+    save_settings_if_current(stored, expected_revision, [(rule['id'], 'enabled', True)])
     settings['rules'] = stored['rules']
     log_line(settings, 'info',
              f'{title}: switched off — the series has ended and nothing remains inside '
@@ -1984,13 +2011,20 @@ def tick() -> int:
     Nothing here is expensive unless something is actually due: the common case is reading
     two small files and comparing timestamps.
     """
+    with run_lock(blocking=False):
+        return _tick_locked()
+
+
+def _tick_locked() -> int:
+    """Run one scheduler cycle while holding the run lock."""
     settings = load_settings()
-    # Schedule fields describe the container's local civil time. Timestamps retained in
-    # state stay UTC, but `is_due` compares aware datetimes correctly across the offset.
-    # Calling `now(...UTC)` here made TZ affect the log stamp but not "daily at 1am".
+    # Schedule fields are evaluated in their configured IANA civil time. The state stores
+    # the exact UTC occurrence so a fall-back hour cannot replay or collapse two runs.
     now = dt.datetime.now().astimezone()
-    state = job_state(settings)
+    state = job_state_strict(settings)
     actions = []
+    schedule = settings.get('schedule') or {}
+    recovery_attempted = False
 
     connectivity = CONNECTIVITY_SECONDS
     if age_seconds(state.get('last_connectivity')) is None or \
@@ -2000,53 +2034,62 @@ def tick() -> int:
         actions.append(f'connectivity: {"reachable" if reachable else "unreachable"}')
         # A run held back because Sonarr was unreachable goes as soon as it answers.
         if reachable and state.get('pending_run'):
-            state['pending_run'] = None
+            pending_occurrence = state.get('pending_run')
+            recovery_attempted = True
             save_job_state(settings, state)
-            actions.append('released the run that was waiting for Sonarr')
+            completed = False
             with contextlib.suppress(Rejected):
-                with run_lock():
-                    run(preview=False, scheduled=True)
+                run(preview=False, scheduled=True)
+                completed = True
             state = job_state(settings)
-            state['last_run'] = now_iso()
+            if completed:
+                state['pending_run'] = None
+                state['last_run'] = now_iso()
+                state['last_occurrence'] = pending_occurrence
+                actions.append('released the run that was waiting for Sonarr')
 
     # Refresh regularly even with no page open. Browsing and editing still use the stored
     # reading; only this resident path and explicit background requests contact Sonarr.
     if sync_is_due(settings):
         with contextlib.suppress(Rejected, SonarrError):
-            with run_lock():
-                report = sync_from_sonarr(settings, reason='due')
+            report = sync_from_sonarr(settings, reason='due')
             actions.append(f'synced with Sonarr: {report["series_changed"]} series changed')
 
-    if schedules.is_due(settings.get('schedule') or {}, now, state.get('last_run')):
+    due = None if recovery_attempted or not schedule.get('enabled') else \
+        schedules.due_occurrence(schedule, now, state.get('last_occurrence'))
+    if due is not None:
+        due_id = schedules.occurrence_id(due)
         if not sonarr_reachable(settings):
             # Queued rather than skipped: exactly one pending run, so an outage over a
             # weekend produces one catch-up rather than a backlog.
-            state['pending_run'] = now_iso()
+            state['pending_run'] = due_id
             actions.append('run queued: Sonarr is unreachable')
         else:
             # Reconcile immediately before acting. The stored reading is what the plan was
             # built from, and a run is the one moment that must not act on it blind.
             with contextlib.suppress(Rejected, SonarrError):
                 sync_from_sonarr(settings, reason='before the run')
-            state['last_run'] = now_iso()
             save_job_state(settings, state)
             scheduled_test = bool((settings.get('schedule') or {}).get('test_mode', True))
             if scheduled_test:
                 log_line(settings, 'info',
                          'scheduled test run started; Test Mode is on and nothing will change')
+            completed = False
             try:
-                with run_lock():
-                    summary = run(preview=False, scheduled=True)
-                    if summary.get('test_mode'):
-                        log_line(settings, 'info',
-                                 f'scheduled test run: {summary["planned"]} planned across '
-                                 f'{len(summary["rules"])} rule(s); nothing changed')
-                    else:
-                        actions.append('scheduled run')
+                summary = run(preview=False, scheduled=True)
+                completed = True
+                if summary.get('test_mode'):
+                    log_line(settings, 'info',
+                             f'scheduled test run: {summary["planned"]} planned across '
+                             f'{len(summary["rules"])} rule(s); nothing changed')
+                else:
+                    actions.append('scheduled run')
             except Rejected as error:
                 log_line(settings, 'warning', f'scheduled run did not complete: {error}')
-            state = job_state(settings)
-            state['last_run'] = now_iso()
+            if completed:
+                state = job_state(settings)
+                state['last_run'] = now_iso()
+                state['last_occurrence'] = due_id
 
     save_job_state(settings, state)
     for message in actions:
@@ -2180,7 +2223,11 @@ def cli() -> int:
     if args.command == 'serve':
         return serve_forever()
     if args.command == 'tick':
-        return tick()
+        try:
+            return tick()
+        except Rejected as error:
+            print(f'TV Retention: {error}', file=sys.stderr)
+            return 1
     if args.command == 'check':
         try:
             with run_lock(blocking=False):

@@ -15,7 +15,10 @@ LABEL org.opencontainers.image.title="TV Retention" \
 
 # Not root. The container mounts no media and needs no host identity: it writes to one
 # volume and talks to Sonarr over the network, so it has nothing to be privileged for.
-RUN useradd --system --uid 1000 --create-home --home-dir /home/tvr tvr
+RUN apt-get update \
+  && apt-get install --no-install-recommends --yes tzdata \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --uid 1000 --create-home --home-dir /home/tvr tvr
 
 WORKDIR /app
 COPY src/worker/ /app/worker/
@@ -29,7 +32,8 @@ RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/BUILD_DATE
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TVR_CONFIG_DIR=/config \
-    TVR_PORT=8787
+  TVR_PORT=8787 \
+  TZ=Etc/UTC
 
 VOLUME ["/config"]
 EXPOSE 8787

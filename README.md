@@ -63,6 +63,13 @@ only required persistent volume. Replace the deliberately invalid `EDIT-ME` pass
 before starting. Keep the service on a trusted network; use HTTPS through a suitable
 reverse proxy when needed, and do not expose it publicly by default.
 
+Backups are optional and should normally use a separate persistent directory. Uncomment
+`./backups:/backups` in the Compose file, make that host directory writable by the
+container's `PUID:PGID` (commonly `99:100` on Unraid), and set **System -> Backup** to
+`/backups`. The container does not recursively change ownership of this separate mount;
+with an explicit Compose `user:`, use matching host ownership yourself. `/config` remains
+the only required volume.
+
 Requirements: a container runtime and a reachable Sonarr v3 or v4 instance. No media mounts.
 
 | Variable | Default | Purpose |
@@ -254,16 +261,17 @@ display; preserving it until deliberate dismissal is still planned.
 
 **System → Backup** offers timestamped ZIPs of the active config directory, normally
 `/config`, including settings, state, journal and caches. It requires a separate absolute
-writable destination and has a retained-archive count. The supplied Compose file mounts
-only `/config`: an unmounted backup destination will not survive container replacement.
+writable destination and has a retained-archive count. Use the optional `/backups` mount
+above when archives must survive container replacement; an unmounted destination may be
+ephemeral. The backup operation refuses configurations whose authoritative `state_dir` is
+outside `/config`, rather than silently omitting application state.
 
-Archives contain credentials. Creation uses temporary-file replacement, but that does not
-make a consistent concurrent snapshot. Snapshot coordination, same-second naming/pruning,
-non-root destination/restore permissions, external-state coverage and recoverable restore
-activation are unresolved. **Do not rely on this feature as a proven recovery mechanism.**
-Restore requires `RESTORE` and returns a reload requirement. The archive routines make no
-Sonarr calls, but restored schedules/intents are not safely quarantined; subsequent worker
-activity can act on them. Test backup/restore only in isolation, not on a live configuration.
+Archives contain credentials. Creation is transaction-coordinated, uses atomic publication,
+per-file hashes, owned-archive retention and bounded restore extraction. Stage a restore with
+`RESTORE`, review quarantined queues/intents, then activate with `ACTIVATE`; activation holds
+the run lock, forces Test Mode on and schedules off, and keeps a rollback journal through
+installation. The legacy direct restore operation remains unavailable. Test backup/restore
+only in isolation, not on a live configuration, until the acceptance checklist is complete.
 
 **System → Status** reports build/date/uptime, mode and schedule state, sync age,
 pending/current runs, Sonarr reachability/recycle-bin state, storage health, API-key state

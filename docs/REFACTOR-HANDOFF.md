@@ -1,10 +1,9 @@
 # Frontend architecture after extraction
 
 The decomposition of `src/assets/app.js` is complete; no further extraction is planned.
-This records module ownership and requirements for future changes, not proof that every
-behavior is correct. [PLAN.md](PLAN.md), revised 2026-09-17, owns the unresolved safety,
-persistence and UI work. [VALIDATION.md](VALIDATION.md) distinguishes historical passing
-checks from the later failing review. See `AGENTS.md` for repository and release rules.
+This records module ownership and requirements for future changes, not a release approval.
+[PLAN.md](PLAN.md) owns the remaining UI, container and acceptance work. [VALIDATION.md](VALIDATION.md)
+records current and historical evidence. See `AGENTS.md` for repository and release rules.
 
 ## Module responsibilities
 
@@ -60,25 +59,26 @@ in `settings.js` as a read-only projection with no independent state or listener
   are constructed, not on every full render. Asset imports must remain within one release
   digest, and non-entry modules must be importable without a page.
 
-## Behavioral requirements — not current guarantees
+## Behavioral requirements and remaining work
 
-The split was intended to preserve these boundaries. The latest review found violations;
-mechanical extraction checks do not demonstrate end-to-end safety. PLAN defines the fixes
-and required regression evidence.
+The split preserves these boundaries through the existing backend and frontend contracts.
+Mechanical extraction checks do not replace end-to-end acceptance; remaining gaps are tracked
+in PLAN.
 
 - Test Mode must prevent external Sonarr mutations on every entry point, scheduled or
-  manual. Settings remain editable; permitted local operational writes need an explicit
-  policy. Immediate monitoring/recycle-bin paths currently violate the external-write
-  requirement, so the old blanket claim that nothing writes is not implementation evidence.
+  manual. Settings remain editable, and local operational writes are separate from Sonarr
+  mutations. The current worker boundary is covered by focused and host-gated checks; the
+  remaining container/browser acceptance is tracked in PLAN.
 - Process a rule only with exactly one confirmed Sonarr series identity, including queued
   and resumed work. No file deletion may proceed without confirmed unmonitoring of all
   affected episodes. Ordinary retention never monitors; explicit removal dispositions
-  remain separate operator intent. The executor regression currently fails.
+  remain separate operator intent. Executor recovery and shared-file protection are covered
+  by the current validation gate.
 - Destructive removal stays queued and undoable until execution starts; stale drafts or
   recovered intents must not resurrect canceled work.
 - Decide exclusions once, ahead of every retention rule. Protect monitoring state and
-  every file containing excluded content. Retention edits must preserve exclusions;
-  exclusion loss and shared protected/delete files are confirmed review failures.
+  every file containing excluded content. Retention edits preserve exclusions; remaining
+  browser and container acceptance is tracked in PLAN.
 - Show cached readings with their age. Per-show Sonarr reads stay background work, with
   no global busy overlay or unrelated-show blocking.
 - Suppress Run as having nothing actionable only on a complete, current, trustworthy
@@ -97,9 +97,7 @@ generation checks so stale submissions or responses cannot erase newer intent.
 
 Extraction was checked against parent commits with mechanical accessor/listener changes
 accounted for, and the graph was reviewed for initialization, state access, invalidation,
-listeners, render order and cycles. Those historical checks are not proof that the review
-findings are fixed or that the current gate passes. Validation commands and release identity
-policy belong in `AGENTS.md`; dated results and coverage limits belong in VALIDATION.
-The cleanup-time Linux gate failed on the known executor regression before reaching
-frontend checks; see VALIDATION. No deployment was performed. Remaining product and
-correctness work belongs in PLAN, not an unfinished extraction plan.
+listeners, render order and cycles. Validation commands and release identity policy belong
+in `AGENTS.md`; dated results and coverage limits belong in `VALIDATION`. The current
+authoritative gate passes; no deployment was performed. Remaining product and acceptance
+work belongs in PLAN, not in this architecture handoff.

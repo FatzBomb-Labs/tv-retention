@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-SETTINGS_VERSION = 13
+SETTINGS_VERSION = 14
 
 # The five-field cron subset the old release generated, mapped back to the structured form
 # so an existing schedule keeps firing at the same time after the upgrade.
@@ -67,6 +67,9 @@ def migrate(raw: dict) -> dict:
         # preserving unrelated forward-version keys for a later release to interpret.
         if version == SETTINGS_VERSION:
             document.pop('notifications', None)
+            schedule = dict(document.get('schedule') or {})
+            schedule.setdefault('timezone', 'Etc/UTC')
+            document['schedule'] = schedule
         return document
 
     if version < 2:
@@ -93,6 +96,8 @@ def migrate(raw: dict) -> dict:
         document.update(_to_v12(document))
     if version < 13:
         document.update(_to_v13(document))
+    if version < 14:
+        document.update(_to_v14(document))
     document['settings_version'] = SETTINGS_VERSION
     return document
 
@@ -149,6 +154,13 @@ def _to_v13(document: dict) -> dict:
     document.setdefault('backup', {})
     return {'connections': connections, 'api_key': document['api_key'],
             'backup': document['backup']}
+
+
+def _to_v14(document: dict) -> dict:
+    """Add an explicit civil-time zone while preserving existing UTC behavior."""
+    schedule = dict(document.get('schedule') or {})
+    schedule.setdefault('timezone', 'Etc/UTC')
+    return {'schedule': schedule}
 
 
 def _to_v11(document: dict) -> dict:

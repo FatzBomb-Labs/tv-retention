@@ -62,9 +62,17 @@ function start(root) {
     getSnapshot: () => snapshot,
     getSettings: () => settings,
     applySaved,
+    restoreActivated: async (result) => {
+      stopPolling();
+      forgetDrafts();
+      discardSettingsDrafts();
+      closeEditor();
+      await refresh(true);
+      notice(`Restore activated: ${result.file}.`, 'ok');
+    },
   });
   const { renderSchedule, renderSettings, renderBackupView, renderAbout,
-          saveSettings } = settingsView;
+          saveSettings, discardDrafts: discardSettingsDrafts } = settingsView;
 
   // -- snapshot and background checking ----------------------------------
   // The queue, the poll and the heartbeat. `monitoring` is passed as an accessor for the
@@ -84,7 +92,7 @@ function start(root) {
     renderAlerts: () => renderAlerts(),
     renderCounts: () => renderCounts(),
   });
-  const { isChecking, queueChecks, startPolling } = checks;
+  const { isChecking, queueChecks, startPolling, stopPolling } = checks;
 
   // -- queued removal ----------------------------------------------------
   // `settings` is reassigned wholesale every time a document comes back, so the module

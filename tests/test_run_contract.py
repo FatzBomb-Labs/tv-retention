@@ -82,6 +82,31 @@ class PublicRunContract(unittest.TestCase):
                 self.assertEqual(intent['operations'][0]['status'], 'done')
                 self.assertEqual(fixture.store.load_settings()['rules'], [])
 
+    def test_completed_intent_replays_only_missing_local_finalization(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False, removal=None)
+            fixture.sonarr.expect('GET', 'series', [SERIES])
+            fixture.sonarr.expect('GET', 'episode', [episode_payload()], query={
+                'seriesId': ['1'], 'includeEpisodeFile': ['true']})
+            fixture.sonarr.expect('PUT', 'episode/monitor',
+                                  body={'episodeIds': [101], 'monitored': False})
+            fixture.sonarr.expect('DELETE', 'episodefile/99')
+            first = fixture.main.run()
+            fixture.sonarr.assert_finished()
+            state_path = fixture.store.state_dir(settings) / 'state.json'
+            journal_path = fixture.store.state_dir(settings) / 'journal.jsonl'
+            state_path.unlink()
+            journal_path.unlink()
+
+            second = fixture.main.run(scheduled=True)
+            fixture.sonarr.assert_finished()
+            self.assertEqual(second['id'], first['id'])
+            self.assertEqual(second['status'], first['status'])
+            self.assertEqual([run['id'] for run in fixture.store.load_state(settings)['runs']],
+                             [first['id']])
+            self.assertEqual([record['id'] for record in fixture.store.read_journal(settings)],
+                             [first['id']])
+
     def test_failed_first_write_stops_next_operation_and_reports_incomplete(self):
         with IsolatedWorker() as fixture:
             settings = fixture.settings(test_mode=False)

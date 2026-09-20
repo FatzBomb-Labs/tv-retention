@@ -108,6 +108,18 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     tick();
   }
 
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    checkQueue = [];
+    checking.clear();
+    forced.clear();
+    bulkChecking = false;
+    renderCheckBanner({});
+  }
+
   // -- heartbeat ---------------------------------------------------------
   // The heartbeat is cache-only. Sonarr freshness belongs to the resident worker and the
   // quiet open/visibility request below, while this keeps time-based plans and progress
@@ -203,6 +215,6 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     });
   }
 
-  return { isChecking, queueChecks, startPolling, requestFreshness,
+  return { isChecking, queueChecks, startPolling, stopPolling, requestFreshness,
            bulkChecking: () => bulkChecking, wire };
 }

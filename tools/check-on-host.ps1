@@ -15,9 +15,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $target = if ($env:TVR_HOST) { $env:TVR_HOST } else { 'fatzserver-host' }
 
 $script = Get-Content (Join-Path $PSScriptRoot 'check-on-host.sh') -Raw
-# The remote half is the single-quoted argument to ssh: everything between the first
-# quote on the ssh line and the closing quote at column 0.
-$remote = [regex]::Match($script, "(?ms)\|\s*ssh[^']*'(.*)^'\s*$").Groups[1].Value
+# The remote half is the single-quoted `remote_script` value in the shell wrapper.
+$remote = [regex]::Match($script, "(?ms)^remote_script='(.*)^'\s*$").Groups[1].Value
 if (-not $remote) { throw 'Could not read the remote half of check-on-host.sh' }
 $remote = $remote -replace "`r`n", "`n"
 
@@ -27,6 +26,7 @@ $remote = $remote -replace "`r`n", "`n"
 # alphanumerics, `+`, `/` and `=`, so nothing on the command line needs quoting at all.
 $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($remote))
 $remotePath = '/tmp/tvr-check-' + [guid]::NewGuid().ToString('N') + '.sh'
+$remoteLease = '/tmp/tvr-check-lease-' + [guid]::NewGuid().ToString('N')
 
 # The tarball travels as a file rather than through a pipe. Under `powershell -File`,
 # which is how this is invoked, a native-to-native pipe is not a byte stream: PowerShell
@@ -44,12 +44,24 @@ try {
     ssh -n $target ('printf %s ' + $encoded + ' | base64 -d > ' + $remotePath)
     if ($LASTEXITCODE -ne 0) { throw "Could not stage the remote script on $target" }
 
-    $run = 'bash ' + $remotePath + '; rc=$?; rm -f ' + $remotePath + '; exit $rc'
-    & $env:ComSpec /c "ssh $target `"$run`" < `"$archive`""
-    $code = $LASTEXITCODE
+    $heartbeatJob = Start-Job -ArgumentList $target, $remoteLease -ScriptBlock {
+        param($jobTarget, $jobLease)
+        while ($true) {
+            & ssh -n -o BatchMode=yes -o ConnectTimeout=5 $jobTarget ("test -e $jobLease && touch $jobLease") *> $null
+            Start-Sleep -Seconds 3
+        }
+    }
+    try {
+        $run = 'TVR_LEASE_PATH=' + $remoteLease + ' TVR_LEASE_TIMEOUT=30 bash ' + $remotePath + '; rc=$?; rm -f ' + $remotePath + '; exit $rc'
+        & $env:ComSpec /c "ssh $target `"$run`" < `"$archive`""
+        $code = $LASTEXITCODE
+    } finally {
+        Stop-Job -Job $heartbeatJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $heartbeatJob -Force -ErrorAction SilentlyContinue
+    }
 } finally {
     # Also cover interrupted staging/execution; this path belongs only to this run.
-    ssh -n $target ('rm -f ' + $remotePath)
+    ssh -n $target ('rm -f ' + $remotePath + ' ' + $remoteLease)
     if ($LASTEXITCODE -ne 0) { Write-Warning "Could not clean up $remotePath on $target" }
     Pop-Location
     Remove-Item $archive -ErrorAction SilentlyContinue

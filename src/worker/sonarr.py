@@ -290,7 +290,10 @@ class Sonarr:
                                 {'seriesId': int(series_id), 'includeEpisode': 'false'})
         records = payload if isinstance(payload, list) else (payload or {}).get('records') or []
         earliest = {}
+        import_events = {'downloadFolderImported', 'seriesFolderImported', 'manualImport'}
         for record in records:
+            if record.get('eventType') not in import_events:
+                continue
             episode_id, stamp = record.get('episodeId'), record.get('date')
             if not episode_id or not stamp:
                 continue

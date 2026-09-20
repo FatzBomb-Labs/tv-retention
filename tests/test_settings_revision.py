@@ -118,3 +118,163 @@ class SettingsRevision(unittest.TestCase):
             self.assertTrue(actual['rules'][0]['enabled'])
             self.assertFalse(actual['rules'][0]['auto_reenable'])
             fixture.sonarr.assert_finished()
+
+    def test_backup_status_commit_serializes_with_a_settings_save(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            fixture.store.save_settings(settings)
+            def create_backup(current):
+                newer = fixture.store.load_settings()
+                newer['rules'][0]['keep_days'] = 90
+                actions.action_settings(newer, {'settings': newer})
+                return {'created_at': 'backup-stamp'}
+
+            with patch.object(actions.backup, 'create', side_effect=create_backup), \
+                    patch.object(actions.backup, 'list_backups', return_value=[]):
+                result = actions.action_backup(settings, {'operation': 'create'})
+
+            self.assertEqual(result['result']['created_at'], 'backup-stamp')
+            actual = fixture.store.load_settings()
+            self.assertEqual(actual['rules'][0]['keep_days'], 90)
+            self.assertEqual(actual['backup']['last'], 'backup-stamp')
+
+    def test_stale_health_writer_preserves_operator_alert_decisions(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            alert = fixture.main.alerts.make('ended-expired', rule_id='r1')
+            recycle = fixture.main.alerts.make('no-recycle-bin', instance_id='fake')
+            fixture.main.write_cache(settings, 'health.json', {
+                'alerts': [alert, recycle], 'rules': {}, 'instances': {}})
+            stale = fixture.store.load_health(settings)
+
+            self.assertTrue(actions.action_acknowledge(settings, {'key': alert['key']})['alerts'])
+            actions.action_suppress_alert(settings, {'key': recycle['key']})
+            stale['instances']['fake'] = {'ok': True, 'reachable': True}
+            fixture.main.write_cache(settings, 'health.json', stale)
+
+            actual = fixture.store.load_health(settings)
+            self.assertIn(alert['key'], actual['acknowledged'])
+            self.assertIn(recycle['key'], actual['suppressed'])
+            self.assertEqual(actual['instances']['fake']['ok'], True)
+
+    def test_invalid_saved_settings_are_visible_but_mutations_fail_closed(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False, removal=None)
+            invalid = copy.deepcopy(settings)
+            invalid['rules'][0]['keep_days'] = 'not-a-duration'
+            fixture.store.CONFIG.write_text(json.dumps(invalid))
+
+            status = actions.dispatch({'action': 'status'})
+            self.assertTrue(status['ok'], status)
+            self.assertTrue(any(alert['kind'] == 'settings-invalid'
+                                for alert in status['alerts']))
+
+            result = actions.dispatch({'action': 'run'})
+            self.assertFalse(result['ok'])
+            self.assertIn('Saved settings are invalid', result['error'])
+            self.assertEqual(fixture.sonarr.mutations, [])
+
+    def test_settings_save_can_repair_an_invalid_document(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            invalid = copy.deepcopy(settings)
+            invalid['rules'][0]['keep_days'] = 'not-a-duration'
+            fixture.store.CONFIG.write_text(json.dumps(invalid))
+
+            result = actions.dispatch({'action': 'settings', 'settings': settings})
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(fixture.store.load_settings_strict()['rules'][0]['keep_days'], 30)
+
+    def test_invalid_saved_intent_is_visible_and_blocks_live_runs(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False, removal=None)
+            fixture.store.save_settings(settings)
+            intent_path = fixture.store.state_dir(settings) / 'run-intent.json'
+            intent_path.write_text('{not-json')
+
+            status = actions.dispatch({'action': 'status'})
+            self.assertTrue(status['ok'], status)
+            self.assertTrue(any(alert['kind'] == 'intent-invalid'
+                                for alert in status['alerts']))
+
+            result = actions.dispatch({'action': 'run'})
+            self.assertFalse(result['ok'])
+            self.assertIn('Saved run intent is unreadable', result['error'])
+            self.assertEqual(fixture.sonarr.mutations, [])
+
+    def test_invalid_saved_operation_is_visible_and_blocks_live_runs(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False, removal=None)
+            fixture.store.save_settings(settings)
+            intent_path = fixture.store.state_dir(settings) / 'run-intent.json'
+            intent_path.write_text(json.dumps({
+                'id': 'bad-operation', 'status': 'incomplete',
+                'operations': [{'kind': 'delete-episode-file', 'status': 'pending'}],
+            }))
+
+            status = actions.dispatch({'action': 'status'})
+            self.assertTrue(status['ok'], status)
+            self.assertTrue(any(alert['kind'] == 'intent-invalid'
+                                for alert in status['alerts']))
+
+            result = actions.dispatch({'action': 'run'})
+            self.assertFalse(result['ok'])
+            self.assertIn('Saved run intent is invalid', result['error'])
+            self.assertEqual(fixture.sonarr.mutations, [])
+
+    def test_invalid_saved_state_is_visible_and_blocks_history_mutation(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            fixture.store.save_settings(settings)
+            state_path = fixture.store.state_dir(settings) / 'state.json'
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text('{not-json')
+
+            status = actions.dispatch({'action': 'status'})
+            self.assertTrue(status['ok'], status)
+            self.assertTrue(any(alert['kind'] == 'state-invalid'
+                                for alert in status['alerts']))
+
+            result = actions.dispatch({'action': 'clear-history'})
+            self.assertFalse(result['ok'])
+            self.assertIn('Saved run history is unreadable', result['error'])
+            self.assertEqual(state_path.read_text(), '{not-json')
+
+    def test_invalid_saved_state_blocks_live_runs_before_sonarr_mutation(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False, removal=None)
+            fixture.store.save_settings(settings)
+            state_path = fixture.store.state_dir(settings) / 'state.json'
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text('{not-json')
+
+            result = actions.dispatch({'action': 'run'})
+            self.assertFalse(result['ok'])
+            self.assertIn('Saved run history is unreadable', result['error'])
+            self.assertEqual(fixture.sonarr.mutations, [])
+
+    def test_invalid_scheduler_state_is_visible_in_status(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            fixture.store.save_settings(settings)
+            jobs_path = fixture.store.state_dir(settings) / 'jobs.json'
+            jobs_path.parent.mkdir(parents=True, exist_ok=True)
+            jobs_path.write_text('{not-json')
+
+            status = actions.dispatch({'action': 'status'})
+            self.assertTrue(status['ok'], status)
+            self.assertTrue(any(alert['kind'] == 'jobs-invalid'
+                                for alert in status['alerts']))
+
+    def test_invalid_health_cache_is_visible_in_status(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True, removal=None)
+            fixture.store.save_settings(settings)
+            health_path = fixture.store.state_dir(settings) / 'health.json'
+            health_path.parent.mkdir(parents=True, exist_ok=True)
+            health_path.write_text('{not-json')
+
+            status = actions.dispatch({'action': 'status'})
+            self.assertTrue(status['ok'], status)
+            self.assertTrue(any(alert['kind'] == 'health-invalid'
+                                for alert in status['alerts']))

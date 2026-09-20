@@ -12,6 +12,7 @@ from unittest import mock
 
 import context  # noqa: F401
 import store
+from core import StorageError
 from store import read_log
 
 
@@ -194,6 +195,32 @@ class RunIntent(unittest.TestCase):
 
     def test_missing_intent_is_not_an_error(self):
         self.assertIsNone(store.load_intent(self.settings))
+        self.assertIsNone(store.load_intent_strict(self.settings))
+
+    def test_malformed_intent_is_reported_by_the_strict_loader(self):
+        path = Path(self.settings['state_dir']) / 'run-intent.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        with self.assertRaisesRegex(Exception, 'Saved run intent is unreadable'):
+            store.load_intent_strict(self.settings)
+        self.assertIn('Saved run intent is unreadable', store.intent_error(self.settings))
+
+    def test_non_object_intent_is_reported_by_the_strict_loader(self):
+        path = Path(self.settings['state_dir']) / 'run-intent.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[]')
+        with self.assertRaisesRegex(Exception, 'Saved run intent is invalid'):
+            store.load_intent_strict(self.settings)
+
+    def test_malformed_operation_is_reported_by_the_strict_loader(self):
+        path = Path(self.settings['state_dir']) / 'run-intent.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            'id': 'run-one', 'status': 'incomplete',
+            'operations': [{'kind': 'delete-episode-file', 'status': 'pending'}],
+        }))
+        with self.assertRaisesRegex(Exception, 'Saved run intent is invalid'):
+            store.load_intent_strict(self.settings)
 
     def test_intent_round_trips_as_one_replaceable_record(self):
         first = {'id': 'run-one', 'status': 'staged', 'operations': [{'status': 'pending'}]}
@@ -202,6 +229,103 @@ class RunIntent(unittest.TestCase):
         store.save_intent(self.settings, second)
         self.assertEqual(store.load_intent(self.settings), second)
         self.assertFalse((Path(self.settings['state_dir']) / 'run-intent.json.tmp').exists())
+
+    def test_record_run_is_idempotent_for_state_and_journal(self):
+        summary = {'id': 'run-one', 'started': 's', 'finished': 'f', 'scheduled': False,
+                   'planned': 2, 'deleted': 2, 'freed_bytes': 123, 'errors': []}
+        self.assertTrue(store.record_run(self.settings, summary))
+        self.assertFalse(store.record_run(self.settings, summary))
+        state = store.load_state(self.settings)
+        self.assertEqual([run['id'] for run in state['runs']], ['run-one'])
+        self.assertEqual(len(store.read_journal(self.settings)), 1)
+        self.assertEqual(state['last_run'], summary)
+
+    def test_required_cache_write_surfaces_storage_failure(self):
+        with mock.patch.object(store, 'atomic_json', side_effect=OSError('read only')):
+            with self.assertRaisesRegex(StorageError, 'Could not persist catalogue.json'):
+                store.write_cache(self.settings, 'catalogue.json', {'value': 1})
+
+    def test_progress_write_remains_best_effort_when_storage_fails(self):
+        with mock.patch.object(store, 'atomic_json', side_effect=OSError('read only')):
+            store.set_progress(self.settings, running=True, started=store.now_iso())
+            store.clear_progress(self.settings)
+
+    def test_strict_state_directory_failure_is_not_hidden(self):
+        blocked = Path(self.temp.name) / 'blocked'
+        blocked.write_text('a file sits where the directory should be')
+        with self.assertRaisesRegex(StorageError, 'Configured state directory is unavailable'):
+            store.write_cache({'state_dir': str(blocked)}, 'catalogue.json', {'value': 1})
+
+    def test_run_journal_survives_compact_state_failure_for_retry(self):
+        summary = {'id': 'run-retry', 'started': 's', 'finished': 'f', 'planned': 0,
+                   'deleted': 0, 'freed_bytes': 0, 'errors': []}
+        original = store.atomic_json
+
+        def fail_compact(path, value):
+            if Path(path).name == 'state.json':
+                raise OSError('state replace failed')
+            return original(path, value)
+
+        with mock.patch.object(store, 'atomic_json', side_effect=fail_compact):
+            with self.assertRaisesRegex(StorageError, 'Could not persist state.json'):
+                store.record_run(self.settings, summary)
+        self.assertEqual(store.read_journal(self.settings), [summary])
+        self.assertFalse((Path(self.settings['state_dir']) / 'state.json').exists())
+
+        self.assertTrue(store.record_run(self.settings, summary))
+        self.assertEqual(store.load_state(self.settings)['last_run'], summary)
+
+    def test_malformed_state_is_reported_by_the_strict_loader(self):
+        path = Path(self.settings['state_dir']) / 'state.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        with self.assertRaisesRegex(Exception, 'Saved run history is unreadable'):
+            store.load_state_strict(self.settings)
+        self.assertIn('Saved run history is unreadable', store.state_error(self.settings))
+
+    def test_malformed_state_cannot_be_overwritten_by_run_finalization(self):
+        path = Path(self.settings['state_dir']) / 'state.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        summary = {'id': 'run-one', 'started': 's', 'finished': 'f', 'planned': 0,
+                   'deleted': 0, 'freed_bytes': 0, 'errors': []}
+        with self.assertRaisesRegex(Exception, 'Saved run history is unreadable'):
+            store.record_run(self.settings, summary)
+        self.assertEqual(path.read_text(), '{not-json')
+
+    def test_malformed_scheduler_state_is_reported_by_the_strict_loader(self):
+        path = Path(self.settings['state_dir']) / 'jobs.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        with self.assertRaisesRegex(Exception, 'Saved scheduler state is unreadable'):
+            store.job_state_strict(self.settings)
+        self.assertIn('Saved scheduler state is unreadable', store.jobs_error(self.settings))
+
+    def test_scheduler_state_with_a_non_timestamp_is_rejected(self):
+        path = Path(self.settings['state_dir']) / 'jobs.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'pending_run': False}))
+        with self.assertRaisesRegex(Exception, 'pending_run is not a timestamp'):
+            store.job_state_strict(self.settings)
+
+    def test_malformed_health_cache_is_reported_and_preserved(self):
+        path = Path(self.settings['state_dir']) / 'health.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{not-json')
+        with self.assertRaisesRegex(Exception, 'Saved health cache is unreadable'):
+            store.load_health_strict(self.settings)
+        self.assertIn('Saved health cache is unreadable', store.health_error(self.settings))
+        with self.assertRaisesRegex(Exception, 'Saved health cache is unreadable'):
+            store.write_cache(self.settings, 'health.json', {'rules': {}})
+        self.assertEqual(path.read_text(), '{not-json')
+
+    def test_partial_health_cache_keeps_operator_fields_optional(self):
+        path = Path(self.settings['state_dir']) / 'health.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'rules': {}, 'suppressed': {'alert': {}}}))
+        health = store.load_health_strict(self.settings)
+        self.assertEqual(health['suppressed'], {'alert': {}})
+        self.assertEqual(health['instances'], {})
 
     @unittest.skipUnless(hasattr(os, 'O_DIRECTORY'), 'atomic directory fsync is Linux-only')
     def test_concurrent_atomic_writes_use_distinct_temporary_files(self):

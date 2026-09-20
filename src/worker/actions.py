@@ -29,9 +29,10 @@ from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
                   validate_text)
 from sonarr import SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
-                   load_health, load_settings, load_state, log_line, now_iso, read_cache,
+                   load_health, load_settings, load_settings_strict, load_state, load_state_strict, log_line, now_iso, read_cache,
                    read_journal, read_log, read_progress, save_settings, save_state,
-                   save_settings_unlocked, settings_transaction, trim_health, write_cache)
+                   save_settings_unlocked, settings_transaction, trim_health, update_health,
+                   write_cache)
 from tmdb import TMDB, TMDBError
 
 
@@ -244,22 +245,28 @@ def action_acknowledge(settings, request):
     what it says brings it back. An error can never be acknowledged: one of them stops a
     series from running, and hiding that would not stop it being true.
     """
-    key = str(request.get('key') or '')
-    health = load_health(settings)
-    found = next((alert for alert in (health.get('alerts') or []) if alert['key'] == key), None)
-    if not found:
-        raise Rejected('That alert is no longer present.')
-    acknowledged = dict(health.get('acknowledged') or {})
-    if request.get('undo'):
-        acknowledged.pop(key, None)
-    else:
-        if not alerts.may_acknowledge(found):
-            raise Rejected('An error cannot be acknowledged while it is still true.')
-        acknowledged[key] = alerts.fingerprint(found)
-    health['acknowledged'] = acknowledged
-    write_cache(settings, 'health.json', health)
+    alert_key = str(request.get('key') or '')
+    undo = bool(request.get('undo'))
+    found_alert = None
+
+    def apply(health, alert_key=alert_key, undo=undo):
+        found_alert = next((alert for alert in (health.get('alerts') or [])
+                            if alert['key'] == alert_key), None)
+        if not found_alert:
+            raise Rejected('That alert is no longer present.')
+        acknowledged = dict(health.get('acknowledged') or {})
+        if undo:
+            acknowledged.pop(alert_key, None)
+        else:
+            if not alerts.may_acknowledge(found_alert):
+                raise Rejected('An error cannot be acknowledged while it is still true.')
+            acknowledged[alert_key] = alerts.fingerprint(found_alert)
+        health['acknowledged'] = acknowledged
+        return found_alert
+
+    health, found_alert = update_health(settings, apply)
     log_line(settings, 'info',
-             f'{"un-" if request.get("undo") else ""}acknowledged: {found.get("title")}')
+             f'{"un-" if undo else ""}acknowledged: {found_alert.get("title")}')
     status, current_alerts, hidden_alerts = _status_bundle(settings, health)
     return {'alerts': current_alerts,
             'suppressed_alerts': hidden_alerts,
@@ -268,20 +275,27 @@ def action_acknowledge(settings, request):
 
 def action_suppress_alert(settings, request):
     """Hide one recurring warning by exact alert key, never by global kind."""
-    key = str(request.get('key') or '')
-    health = load_health(settings)
-    found = next((alert for alert in (health.get('alerts') or []) if alert['key'] == key), None)
-    suppressed = dict(health.get('suppressed') or {})
-    if request.get('undo'):
-        suppressed.pop(key, None)
-    else:
-        if not found or found.get('kind') != 'no-recycle-bin':
-            raise Rejected('That alert cannot be hidden permanently.')
-        suppressed[key] = {'kind': found['kind'], 'instance_id': found.get('instance_id')}
-    health['suppressed'] = suppressed
-    write_cache(settings, 'health.json', health)
+    alert_key = str(request.get('key') or '')
+    undo = bool(request.get('undo'))
+    found_alert = None
+
+    def apply(health, alert_key=alert_key, undo=undo):
+        found_alert = next((alert for alert in (health.get('alerts') or [])
+                            if alert['key'] == alert_key), None)
+        suppressed = dict(health.get('suppressed') or {})
+        if undo:
+            suppressed.pop(alert_key, None)
+        else:
+            if not found_alert or found_alert.get('kind') != 'no-recycle-bin':
+                raise Rejected('That alert cannot be hidden permanently.')
+            suppressed[alert_key] = {'kind': found_alert['kind'],
+                                     'instance_id': found_alert.get('instance_id')}
+        health['suppressed'] = suppressed
+        return found_alert
+
+    health, found_alert = update_health(settings, apply)
     log_line(settings, 'info',
-             f'{"restored" if request.get("undo") else "suppressed"}: {key}')
+             f'{"restored" if undo else "suppressed"}: {alert_key}')
     status, current_alerts, hidden_alerts = _status_bundle(settings, health)
     return {'alerts': current_alerts,
             'suppressed_alerts': hidden_alerts,
@@ -779,32 +793,47 @@ def action_test_connection(settings, request):
     return {'ok_message': f'{kind.title()} connection answered.'}
 
 
+def _record_backup_status(fields):
+    """Merge backup-owned status into the newest settings document."""
+    with settings_transaction():
+        latest = load_settings()
+        latest.setdefault('backup', {}).update(fields)
+        save_settings_unlocked(latest)
+        return latest
+
+
 def action_backup(settings, request):
     def remember_error(message):
         # The archive operation is the useful result; a failure to record its diagnostic
         # must not replace it with a second, less actionable error (for example when a
         # hand-edited settings file becomes read-only at the same time as the destination).
         with contextlib.suppress(Exception):
-            updated = load_settings()
-            updated.setdefault('backup', {})['last_error'] = str(message)[:500]
-            save_settings(updated)
+            _record_backup_status({'last_error': str(message)[:500]})
 
     operation = str(request.get('operation') or 'list').lower()
+    if backup.activation_pending():
+        with main.run_lock(blocking=True):
+            backup.recover_activation()
     if operation == 'list':
         configured = (settings.get('backup') or {}).get('path')
         backups = backup.list_backups(settings) if str(configured or '').strip() else []
         return {'backups': backups,
-                'backup': dict(settings.get('backup') or {})}
+                'backup': dict(settings.get('backup') or {}),
+                'staged_restore': backup.load_staged_restore(settings)}
     if operation == 'create':
         try:
             result = backup.create(settings)
         except Rejected as error:
             remember_error(error)
             raise
-        updated = load_settings()
-        updated.setdefault('backup', {}).update(last=result['created_at'], last_error='')
-        save_settings(updated)
+        updated = _record_backup_status({'last': result['created_at'], 'last_error': ''})
         return {'result': result, 'backups': backup.list_backups(updated)}
+    if operation == 'stage':
+        return backup.stage_restore(settings, request.get('file'), request.get('confirm', ''))
+    if operation == 'activate':
+        with main.run_lock():
+            return backup.activate(settings, request.get('confirm', ''),
+                                   review_pending=bool(request.get('review_pending')))
     if operation == 'restore':
         # Archived settings/queues/intents cannot be activated safely without maintenance
         # exclusion and quarantine. Do not install even briefly, in either current mode.
@@ -951,7 +980,7 @@ def action_test_tmdb(settings, request):
 
 
 def action_clear_history(settings, request):
-    state = load_state(settings)
+    state = load_state_strict(settings)
     state['runs'] = []
     state['last_run'] = None
     save_state(settings, state)
@@ -998,7 +1027,14 @@ def dispatch(request: dict) -> dict:
     if not handler:
         return {'ok': False, 'error': 'Unknown action'}
     try:
-        settings = load_settings()
+        if backup.activation_pending():
+            with main.run_lock(blocking=True):
+                backup.recover_activation()
+        read_only = {
+            'alerts', 'episodes', 'log', 'scope-counts', 'series', 'snapshot', 'stats',
+            'settings', 'status', 'test-instance',
+        }
+        settings = load_settings() if action in read_only else load_settings_strict()
         return {'ok': True, **handler(settings, request)}
     except Rejected as error:
         return {'ok': False, 'error': str(error)}

@@ -1,8 +1,8 @@
 # Container design record
 
 The port is complete: `15dfca1` removed the Unraid integration and `fbadb3b` added the
-HTTP front end. This records the design, not unfinished port work or production approval.
-The [production-readiness plan](PLAN.md), revised 2026-09-17, owns remaining work and
+HTTP front end. This records the design, not production approval. The
+[production-readiness plan](PLAN.md) owns remaining work and
 release gates; [SECURITY-REVIEW.md](../SECURITY-REVIEW.md) records current review limits.
 
 ## Architecture and boundaries
@@ -18,8 +18,9 @@ release gates; [SECURITY-REVIEW.md](../SECURITY-REVIEW.md) records current revie
 - **Portable runtime.** The container replaces the host PHP/Python bridge, WebGUI page,
   event hooks and cron integration rather than maintaining a parallel plugin. Standard
   library only keeps dependencies small, but application, interpreter and base-image
-  security still require review and renewal. Scheduling correctness remains Phase 4.2;
-  worker readiness and shutdown remain Phase 6.
+  security still require review and renewal. Scheduling uses validated IANA civil time,
+  and the image installs Debian `tzdata` so DST behavior is available in production.
+  Worker readiness and shutdown remain Phase 6.
 
 ## Persistence and process identity
 
@@ -28,9 +29,13 @@ state (caches, journal, run intent and posters) belong there; the application do
 to the filesystem. Config/state overrides require care: a backup must not silently omit
 state stored elsewhere.
 
-A separate optional persistent `/backups` mount, its permissions and safe restore behavior
-are **unresolved** in Phase 3. Do not assume archives survive container replacement or
-that copying a directory while work is active gives a consistent, safely restorable backup.
+A separate optional persistent `/backups` mount is supported for archive retention. Uncomment
+the example mount, set the Backup destination to `/backups`, and make the host directory
+writable by the configured `PUID:PGID` before startup. The application does not recursively
+chown this operator-supplied mount, so an explicit non-root `user:` must also match its
+ownership. `/config` remains the only required volume; no media mount is supported. Backup
+creation is transaction-coordinated and refuses a `state_dir` outside `/config` rather than
+silently omitting authoritative state.
 
 On root startup, `server.take_the_volume` prepares `/config` ownership and applies `UMASK`,
 then drops supplementary groups and switches to `PGID`/`PUID`. This avoids requiring a
@@ -75,7 +80,7 @@ release snapshot under `/assets/<digest>/`, preventing a module graph from mixin
 [AGENTS.md](../AGENTS.md) owns deployment and scoped rollback/cleanup conventions;
 [README.md](../README.md) describes usage. Follow the plan's acceptance ladder alongside
 [ACCEPTANCE.md](ACCEPTANCE.md), recording candidate evidence in
-[VALIDATION.md](VALIDATION.md). Phase 6 still requires fresh-base renewal, image evidence
-and verification of published-image versus local-build instructions. Test Mode's intended
-external-write boundary is not yet enforced on every entry point (Phase 1.4); keep settings
-editable and do not repeat the old “nothing writes” guarantee.
+[VALIDATION.md](VALIDATION.md). The remaining container checks and the supported deployment
+profile are listed in [PLAN.md](PLAN.md). Test Mode's external-write boundary remains the
+required safety rule; keep settings editable and do not repeat the old “nothing writes”
+guarantee for local application writes.

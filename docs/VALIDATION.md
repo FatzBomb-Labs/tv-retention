@@ -1,5 +1,92 @@
 # Validation record
 
+## Phase 4 dates and scheduling — 2026-09-20
+
+The implementation passed the authoritative Linux host gate on `fatzserver-host`: **741
+Python tests in 10.027s** and **31 frontend tests**, with `All required checks passed` and
+exit code `0`. Worker imports and shipped module syntax checks also passed. No deployment,
+live Sonarr request, media access, Docker acceptance or WSL installation was performed.
+
+Focused Phase 4 evidence covers:
+
+- provider safety: ambiguous TMDB external-ID matches are rejected; unique matches resolve;
+  Sonarr dates are never overwritten; TVMaze preserves season `0`; provider failures leave
+  missing dates unresolved; persisted provider caches are reused and expired entries refresh;
+  AniList, Plex and Jellyfin cannot be enabled as retention-date providers;
+- interpolation and acquisition fallback: only bounded air-date gaps are estimated;
+  leading/trailing gaps remain unresolved; acquisition dates use import events rather than
+  grabs, upgrades or deletions;
+- scheduling: all cron fields validate, IANA zones are checked, sparse annual schedules
+  catch up within the bounded ten-year search, nonexistent spring-forward times are skipped,
+  repeated fall-back times receive distinct UTC occurrence IDs, and pending recovery cannot
+  run twice in one tick;
+- persistence/UI/image integration: settings version 14 migrates the timezone default,
+  `jobs.json` persists `last_occurrence` and `pending_run`, the schedule UI round-trips the
+  IANA timezone, unsupported providers are visibly disabled, and the image installs `tzdata`
+  with `TZ=Etc/UTC` as its default.
+
+AniList retention dates remain intentionally disabled because the current title-based query
+does not prove season identity. Container permission, browser reload, Docker and WSL
+acceptance remain outside this gate and remain open in the plan.
+
+## Phase 2 durability completion — 2026-09-19
+
+The Phase 2 durability work passed the authoritative Linux host gate on
+`fatzserver-host`: **712 Python tests in 9.411s** and **31 frontend tests**, with
+`All required checks passed` and exit code `0`. Worker imports and shipped module syntax
+checks also passed. No deployment, live Sonarr request or media access was performed.
+
+Focused evidence included:
+
+- **15 settings-revision tests:** full-document stale writes reject; binding, sync and
+  expiry writers merge only their owned fields; operator resolution preserves failure
+  propagation and newer settings.
+- **64 freshness tests:** re-enable behavior remains correct after commit-time merging.
+- **14 mode-boundary tests:** the new held-lock regression proves `tick()` exits before
+  reading settings, contacting Sonarr or writing `jobs.json` when another run owns the
+  lock.
+- **29 store tests:** required cache/state writes raise `StorageError`; progress markers
+  stay best effort; strict configured state paths fail closed; journal evidence precedes
+  compact run-state replacement and remains retryable after a replacement failure.
+- **3 removal-resolution tests:** operator cancellation still leaves the queue intact when
+  the settings write fails, and successful resolution remains request-scoped.
+
+The scheduler now holds one non-blocking `run.lock` across its complete bookkeeping cycle,
+with nested lock acquisition removed. Authoritative settings, intent, run history,
+scheduler state, health cache and removal-ledger failures are no longer silently converted
+into empty state. Background settings writers use revision-checked owned-field merges;
+stale full-document writers are rejected. Phase 3 backup/restore is now implemented through
+explicit staging and activation; the separately documented atomic in-progress Test Mode
+transition remains open.
+
+## Phase 3 backup creation, staging and activation — 2026-09-19
+
+The focused backup suite passed **11 tests in 0.645s** on Windows. The slice covers:
+
+- archive creation under the settings transaction with per-file SHA-256 manifest values;
+- Windows temporary-file descriptor cleanup and same-second concurrent publication;
+- retention pruning limited to owned archives while retaining the newly created archive and
+  unrelated destination files;
+- manifest/member/path validation, bounded expanded bytes and streamed extraction limits;
+- malformed settings, tampered archive content and active-config preservation;
+- restore staging with Test Mode forced on, schedules disabled, executable queues and run
+  state quarantined, and a durable `restore-staging.json` marker reloadable after restart;
+- explicit activation under the existing `run.lock`, typed confirmation and pending-work
+  review, replacement of files absent from an older archive, and rollback after interrupted
+  snapshot/install phases.
+- Backup UI staging and activation controls, quarantine display, polling stop, draft discard
+  and fresh-snapshot reload. The local frontend contract suite passed **166 build tests** and
+  **31 executable frontend tests** after this change.
+
+The read-only backup listing now reports the durable staged-restore marker. The legacy direct
+`restore` operation remains refused; the new explicit `stage` and `activate` operations do
+not contact Sonarr and always install Test Mode with schedules disabled. The authoritative
+Linux host gate then passed **723 Python tests in 9.594s** and **31 frontend tests**, with
+`All required checks passed`. Container permission and optional backup-mount acceptance could
+not be run on the Windows development box: Docker is not installed or on `PATH`, and WSL is
+not installed. No container was started. No deployment, live Sonarr request or media access
+was performed.
+
 ## Build 22 deployment — 2026-09-18
 
 The committed source checkpoint is `a18d758` (`Refresh UI after runs and fix specials
@@ -31,6 +118,166 @@ Build 21 is retained as the rollback image under both `tv-retention:rollback` an
 `330e58d07228c7a3ea1b23e0c75de2a3303adb5591e272523d210e5bf67898d2`. Superseded TV
 Retention image tags and the older build-20 rollback archive were removed; no global
 container or image cleanup was used.
+
+## Interrupted host-validation cleanup — 2026-09-18
+
+The host-validation wrappers now create a unique lease for each disposable staging
+directory. The local shell or PowerShell runner refreshes that lease while the remote
+gate is alive. A remote watchdog removes the staging directory and lease after the
+refresh stops, while the normal exit trap still removes both immediately. This covers
+an abrupt local SSH-client loss without changing the application, its config volume or
+any Sonarr state.
+
+Evidence:
+
+- The authoritative wrapper gate passed **684 Python tests and 31 frontend tests**, with
+  `All required checks passed` and exit code `0` after the lease change.
+- A disposable remote fault probe created unique `/tmp/tv-retention-interrupt.*`, lease
+  and marker paths, killed the local SSH client after readiness, and observed
+  `marker=expired staging=removed` within the bounded probe window. The unique marker
+  was then removed; no application staging or `/tmp/tvr-demo/config` path was used.
+- The probe exercises the lease/watchdog cleanup protocol directly rather than
+  interrupting a full test suite mid-case. It establishes bounded stale-staging cleanup;
+  it does not claim that an arbitrary remote process outside this wrapper is terminated
+  by SSH loss.
+
+## Safe-restore mutation boundary — 2026-09-18
+
+The bounded Linux fixture matrix passed **13 tests in 0.077s**. It exercises the real
+action and CLI boundaries against the scripted Sonarr transport in both Test Mode and
+live mode, with exact ordered fake requests and isolated temporary config/state.
+
+Covered entry points are manual run, scheduled run, CLI run, due tick, picker monitoring,
+scope pass, recycle-bin configuration, queued series removal, preview and restore refusal.
+Test Mode and preview produce no Sonarr mutation and do not create run state. Live cases
+send only the expected fixture requests. Restore is refused before calling `backup.restore`
+in both modes, leaves the settings document unchanged and sends no Sonarr request.
+
+The Windows copy of this focused file cannot run because the worker imports POSIX `fcntl`;
+the authoritative Linux host result is the release evidence. Safe archive activation is
+still deliberately disabled until the Phase 3 backup/restore work adds maintenance
+exclusion, quarantine and safe pending-work activation.
+
+## Latest implementation — 2026-09-18 (backup status merge)
+
+Backup archive creation now records `last` and `last_error` by merging only backup-owned
+fields into the newest settings document under the short settings transaction. A settings
+save that completes during archive creation is preserved rather than overwritten by the
+older request snapshot.
+
+The focused settings-revision suite passed **6 tests in 0.013s** on `fatzserver-host`.
+The regression performs a valid public settings save during the archive operation and
+verifies that the newer retention window and the backup timestamp both survive. This is
+a bounded owned-field commit fix; other internal writers, commit-time rechecks and full
+transaction ordering remain open in Phase 2.
+
+The same focused suite now passes **7 tests in 0.014s** after adding a health-cache
+transaction boundary. Operator-owned alert acknowledgement and suppression survive a
+stale background health write, while the newer background instance reading is retained.
+This protects the two operator-owned health fields; the broader health writer ordering
+and cross-process cache durability model remain open in Phase 2.
+
+The full authoritative gate then passed **686 Python tests in 9.676s** and **31 frontend
+tests**, with all required checks passing. No deployment or live Sonarr request was made.
+
+## Latest implementation — 2026-09-18 (strict settings and intent authority)
+
+Read-only settings views retain a repairable document when structural validation fails, but
+mutating and external-write RPCs now use a strict loader and refuse the saved authority.
+The settings-save action remains available as the explicit repair path. Status exposes a
+blocking `settings-invalid` alert without replacing the stored document.
+
+The executable `run-intent.json` record now has a strict loader. A missing record remains a
+normal fresh-install state; malformed JSON, unreadable content or a non-object record is a
+blocking `intent-invalid` condition. Live runs validate that record before binding rules or
+making any Sonarr request, so damaged recovery state cannot be mistaken for a clean start.
+
+Focused Linux validation passed **17 store tests** and **10 settings/revision tests**. The
+complete authoritative gate passed **691 Python tests in 9.213s** and **31 frontend tests**,
+with all required checks passing. No deployment, live Sonarr request or media access was
+made. Broader cache transaction ordering and full intent shape validation remain open in
+Phase 2.
+
+## Latest implementation — 2026-09-18 (idempotent run finalization)
+
+Completed intents now carry their rendered summary before local bookkeeping begins. On a
+restart, if `state.json` or `journal.jsonl` is missing, the worker replays only that local
+finalization and returns the existing summary without contacting Sonarr or creating a new
+logical run. The store-level recorder deduplicates state and journal entries by run ID under
+the short local transaction.
+
+Focused Linux validation passed **18 store tests** and **9 public-run contract tests**. The
+process-interruption suite passed **5 tests in 2.908s** and the retention-retry suite passed
+**5 tests in 0.042s**. The complete authoritative gate passed **693 Python tests in 9.738s**
+and **31 frontend tests**, with all required checks passing. No deployment, live Sonarr
+request or media access was made. Broader storage-failure ordering and full transaction
+coordination remain open in Phase 2.
+
+## Latest implementation — 2026-09-18 (strict intent shape validation)
+
+Strict `run-intent.json` loading now validates the executable record identity, status,
+collections, operation identity, operation kind/status/attempt fields, and kind-specific
+fields such as episode lists, file membership, and series deletion flags. Malformed nested
+operations are exposed through the blocking `intent-invalid` Status alert and refuse live
+runs before any Sonarr request.
+
+Legacy compatibility is preserved: completed intents from before summary persistence remain
+recoverable through the removal ledger, and removal operations without target snapshots stay
+held for the existing review-required path rather than being silently discarded.
+
+Focused Linux validation passed **19 store tests** and **11 settings/revision tests**. The
+recovery compatibility suites passed **6, 17, 6, 8 and 3 tests** respectively. The complete
+authoritative gate passed **695 Python tests in 9.237s** and **31 frontend tests**, with all
+required checks passing. No deployment, live Sonarr request or media access was made.
+
+## Latest implementation — 2026-09-18 (strict run-history authority)
+
+`state.json` now has a strict loader for authoritative run history. Malformed or unreadable
+history is exposed through the blocking `state-invalid` Status alert. Run finalization and
+clear-history refuse to overwrite it, and live runs validate state before binding rules or
+making any Sonarr request.
+
+Focused Linux validation passed **21 store tests** and **13 settings/revision tests**. The
+complete authoritative gate passed **699 Python tests in 9.377s** and **31 frontend tests**,
+with all required checks passing. No deployment, live Sonarr request or media access was
+made. Scheduler bookkeeping and broader cache/storage failure ordering remain open in
+Phase 2.
+
+## Latest implementation — 2026-09-18 (strict scheduler-state authority)
+
+`jobs.json` now has a strict loader for `pending_run`, `last_run`, and
+`last_connectivity`. Malformed scheduler state is exposed through the blocking
+`jobs-invalid` Status alert, and scheduler ticks refuse it instead of treating a damaged
+document as an empty scheduler state that could drop a queued run.
+
+Focused Linux validation passed **23 store tests** and **14 settings/revision tests**. The
+complete authoritative gate passed **702 Python tests in 9.859s** and **31 frontend tests**,
+with all required checks passing. No deployment, live Sonarr request or media access was
+made. Disposable cache readers and broader storage-failure ordering remain open in Phase 2.
+
+## Latest implementation — 2026-09-18 (strict health-cache authority)
+
+Locked health-cache merges and operator acknowledgement/suppression updates now refuse a
+malformed `health.json` rather than replacing it with an empty reading. Status exposes the
+blocking `health-invalid` alert, while tolerant read-only views remain available for repair.
+
+Focused Linux validation passed **25 store tests** and **15 settings/revision tests**. The
+complete authoritative gate passed **705 Python tests in 9.863s** and **31 frontend tests**,
+with all required checks passing. No deployment, live Sonarr request or media access was
+made. Per-rule episode-cache integrity and broader storage-failure ordering remain open in
+Phase 2.
+
+## Latest implementation — 2026-09-18 (per-rule cache recovery)
+
+Malformed per-rule episode readings are now covered by regression tests: normal planning
+refetches them from Sonarr, while offline planning rejects them instead of treating an empty
+cache as a valid plan. This preserves the existing disposable-reading contract without
+turning one damaged series cache into a system-wide block.
+
+The focused Linux freshness suite passed **64 tests**. The complete authoritative gate then
+passed **707 Python tests in 9.851s** and **31 frontend tests**, with all required checks
+passing. No deployment, live Sonarr request or media access was made. Broader storage-failure
+ordering remains open in Phase 2.
 
 ## Executor image correction — 2026-09-18
 
@@ -135,9 +382,10 @@ gate passed **679 Python and 29 frontend tests**.
 
 Phase 0 validation evidence also includes two complete host gates run concurrently. Each
 passed **678 Python and 29 frontend tests** with independent disposable staging and cleanup.
-An attempted interruption completed normally, so no SSH-loss or interrupted-cleanup claim
-is made. Injected fsync/replace failure coverage and serialized transactions remain open
-in Phase 2; safe restore remains intentionally disabled until Phase 3.
+The later lease-watchdog fault probe killed the local SSH client and observed bounded
+cleanup with `marker=expired staging=removed`; see the dedicated record above. Injected
+fsync/replace failure coverage and serialized transactions remain open in Phase 2; safe
+restore remains intentionally disabled until Phase 3.
 
 ## Latest implementation — 2026-09-18 (Phase 1 safety checkpoint)
 
