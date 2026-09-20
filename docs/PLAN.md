@@ -44,7 +44,18 @@ This is the part that is earned. Everything else on this page is scheduling.
 Fix concrete state failures in the existing modules. Do not expand the frontend
 architecture.
 
-### 2. Container verification
+### 2. Seed the scheduler's bookkeeping on upgrade
+
+Upgrading from a build that predates `last_occurrence` makes the scheduler read the most
+recent occurrence as unanswered and fire a catch-up immediately. Build 23 did exactly
+that on the demo instance, harmlessly, because Test Mode was on. With Test Mode off it
+would be an unscheduled real run a minute after start.
+
+When `jobs.json` has no `last_occurrence` but does have `last_run`, seed it from the
+latest occurrence at or before `last_run` rather than treating it as never answered. An
+absent file on a genuinely fresh install must still mean "no history", not "nothing due".
+
+### 3. Container verification
 
 Run the application in an isolated container and verify:
 
@@ -54,7 +65,7 @@ Run the application in an isolated container and verify:
 
 Keep the standard-library design. No framework, no database.
 
-### 3. Acceptance
+### 4. Acceptance
 
 Never against a production library. Use a copied configuration throughout. A read-only
 smoke is not permission to run a write-enabled operation.

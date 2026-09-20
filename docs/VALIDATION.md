@@ -6,15 +6,35 @@ or re-run the gate.
 
 ## Current gate — 2026-09-20
 
-Authoritative Linux host gate on `fatzserver-host`: **641 Python tests in 10.082s** and
+Authoritative Linux host gate on `fatzserver-host`: **624 Python tests in 9.717s** and
 **31 frontend tests**, `All required checks passed`, exit code `0`. Worker imports and
 shipped-module syntax checks passed.
 
-Down from 741 because the `test_build.py` trim removed 100 assertions about appearance —
-colours, wording, control placement, icon geometry — and kept 66 structural checks. No
-behavioral coverage was removed.
+Down from 741: the `test_build.py` trim removed 100 assertions about appearance, and
+flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
+document can reach. No behavioral coverage was removed.
 
-No deployment, live Sonarr request, media access or Docker acceptance was performed.
+## Build 23 deployment — 2026-09-20
+
+Replaced `tv-retention:dev-build22` with `dev-build23` on the demo instance: config on
+`/mnt/user/appdata/tv-retention`, `TZ=America/Detroit`, Test Mode on, schedules on.
+
+- Preflight against a `/tmp` copy, `--rm`: migrated 13 → 14, timezone inherited as
+  `America/Detroit` rather than `Etc/UTC`, 32 rules and 4 presets intact,
+  `integrity_errors` clean.
+- Schedule unmoved: `last_occurrence` resolves to `2026-09-20T05:00:00+00:00` under both
+  builds — 01:00 EDT before and after. This is what `_to_v14` inheriting the container
+  zone exists to guarantee; defaulting to `Etc/UTC` would have read 21:00.
+- Rollback held as one `tv-retention:rollback` tag plus
+  `pre-build23-20260920-1205.tar.gz`. Predecessor container and superseded tag removed.
+
+**One-time upgrade artifact:** `last_occurrence` did not exist in build 22's `jobs.json`,
+so build 23 read the 01:00 occurrence as unanswered and fired one catch-up test run at
+12:07. That is the documented catch-up contract behaving correctly, and it was harmless
+under Test Mode — but the same upgrade on an instance with Test Mode off would start a
+real run within a minute of starting. Tracked in PLAN.
+
+No live Sonarr mutation, media access or deletion occurred.
 
 ## What the gate covers
 
