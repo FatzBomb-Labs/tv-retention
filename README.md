@@ -12,26 +12,19 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ## Status and safety
 
-**Not ready for unattended destructive use. Keep retention schedules off and Test Mode
-on.** The [production-readiness plan](docs/PLAN.md), revised 2026-09-17, records unresolved
-release blockers, not completed fixes:
+**Not yet approved for unattended destructive use. Keep retention schedules off and Test
+Mode on.** Test Mode blocks external Sonarr mutations on every path, manual or scheduled,
+including the immediate ones: the monitoring pickers, the scope pass on save and the
+recycle-bin fix. Settings stay editable, and local cache/log writes still occur.
 
-- Executor dispatch is fixed, but recovery authorization and concurrent-write safety
-  still have release blockers.
-- Cross-tab settings conflict protection is not yet implemented.
-- AniList can overwrite an existing Sonarr date rather than only filling blanks.
-- Immediate monitoring and recycle-bin actions bypass Test Mode.
+What is still open is tracked in the [plan](docs/PLAN.md): cross-tab and late-response
+save conflicts, and container-level acceptance (non-root startup, permissions, graceful
+shutdown, readiness). Until those are done, treat this as a supervised tool.
 
-Test Mode selects a dry-run path for manual and scheduled runs, but **is not a general
-external-write barrier**. Saving a series can unmonitor episodes immediately, even when
-adding it disabled; monitoring pickers can also write on save. Read-only use means browsing
-and read-only refreshes, not saving rules, changing monitored flags, using the recycle-bin
-fix, queueing work or restoring archives. Local cache/log writes may still occur.
-
-Do not treat a preview, green Status page, typed confirmation or recycle bin as proof of
-safe execution. There is no active deletion-percentage guard. Deletions are not generally
-reversible; Sonarr's recycle-bin configuration and actual behavior determine recovery.
-Follow [acceptance](docs/ACCEPTANCE.md) and the PLAN gates before any target canary.
+Do not treat a preview, a green Status page, a typed confirmation or a recycle bin as
+proof of safe execution. There is no deletion-percentage guard. Deletions are not
+generally reversible; Sonarr's recycle-bin configuration and actual behavior determine
+recovery. Start with a disposable configuration and Sonarr instance.
 
 ## Contents
 
@@ -111,8 +104,7 @@ the editor keeps series facts and actions around a scrolling settings pane.
 
 Rules bind to a Sonarr instance and series ID. A unique match is required for retention;
 unmatched rules show a reason and are skipped. A configured series awaiting its first
-import can be selected; a series with no Sonarr path cannot. Identity validation for
-removals and resumed work remains a release blocker.
+import can be selected; a series with no Sonarr path cannot.
 
 | Condition | Meaning |
 |---|---|
@@ -126,14 +118,12 @@ removals and resumed work remains a release blocker.
 | **All** | Keep only if all conditions say keep; any delete vote selects deletion. |
 
 An unknown condition prevents deletion in either mode. For example, Age `180`, Episodes
-`20`, Keep **Any** keeps both the last 180 days and the 20 newest episodes. These are the
-policy semantics, not a guarantee of correct shared-file handling in the current build.
+`20`, Keep **Any** keeps both the last 180 days and the 20 newest episodes.
 
 The editor's next-run counts use draft values. Monitoring colors describe the keep window
 (green all monitored, orange some, red none), with a hover breakdown and episode details.
 An existing rule's enable switch saves immediately, separately from **Update**. Retention
-drafts are retained while browsing other shows and cleared when leaving the library;
-stale drafts and asynchronous responses still have unresolved correctness issues.
+drafts are retained while browsing other shows and cleared when leaving the library.
 
 ### Exclusions and specials
 
@@ -144,26 +134,23 @@ episodes does not. Global exclusions are explained but cannot be unticked per se
 **Season 0 / specials** can inherit the global default (excluded), or be included/excluded
 per series.
 
-Exclusions are intended to outrank retention and leave excluded episodes' monitored flags
-alone. The picker also exposes explicit monitoring edits and shades episodes in the keep
-window. **Do not rely on exclusion protection yet:** ordinary retention saves can discard
-manual entries, and an excluded episode does not reliably protect its shared physical file.
-Both failures are tracked in PLAN.
+Exclusions outrank retention and leave excluded episodes' monitored flags alone. An
+exclusion on any episode sharing a physical file protects that whole file. The picker also
+exposes explicit monitoring edits and shades episodes in the keep window.
 
 ## Retention presets
 
 Create named presets under **Series → Presets**. A new rule starts on **Custom**; selecting
 a preset shares its retention values with every rule using it. Editing that preset changes
 all those rules, and the editor lists affected shows. Presets in use cannot be deleted.
-Cards show a preset name or custom values. Test this workflow only with disposable settings
-while save/concurrency issues remain unresolved.
+Cards show a preset name or custom values.
 
 ## Monitoring
 
-Ordinary retention policy only unmonitors: episodes outside the keep window, including
-fileless episodes, should be unmonitored; file deletion must follow successful
-unmonitoring to avoid re-download loops. The executor does **not yet reliably enforce this
-contract**. Explicit removal dispositions that monitor are separate operator intent.
+Ordinary retention only unmonitors: episodes outside the keep window, including fileless
+episodes, are unmonitored, and file deletion follows successful unmonitoring so Sonarr
+cannot re-fetch what is about to be removed. Explicit removal dispositions that monitor
+are separate operator intent.
 
 The editor's **Change monitor status for episodes within scope** opens the current keep
 window's episodes, checked according to Sonarr. It is not restricted to newly added scope.
@@ -171,9 +158,9 @@ Selected differences are sent **immediately on save**, not queued. Saving also r
 outside-window unmonitor pass without an opt-in. The exclusion picker's changed monitored
 flags are likewise applied on save. Monitoring can lead to downloads.
 
-These immediate paths currently bypass Test Mode. A disabled rule or an unchecked
-inside-window toggle does not prevent the outside-window save pass. Avoid all such saves
-when browsing a real library read-only.
+Those immediate paths respect Test Mode, which refuses the write before sending it. A
+disabled rule or an unchecked inside-window toggle does not prevent the outside-window
+save pass, so avoid such saves when browsing a real library read-only.
 
 ## Queued changes
 
@@ -186,10 +173,9 @@ not an immediate deletion. The queued Sonarr disposition can be:
 - Delete the series and files — the UI requires `DELETE ALL`.
 
 The confirmation uses those exact words, not the series title. The removal dialog also
-has **Set monitoring in Sonarr before it goes**: those picker changes are immediate,
-separate from the queued disposition, and bypass Test Mode. Undoing a queue does not undo
-those writes or a completed deletion. Stale drafts can restore canceled queue data; queue
-persistence, identity checks and execution need the PLAN fixes before use on real media.
+has **Set monitoring in Sonarr before it goes**: those picker changes are immediate and
+separate from the queued disposition, though still subject to Test Mode. Undoing a queue
+does not undo those writes or a completed deletion.
 
 ## Finished shows
 
@@ -207,10 +193,9 @@ series reads fetch Sonarr data in the background. Monitoring changes made direct
 Sonarr require an episode read; history alone does not reveal them.
 
 The editor displays reading age and a per-series refresh. A show without a rule refreshes
-its catalogue facts. Cached counts remain dependent on that reading: stale/partial plans,
-Run-button eligibility and asynchronous UI updates have open issues in PLAN. Do not assume
-all writes re-read Sonarr: the immediate scope pass uses cached episodes, and resumed
-execution needs revalidation fixes.
+its catalogue facts. Cached counts depend on that reading, and the Run button is only
+hidden on a complete, current plan. Do not assume every write re-reads Sonarr: the
+immediate scope pass uses cached episodes.
 
 ## Alerts
 
@@ -230,24 +215,23 @@ its rules but stops ordinary processing. Stored Sonarr/provider credentials are 
 settings responses; saving the unchanged mask retains the secret. They remain sensitive
 plaintext in local settings and backups, unlike TV Retention's own hashed API credential.
 
-Connections reports recycle-bin configuration and offers a fix that **writes to Sonarr
-immediately, even in Test Mode**. Do not use it during read-only checks. Without a recycle
-bin, deletion is permanent; even with one, verify recovery in a disposable environment.
+Connections reports recycle-bin configuration and offers a fix that writes to Sonarr
+immediately rather than queueing; Test Mode refuses it. Without a recycle bin, deletion is
+permanent; even with one, verify recovery in a disposable environment.
 
 ## Air dates and optional providers
 
 **Settings → Air dates** controls provider order and unresolved-date handling; optional
-connection credentials/tests live under **Settings → Connections**. Sonarr is intended to
-remain authoritative. TMDB (with a key), TVMaze and AniList have date-fetching code.
-**Plex/Jellyfin checks are connectivity-only and supply no retention dates**; other listed
-unimplemented choices must not be treated as working providers.
+connection credentials/tests live under **Settings → Connections**. Sonarr remains
+authoritative. TMDB (with a key) and TVMaze can supply dates. **AniList supplies none**:
+its lookup cannot prove series, season and episode identity without matching on title
+alone, so it is out of scope as a date source. **Plex/Jellyfin checks are
+connectivity-only**; other listed choices are not working providers.
 
 Date enrichment can use neighboring-episode estimates and, for a wholly undated series,
 Sonarr-history fallback. Episode details expose provenance such as `sonarr`, provider,
-`estimated` or `acquired`. Unresolved files can be excluded or cause the rule to be disabled
-with a blocking alert. Estimates, provider identity/numbering and history-event selection
-remain under review. AniList has a confirmed overwrite bug; keep its date contribution
-disabled until fixed and validated. Provider connection success does not validate dates.
+`estimated` or `acquired`. Unresolved files can be excluded or cause the rule to be
+disabled with a blocking alert. Provider connection success does not validate dates.
 
 ## API key lifecycle
 
@@ -283,9 +267,10 @@ Status display does not establish worker readiness or safe execution.
 **Settings → Schedule** has a prominent Test Mode card and supports hourly, daily, weekly,
 monthly by date or weekday, and custom five-field cron schedules. The worker runs without
 an open page and implements missed-run catch-up and pending work while Sonarr is unavailable.
-Timezone/DST, sparse-cron catch-up, validation and restart behavior still need the PLAN fixes
-and evidence. **Keep retention schedules off now**, including in copied/restored settings.
-The mode toggle saves immediately; its UI wording overstates protection for immediate actions.
+Scheduling uses validated IANA civil time, and the image installs `tzdata` so DST behaves.
+Restart behavior still needs container acceptance. **Keep retention schedules off** until
+the plan's gates are done, including in copied or restored settings. The mode toggle saves
+immediately.
 
 ## Where things are stored
 
@@ -327,24 +312,36 @@ the interpreter, base image, HTTP boundary or dependencies of the operating syst
 | `src/worker/sonarr.py`, `tmdb.py`, `tvmaze.py`, `anilist.py` | Sonarr mapping and optional date clients. |
 | `src/worker/alerts.py`, `schedules.py`, `migrate.py` | Alerts, due-job calculation and settings upgrades. |
 
-The worker loop runs in a thread behind the HTTP server. Browsers use the application API,
-not Sonarr directly. Settings are validated on load/save; validation does not yet prevent
-lost updates or every unsafe mutation. Assets ship under a shared release digest so static
-imports stay within one release. Mapping field shapes participate in cache invalidation.
+One image, one process: `server.py` runs a standard-library `ThreadingHTTPServer` over
+`actions.dispatch`, with the worker and scheduler in a background thread, so there is no
+framework, supervisor or second service. The worker runs independently of browser login.
+Browsers use the application API, not Sonarr directly. Assets ship under a shared release
+digest so static imports stay within one release, and mapping field shapes participate in
+cache invalidation.
+
+The frontend is nineteen modules with `app.js` as the composition root: `dom`, `format`,
+`storage`, `transport`, `feedback`, `changes`, `episode-trees`, `activity`, `settings`,
+`checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`,
+`connections` and `library`. Sibling modules do not import each other; the entry supplies
+narrow, intent-named capabilities and reads replaceable documents through accessors such
+as `getSettings` and `getSnapshot` rather than captured references. Every module but the
+entry is side-effect-free at import.
+
+Sessions are in memory, with `HttpOnly`/`SameSite=Strict` cookies and per-session CSRF
+tokens. There is no proxy-header authentication mode, and forwarding headers are not
+treated as authentication or TLS proof. Restrict reachability to a trusted network or a
+controlled HTTPS reverse proxy. Settings are validated on load and on save; cross-tab
+conflict rejection is still open work.
 
 ## Development
 
-See [AGENTS.md](AGENTS.md) for conventions and validation constraints,
-[docs/REFACTOR-HANDOFF.md](docs/REFACTOR-HANDOFF.md) for frontend contracts, and
-[docs/CONTAINER.md](docs/CONTAINER.md) for container-port context.
+See [AGENTS.md](AGENTS.md) for conventions, constraints and validation.
 `tools/check-on-host.sh` and its Windows counterpart `tools/check-on-host.ps1` stage source
 under `/tmp` for Linux validation; the scripts do not build an image or contact Sonarr.
 Windows cannot substitute for Linux-specific worker behavior. Frontend tests live under
 `tests/frontend/`; backend fixtures and regressions live under `tests/`.
 
-[docs/VALIDATION.md](docs/VALIDATION.md) records past evidence, not current release approval.
-Follow [docs/PLAN.md](docs/PLAN.md) for remaining work and
-[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) for the staged acceptance boundary. Historical test
-counts and successful runs do not supersede the known failing executor regression.
+[docs/PLAN.md](docs/PLAN.md) owns the safety list, the remaining work and the acceptance
+ladder. [docs/VALIDATION.md](docs/VALIDATION.md) records the current gate result.
 
 Licensed GPL-3.0; see [LICENSE](LICENSE).

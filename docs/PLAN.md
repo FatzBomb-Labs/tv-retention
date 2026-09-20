@@ -1,25 +1,24 @@
-# TV Retention Final Plan
+# TV Retention plan of record
 
-Plan of record, updated September 20, 2026. This document tracks the work still needed
-before a release. Completed implementation history belongs in [VALIDATION.md](VALIDATION.md),
-not in this checklist.
+Updated September 20, 2026. What is left before release. Completed work belongs in git
+history, not here; delete from this file as things land.
 
 ## Current state
 
-The working baseline is in place:
-
-- Sonarr owns media metadata, monitoring and deletion. The application has no media mounts.
-- Test Mode, queued removals, exclusion protection, shared-file checks and durable recovery
-  are implemented.
+- Sonarr owns media metadata, monitoring and deletion. No media mounts.
+- Test Mode, queued removals, exclusion protection, shared-file checks and durable
+  recovery are implemented.
 - Backup creation, restore staging and activation are implemented.
-- Provider date safety and civil-time scheduling are implemented. AniList remains disabled
-  for retention dates because its current lookup cannot prove season identity.
-- The authoritative Linux gate passes: **741 Python tests** and **31 frontend tests**.
+- Provider date safety and civil-time scheduling are implemented. AniList contributes no
+  retention dates.
+- The Linux gate passes. [VALIDATION.md](VALIDATION.md) holds the current counts; never
+  quote one from memory.
 
-This is not release approval. No unattended destructive schedule is authorized until the
-remaining acceptance work below is complete.
+Not release approval: no unattended destructive schedule until the work below is done.
 
 ## Non-negotiable safety
+
+This is the part that is earned. Everything else on this page is scheduling.
 
 - Sonarr is the only authority for media metadata, monitoring and deletion.
 - A rule must resolve to exactly one current Sonarr series before it can act.
@@ -34,66 +33,76 @@ remaining acceptance work below is complete.
 
 ## Remaining work
 
-### 1. Finish UI state correctness
-
-Required before release:
+### 1. UI state correctness
 
 - Keep Run and confirmation tied to a current, complete plan and current source readings.
 - Prevent stale saves, late responses and concurrent tabs from overwriting newer edits.
 - Preserve drafts, one-time API-key display and restore reload behavior through background
   refreshes.
-- Finish the small accessibility and responsive-layout fixes that affect primary actions.
+- Finish the accessibility and responsive-layout fixes that affect primary actions.
 
-Do not expand the frontend architecture. Fix concrete state or usability failures in the
-existing modules.
+Fix concrete state failures in the existing modules. Do not expand the frontend
+architecture.
 
-### 2. Verify the supported container
+### 2. Container verification
 
 Run the application in an isolated container and verify:
 
-- login, configurable port, health/readiness and worker failure reporting;
-- malformed HTTP/RPC input is rejected cleanly;
-- graceful shutdown and restart recover safely;
 - root and non-root startup, `PUID`/`PGID`/`UMASK`, `/config` and optional backup permissions;
-- published-image instructions, version/build metadata and base-image renewal.
+- graceful shutdown and restart recover safely;
+- health/readiness and worker failure reporting on a configurable port.
 
-Keep the existing standard-library design. Do not add a framework or database for this work.
+Keep the standard-library design. No framework, no database.
 
-### 3. Complete acceptance in order
+### 3. Acceptance
 
-1. **Deterministic fixtures:** run the focused backend/frontend checks and the Linux gate.
-2. **Isolated container:** exercise the UI-to-worker path with fake Sonarr, including saves,
-   restart, recovery, migration and backup/restore. Record exact external requests.
-3. **Disposable Sonarr:** use synthetic media only; Test Mode off is allowed only here.
-   Verify monitoring, recycle-bin behavior, file outcomes and restart recovery.
-4. **Target read-only smoke:** use a copied config under `/tmp`, schedules off and Test Mode
-   on. Verify login, display, freshness, permissions and read-only Sonarr access.
-5. **Operator canary:** only after steps 1-4 and explicit approval. Use one bounded plan,
-   one rollback image and one matching config archive.
+Never against a production library. Use a copied configuration throughout. A read-only
+smoke is not permission to run a write-enabled operation.
 
-Docker and WSL are unavailable on the current Windows development machine, so steps 2-5
-must run on the Linux host or another approved environment.
+**1. Deterministic fixtures.** The focused backend/frontend checks and the Linux gate:
+worker imports, shipped-module syntax, no skipped mandatory checks. Record the result in
+VALIDATION.
 
-### 4. Keep documentation aligned
+**2. Isolated container**, fake Sonarr and a disposable config:
 
-- Update README, AGENTS and SECURITY-REVIEW when behavior changes.
-- Keep Test Mode, media-filesystem and notification wording accurate.
-- Record only current validation counts and environment details in VALIDATION.
-- Do not add a new test for every checklist line. Add tests for concrete regressions,
-  safety boundaries or data-loss risks; otherwise use the smallest focused check.
+- startup refuses missing or invalid credentials;
+- login, configurable port and health endpoint work;
+- settings, rules, exclusions, queues and migrations survive restart;
+- UI saves and background refreshes do not lose newer edits;
+- Test Mode sends no Sonarr mutations;
+- backup, restore staging and activation preserve the safety defaults;
+- shutdown and restart recover without replaying completed work.
+
+Record exact external requests for anything allowed to write here.
+
+**3. Real run, bounded.** One throwaway series with junk files on a reachable Sonarr,
+Test Mode off, one rollback image and one matching config archive. Verify monitoring
+changes, shared multi-episode files, recycle-bin behavior, partial failure and restart
+recovery, and truthful run history, journal and byte totals. Restore Test Mode on and
+schedules off when finished.
+
+**4. Read-only smoke on the target.** Copied config under `/tmp`, schedules off, Test Mode
+on. Verify login, version/build display, asset loading and browser refresh, library and
+cache ages, read-only Sonarr refreshes, and config/state permissions. Do not save rules,
+queue removals, run retention, change monitoring, alter the recycle bin, change API keys
+or restore during this step.
+
+Docker is unavailable on the Windows development machine, so 2-4 run on the Linux host.
+
+## Ship criterion
+
+The safety list holds, §1 is fixed, the container starts non-root and survives a restart,
+and one real run against one real show does what it said it would. That is 1.0.
 
 ## Explicitly unresolved
 
-- AniList cannot contribute retention dates until it can prove series, season and episode
-  identity without relying on title similarity.
-- Container permissions, HTTP hardening, graceful shutdown and readiness still need an
-  actual image-level check.
-- Browser reload, real-browser interaction and large-library performance still need practical
-  acceptance evidence; do not build a new frontend architecture to obtain it.
-- No live target deletion, deployment or production canary is authorized by this document.
+- Container permissions, graceful shutdown and readiness need an actual image-level check.
+- Real-browser interaction and large-library performance need practical evidence. Open a
+  browser; do not build a new frontend architecture to obtain it.
+- No live target deletion or production canary is authorized by this document.
 
 ## Out of scope
 
 Radarr/movie management, watched-state retention, new provider integrations, outbound
-notifications/webhooks, direct media access, media mounts, filesystem auditing and frontend
-framework rewrites.
+notifications/webhooks, direct media access, media mounts, filesystem auditing, frontend
+framework rewrites, and AniList as a retention-date source.
