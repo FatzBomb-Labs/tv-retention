@@ -29,6 +29,34 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   const WEEKDAYS = [[0, 'Sunday'], [1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'],
                     [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday']];
 
+  // Grouped by region, because 486 flat options is a scroll rather than a choice, and
+  // built from the list the worker sends rather than one kept here: that list is the
+  // container's own zone database, so every option offered is one validation accepts.
+  // A free-text field could not promise that — you found out at save time.
+  function renderTimezones(current) {
+    const select = $('tvr-timezone');
+    if (!select) return;
+    const offered = (snapshot().timezones || []).slice();
+    // A stored zone this image no longer carries still has to be selectable. Dropping
+    // it would silently move the schedule to whichever zone happened to render first,
+    // which is the one thing a timezone control must never do on its own.
+    if (current && !offered.includes(current)) offered.push(current);
+    const regions = new Map();
+    offered.forEach((name) => {
+      const region = name.split('/')[0];
+      if (!regions.has(region)) regions.set(region, []);
+      regions.get(region).push(name);
+    });
+    select.replaceChildren(...[...regions.keys()].sort().map((region) => {
+      const group = el('optgroup', { label: region });
+      regions.get(region).sort().forEach((name) => group.append(
+        // The region is already the group heading, so the option says the rest.
+        el('option', { value: name, textContent: name.slice(region.length + 1).replace(/_/g, ' ') })));
+      return group;
+    }));
+    select.value = current;
+  }
+
   function renderSchedule() {
     const schedule = settings().schedule || {};
     $('tvr-schedule-enabled').checked = !!schedule.enabled;
@@ -44,7 +72,7 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     $('tvr-freq').value = schedule.frequency || 'daily';
     $('tvr-monthly-mode').value = schedule.monthly_mode || 'day';
     $('tvr-cron').value = schedule.cron || '0 4 * * *';
-    $('tvr-timezone').value = schedule.timezone || 'Etc/UTC';
+    renderTimezones(schedule.timezone || 'Etc/UTC');
     $('tvr-schedule-summary').textContent = snapshot().schedule_text || 'Off';
 
     applyScheduleVisibility();

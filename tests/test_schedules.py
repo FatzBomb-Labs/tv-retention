@@ -233,3 +233,35 @@ class OneMatcher(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OfferedZones(unittest.TestCase):
+    """The interface offers zones from the running database, not a list kept in code.
+
+    The two disagree: the container installs tzdata and carries America/Detroit, the
+    host running this gate carries a trimmed set and does not. A hard-coded list would
+    eventually offer a name `zone_for` refuses, which is the failure the free-text field
+    had — you found out at save time.
+    """
+
+    def test_every_zone_offered_is_one_the_schedule_can_use(self):
+        offered = schedules.available_zones()
+        self.assertTrue(offered, 'the zone database produced nothing at all')
+        for name in offered:
+            schedules.zone_for({'timezone': name})   # raises ScheduleError if unusable
+
+    def test_the_default_is_offered(self):
+        self.assertIn(schedules.DEFAULT_TIMEZONE, schedules.available_zones())
+
+    def test_only_places_are_offered(self):
+        # Factory and localtime are not places, and bare UTC/GMT are Etc/UTC spelled
+        # differently. Every entry has a region, which is what the grouping relies on.
+        offered = schedules.available_zones()
+        self.assertTrue(all('/' in name for name in offered))
+        for junk in ('Factory', 'localtime', 'UTC', 'GMT'):
+            self.assertNotIn(junk, offered)
+
+    def test_the_list_is_sorted_and_free_of_duplicates(self):
+        offered = schedules.available_zones()
+        self.assertEqual(offered, sorted(offered))
+        self.assertEqual(len(offered), len(set(offered)))

@@ -19,7 +19,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import re
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 FREQUENCIES = ['hourly', 'daily', 'weekly', 'monthly', 'custom']
 MONTHLY_MODES = ['day', 'first', 'last']
@@ -100,6 +100,29 @@ def zone_for(schedule: dict, fallback=None):
         return ZoneInfo(name)
     except ZoneInfoNotFoundError as error:
         raise ScheduleError(f'Unknown IANA timezone "{name}"') from error
+
+
+def available_zones() -> list[str]:
+    """Every IANA zone this image can actually resolve, for the interface to offer.
+
+    Read from the running zone database rather than a list kept here, because the two
+    can disagree: the container installs `tzdata` and carries America/Detroit, the host
+    that runs the test gate carries a trimmed set and does not. A hard-coded list would
+    eventually offer a zone `zone_for` then refuses, which is the failure a free-text
+    field already had — you find out at save time, or never, because the name looked
+    right.
+
+    Region-prefixed names only. `Factory` and `localtime` are not places, and bare `UTC`
+    and `GMT` are the same choice as `Etc/UTC` spelled differently.
+
+    The default is always present even when the database omits it. A trimmed zone set
+    can lack `Etc/UTC` — the gate host's does — but `zone_for` special-cases the name
+    and never looks it up, so it is always a usable choice and a list that offered
+    everything except the default would be a strange thing to hand somebody.
+    """
+    zones = {name for name in available_timezones() if '/' in name}
+    zones.add(DEFAULT_TIMEZONE)
+    return sorted(zones)
 
 
 def _aware(moment: dt.datetime) -> dt.datetime:

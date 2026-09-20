@@ -6,7 +6,7 @@ or re-run the gate.
 
 ## Current gate — 2026-09-20
 
-Authoritative Linux host gate on `fatzserver-host`: **631 Python tests in 8.990s** and
+Authoritative Linux host gate on `fatzserver-host`: **635 Python tests in 9.715s** and
 **33 frontend tests**, `All required checks passed`, exit code `0`. Worker imports and
 shipped-module syntax checks passed.
 
@@ -14,6 +14,22 @@ Down from 741: the `test_build.py` trim removed 100 assertions about appearance,
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
+
+## First operator-approved live run — 2026-09-20
+
+Run `63b8ab8c8b96`, 21:43:19 UTC, on build 24 against the operator's real Sonarr with a
+bounded rule: **2 planned, 2 deleted, 2705 MiB freed, 0 errors**, `status: complete`.
+The journal records `test_mode: false`, `dry_run: false`, `scheduled: false` — a real
+manual run, not a dry one. Test Mode was restored afterwards and the schedule left off.
+
+This is acceptance step 3 for the deletion path itself. Not yet evidenced by it: shared
+multi-episode files, recycle-bin recovery, partial failure and restart recovery during a
+run, and whether the confirmation text matched the plan. Those remain open.
+
+Correction to the build 24 entry below: it called the coming run "the first deletion this
+application has ever performed". That was wrong. The journal shows completed live runs on
+2026-09-16 and twice on 2026-09-18, and the four series missing from the current config
+were removed through the application's own queued `delete-series-files` on 2026-09-16.
 
 ## Build 24 deployment — 2026-09-20
 
@@ -78,11 +94,15 @@ No live Sonarr mutation, media access or deletion occurred.
 
 ## Evidence still missing
 
-No recorded live acceptance establishes deletion or monitoring-write correctness, real
-provider behavior with live keys, API-key lifecycle, or backup and restore against a real
-configuration. Container permissions, dropped-privilege restore, graceful shutdown,
-readiness, real-browser workflows and large-library performance have no practical
-evidence.
+One bounded live run has now exercised the deletion path end to end (above). It did not
+cover shared multi-episode files, recycle-bin recovery, partial failure or restart
+recovery during a run, and it says nothing about whether the confirmation text matched
+the plan.
+
+Still without practical evidence: monitoring-write correctness beyond that run, real
+provider behaviour with live keys, API-key lifecycle, backup and restore against a real
+configuration, `UMASK` and backup-mount permissions, dropped-privilege restore, readiness
+as distinct from liveness, real-browser workflows and large-library performance.
 
 Isolated contract tests do not replace those checks. Keep schedules off and Test Mode on,
 and follow the acceptance ladder in [PLAN.md](PLAN.md) before any live write.

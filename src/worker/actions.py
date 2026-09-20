@@ -135,6 +135,10 @@ def action_snapshot(settings, request):
         'suppressed_alerts': hidden_alerts,
         'alert_summary': alerts.summarise(current_alerts),
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
+        # Static per image, and only the schedule panel wants it — but it is the zone
+        # database this container actually has, so offering anything else would put a
+        # name in the list that validation then refuses.
+        'timezones': schedules.available_zones(),
         'jobs': job_state(settings),
         'plan': plan_summary(settings, load_health(settings)),
         'sync': main.last_sync(settings),
