@@ -444,15 +444,20 @@ class Safety(Sources):
         self.assertIn('stopPolling()', module_js('app.js'))
         self.assertIn('discardSettingsDrafts()', module_js('app.js'))
 
-    def test_automatic_search_is_removed_but_legacy_setting_remains_readable(self):
-        """Sonarr RSS owns discovery; old settings still load without doing a search."""
+    def test_nothing_asks_sonarr_to_search(self):
+        """Sonarr RSS owns discovery, so no path here may trigger a fetch.
+
+        The settings key that used to request one was scrubbed by the v12 migration, and
+        the floor is now above it, so no document this release accepts can still carry
+        it — which is why this asserts the absence of the behaviour rather than the
+        presence of a migration step that no longer exists.
+        """
         worker = (ROOT / 'src' / 'worker' / 'main.py').read_text(encoding='utf-8')
-        migration = (ROOT / 'src' / 'worker' / 'migrate.py').read_text(encoding='utf-8')
         settings = module_js('settings.js')
         self.assertNotIn('search_episodes', worker)
+        self.assertNotIn('search_after_monitor', worker)
         self.assertNotIn('tvr-auto-search', self.html)
         self.assertNotIn('SEARCH_QUESTION', settings)
-        self.assertIn('search_after_monitor', migration)
         self.assertIn('Object.assign({}, settings().automation || {}, {', settings)
 
 

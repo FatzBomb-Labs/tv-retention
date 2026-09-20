@@ -29,7 +29,7 @@ except ImportError:  # Windows filesystem-only tests; the container path is Linu
     fcntl = None
 
 from core import CACHE_SCHEMA, DEFAULTS, Rejected, StorageError, atomic_json, validate_settings
-from migrate import migrate
+from migrate import UnsupportedVersion, migrate
 from sonarr import MAPPING_SCHEMA
 
 # The number covers everything the caches hold; the fingerprint covers the shape of what
@@ -108,7 +108,10 @@ def _load_settings(strict: bool = False) -> dict:
         stored = json.loads(CONFIG.read_text())
     except (OSError, json.JSONDecodeError) as error:
         raise Rejected(f'Settings file is unreadable ({error}). Fix or remove {CONFIG}.')
-    stored = migrate(stored if isinstance(stored, dict) else {})
+    try:
+        stored = migrate(stored if isinstance(stored, dict) else {})
+    except UnsupportedVersion as error:
+        raise Rejected(f'{error} ({CONFIG})') from error
     merged = json.loads(json.dumps(DEFAULTS))
     merged.update(stored)
     if not stored.get('state_dir'):

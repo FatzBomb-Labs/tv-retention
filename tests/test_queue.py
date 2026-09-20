@@ -134,10 +134,14 @@ class LoadNormalises(unittest.TestCase):
         import tempfile
         from pathlib import Path
         import main, store
+        from migrate import MINIMUM_VERSION
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'settings.json'
             path.write_text(json.dumps({
-                'settings_version': 4,
+                # At the migration floor: this is about validation filling in fields on
+                # load, not about migration, so the document only has to be old enough
+                # to predate the fields, not old enough to need a version step.
+                'settings_version': MINIMUM_VERSION,
                 'instances': [{'id': 'i1', 'name': 'S', 'url': 'http://s:8989', 'api_key': 'a' * 32}],
                 # A rule as an older release would have written it: no queue, no overrides.
                 'rules': [{'id': 'r1', 'instance_id': 'i1', 'series_id': 1, 'path': '/tv/A',
