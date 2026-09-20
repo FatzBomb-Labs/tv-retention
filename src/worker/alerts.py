@@ -164,11 +164,6 @@ def make(kind: str, *, rule_id: str = '', instance_id: str = '', detail: str = '
     }
 
 
-def notifies(alert) -> bool:
-    """Legacy compatibility hook; outbound notifications no longer exist."""
-    return False
-
-
 def merge(existing, current) -> list:
     """Carry first-seen dates across a re-check, and drop what has cleared.
 

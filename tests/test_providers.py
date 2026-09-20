@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 
 import context  # noqa: F401
-from core import validate_air_dates
+import main
+from core import validate_air_dates, validate_settings
 from tmdb import TMDB
 from tvmaze import TVMaze
 
@@ -113,3 +114,47 @@ class ProviderSafety(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TMDBGate(unittest.TestCase):
+    """An API key is the only switch TMDB has.
+
+    `validate_settings` never keeps an `enabled` flag for this section — migration
+    deletes it (test_migration.py asserts that), and DEFAULTS never re-adds it — so a
+    key alone must be enough to build the provider a run uses. Gating on both left every
+    configured key permanently unreachable while "Test TMDB" kept reporting success,
+    because it builds its own client straight from the typed key.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.settings = {'state_dir': str(Path(self.temp.name) / 'state')}
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_a_configured_key_alone_builds_the_provider(self):
+        self.settings['tmdb'] = {'api_key': 'b' * 32}
+        tmdb = main.tmdb_provider(self.settings)
+        self.assertIsNotNone(tmdb)
+        self.assertEqual(tmdb.key, 'b' * 32)
+
+    def test_the_shape_validate_settings_actually_produces_still_works(self):
+        # No 'enabled' key at all - exactly what validate_settings and migration leave
+        # behind, and the shape test_migration.py asserts for a key that survives.
+        settings = validate_settings({'tmdb': {'api_key': 'c' * 32}})
+        self.assertNotIn('enabled', settings['tmdb'])
+        settings['state_dir'] = self.settings['state_dir']
+        self.assertIsNotNone(main.tmdb_provider(settings))
+
+    def test_no_key_means_no_provider(self):
+        self.assertIsNone(main.tmdb_provider({}))
+        self.assertIsNone(main.tmdb_provider({'tmdb': {}}))
+        self.assertIsNone(main.tmdb_provider({'tmdb': {'api_key': ''}}))
+
+    def test_a_stale_enabled_flag_from_before_the_bug_fix_changes_nothing(self):
+        # Even if something upstream still hands a settings dict an 'enabled' key
+        # from an old build, the key alone must decide it either way.
+        self.settings['tmdb'] = {'api_key': 'd' * 32, 'enabled': False}
+        self.assertIsNotNone(main.tmdb_provider(self.settings))
+
+

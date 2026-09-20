@@ -343,11 +343,9 @@ class EndedAlerts(unittest.TestCase):
     def test_a_running_series_says_nothing(self):
         self.assertEqual(self.kinds(''), [])
 
-    def test_it_is_a_notice_and_does_not_notify_twice(self):
-        # Sonarr's own "this series ended" notification already goes out once, the first
-        # time it says so. This is the standing fact rather than the news of it.
+    def test_an_ended_series_is_a_notice_rather_than_a_problem(self):
+        # A standing fact about the series, not something that stops a run.
         import alerts
         made = alerts.make('ended', rule_id='r1', detail='x')
         self.assertEqual(made['severity'], alerts.NOTICE)
         self.assertFalse(made['blocking'])
-        self.assertFalse(alerts.notifies(made))
