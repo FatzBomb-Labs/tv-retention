@@ -2004,6 +2004,39 @@ def tick() -> int:
         return _tick_locked()
 
 
+def seed_last_occurrence(schedule: dict, state: dict) -> bool:
+    """Credit a run recorded by an older build with the occurrence it answered.
+
+    `last_run` predates `last_occurrence`, so upgrading across that point leaves a state
+    file saying a run happened but not which scheduled moment it was for. An absent value
+    has only one reading available to the scheduler — an occurrence still owed — and the
+    catch-up then fires within a minute of starting. That is right for a server that was
+    off at 01:00 and wrong for one that was upgraded at noon, and from the absent key
+    alone the two are indistinguishable.
+
+    `last_run` is what tells them apart: a file with a run in it has history, and the
+    occurrence that run answered is the latest one at or before it. Seeding only that
+    much leaves real catch-up intact — a run last completed a week ago still owes every
+    occurrence since — and a genuinely fresh install, which has neither field, keeps
+    meaning "no history" rather than "nothing due".
+    """
+    if state.get('last_occurrence') or not state.get('last_run'):
+        return False
+    try:
+        ran_at = dt.datetime.fromisoformat(str(state['last_run']).replace('Z', '+00:00'))
+    except ValueError:
+        return False
+    try:
+        answered = schedules.last_occurrence(schedule, ran_at)
+    except schedules.ScheduleError:
+        # An unusable schedule is reported elsewhere; it must not break the tick here.
+        return False
+    if answered is None:
+        return False
+    state['last_occurrence'] = schedules.occurrence_id(answered)
+    return True
+
+
 def _tick_locked() -> int:
     """Run one scheduler cycle while holding the run lock."""
     settings = load_settings()
@@ -2014,6 +2047,12 @@ def _tick_locked() -> int:
     actions = []
     schedule = settings.get('schedule') or {}
     recovery_attempted = False
+
+    if seed_last_occurrence(schedule, state):
+        save_job_state(settings, state)
+        log_line(settings, 'info',
+                 'scheduler state upgraded: the last run now records which occurrence it '
+                 'answered, so the upgrade is not mistaken for a missed run')
 
     connectivity = CONNECTIVITY_SECONDS
     if age_seconds(state.get('last_connectivity')) is None or \

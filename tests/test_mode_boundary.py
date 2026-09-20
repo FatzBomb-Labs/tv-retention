@@ -329,3 +329,85 @@ class ModeBoundary(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class UpgradeIsNotAMissedRun(unittest.TestCase):
+    """`last_occurrence` arrived after `last_run`, and an absent key reads as work owed.
+
+    Deploying build 23 over build 22 fired a catch-up test run a minute after start, for
+    an occurrence the previous build had already answered that morning. Harmless under
+    Test Mode; with Test Mode off it is an unscheduled real run.
+    """
+
+    SCHEDULE = {'enabled': True, 'frequency': 'daily', 'hour': 1, 'minute': 0,
+                'weekday': 0, 'monthly_mode': 'day', 'monthly_day': 1,
+                'monthly_weekday': '', 'cron': '0 4 * * *',
+                # Eastern, so 01:00 local is 05:00Z. Not America/Detroit, which the
+                # container ships tzdata for but the gate host's trimmed zone database
+                # does not have -- the zone name is incidental to what is under test.
+                'timezone': 'America/New_York'}
+
+    def test_a_run_recorded_without_its_occurrence_is_credited_with_one(self):
+        import main
+        state = {'last_run': '2026-09-20T05:00:26+00:00'}   # 01:00 EDT, as build 22 wrote it
+        self.assertTrue(main.seed_last_occurrence(self.SCHEDULE, state))
+        self.assertEqual(state['last_occurrence'], '2026-09-20T05:00:00+00:00')
+
+    def test_the_credited_occurrence_stops_the_scheduler_owing_it(self):
+        import main
+        import schedules
+        state = {'last_run': '2026-09-20T05:00:26+00:00'}
+        noon = dt.datetime(2026, 9, 20, 16, 0, tzinfo=dt.timezone.utc)      # 12:00 EDT
+        self.assertIsNotNone(schedules.due_occurrence(self.SCHEDULE, noon, None),
+                             'without the seed the morning occurrence reads as owed')
+        main.seed_last_occurrence(self.SCHEDULE, state)
+        self.assertIsNone(schedules.due_occurrence(self.SCHEDULE, noon,
+                                                   state['last_occurrence']))
+
+    def test_a_genuinely_missed_occurrence_still_catches_up(self):
+        """The seed credits one occurrence, not every occurrence since."""
+        import main
+        import schedules
+        state = {'last_run': '2026-09-17T05:00:26+00:00'}   # three days ago
+        main.seed_last_occurrence(self.SCHEDULE, state)
+        noon = dt.datetime(2026, 9, 20, 16, 0, tzinfo=dt.timezone.utc)
+        self.assertIsNotNone(schedules.due_occurrence(self.SCHEDULE, noon,
+                                                      state['last_occurrence']))
+
+    def test_a_fresh_install_is_left_alone(self):
+        import main
+        for state in ({}, {'last_connectivity': '2026-09-20T05:00:00+00:00'}):
+            self.assertFalse(main.seed_last_occurrence(self.SCHEDULE, dict(state)))
+
+    def test_an_existing_occurrence_is_never_rewritten(self):
+        import main
+        state = {'last_run': '2026-09-20T05:00:26+00:00',
+                 'last_occurrence': '2026-09-19T05:00:00+00:00'}
+        self.assertFalse(main.seed_last_occurrence(self.SCHEDULE, state))
+        self.assertEqual(state['last_occurrence'], '2026-09-19T05:00:00+00:00')
+
+    def test_an_unusable_schedule_or_timestamp_does_not_break_the_tick(self):
+        import main
+        broken_clock = {'last_run': 'not a timestamp'}
+        self.assertFalse(main.seed_last_occurrence(self.SCHEDULE, broken_clock))
+        broken_schedule = dict(self.SCHEDULE, frequency='Daily')
+        self.assertFalse(main.seed_last_occurrence(
+            broken_schedule, {'last_run': '2026-09-20T05:00:26+00:00'}))
+
+    def test_the_upgrade_tick_does_not_run_and_records_the_seed(self):
+        """End to end: build 22's state file, a real tick, and no run."""
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=True)
+            settings['schedule'] = dict(self.SCHEDULE)
+            fixture.store.save_settings(settings)
+            # Exactly what build 22 left behind: a run, and no record of its occurrence.
+            ran_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)).isoformat()
+            fixture.store.save_job_state(settings, {
+                'last_run': ran_at, 'last_connectivity': fixture.store.now_iso()})
+            with patch.object(fixture.main, 'sync_is_due', return_value=False), \
+                    patch.object(fixture.main, 'run') as never:
+                self.assertEqual(fixture.main.tick(), 0)
+                never.assert_not_called()
+            self.assertTrue(fixture.store.job_state(settings).get('last_occurrence'),
+                            'the seed must persist, or every tick recomputes it')
+            fixture.sonarr.assert_finished()
