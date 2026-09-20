@@ -35,11 +35,20 @@ This is the part that is earned. Everything else on this page is scheduling.
 
 ### 1. UI state correctness
 
+Done: concurrent tabs (the save round-trips `settings_revision` and the server rejects a
+stale one — `test_settings_revision`), late scope-count responses (a generation guard in
+`series-editor.js`), the one-time API-key reveal surviving a background render, and
+drafts surviving a look at another series.
+
+Left:
+
 - Keep Run and confirmation tied to a current, complete plan and current source readings.
-- Prevent stale saves, late responses and concurrent tabs from overwriting newer edits.
-- Preserve drafts, one-time API-key display and restore reload behavior through background
-  refreshes.
-- Finish the accessibility and responsive-layout fixes that affect primary actions.
+  The Run button already hides only on a complete plan; the confirmation text and the
+  readings behind it have not been checked the same way.
+- Restore reload behaviour through a background refresh.
+- The accessibility and responsive-layout fixes that affect primary actions. Name them
+  before starting — "finish the a11y fixes" is not a list, and an unbounded one is how
+  this section grows rather than closes.
 
 Fix concrete state failures in the existing modules. Do not expand the frontend
 architecture.

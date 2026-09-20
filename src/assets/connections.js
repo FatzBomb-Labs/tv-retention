@@ -65,6 +65,30 @@ export function createConnections({ api, getSettings, getSnapshot, saveSettings,
     }));
   }
 
+  // The full key is returned once and never again. `render()` redraws this panel on the
+  // heartbeat, and revealing a key does not make the settings dirty, so the dirty guard
+  // that protects the rest of the form does not protect this: a background refresh
+  // landing in the wrong second used to wipe the key before it had been copied, and the
+  // only way back is to regenerate and invalidate whatever already holds it. Held here
+  // until deliberately dismissed, and rebuilt on every render for as long as it is.
+  let revealed = null;
+
+  function revealRow() {
+    const row = el('div', { className: 'tvr-inline-row' });
+    const input = el('input', { type: 'text', value: revealed, readonly: true,
+                                className: 'tvr-mono' });
+    const copy = el('button', { type: 'button', className: 'tvr-small', textContent: 'Copy' });
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(revealed); notice('API key copied.', 'ok'); }
+      catch (_) { input.select(); notice('Select and copy the key manually.', 'ok'); }
+    });
+    // Dismissal is the operator's, not a timer's and not a refresh's.
+    const done = el('button', { type: 'button', className: 'tvr-small', textContent: 'Done' });
+    done.addEventListener('click', () => { revealed = null; renderApiKey(); });
+    row.append(input, copy, done);
+    return row;
+  }
+
   function renderApiKey() {
     const state = $('tvr-api-key-state');
     const actions = $('tvr-api-key-actions');
@@ -78,28 +102,21 @@ export function createConnections({ api, getSettings, getSnapshot, saveSettings,
       const button = el('button', { type: 'button', className, textContent: label });
       button.addEventListener('click', () => guarded('', async () => {
         const data = await api('api-key', { operation }, 'Updating API key…');
-        if (data.key) {
-          const reveal = el('div', { className: 'tvr-inline-row' });
-          const input = el('input', { type: 'text', value: data.key, readonly: true, className: 'tvr-mono' });
-          const copy = el('button', { type: 'button', className: 'tvr-small', textContent: 'Copy' });
-          copy.addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(data.key); notice('API key copied.', 'ok'); }
-            catch (_) { input.select(); notice('Select and copy the key manually.', 'ok'); }
-          });
-          reveal.append(input, copy); actions.append(reveal);
-          notice('API key created — copy it now; it will not be shown again.', 'ok');
-          getSettings().api_key = data.api_key || getSettings().api_key;
-          state.replaceChildren(el('span', { className: 'tvr-inline-label', textContent: 'State' }),
-            el('span', { textContent: `Created (${data.api_key?.prefix || ''}…)` }));
-          return;
-        } else notice(`API key ${operation}d.`, 'ok');
         getSettings().api_key = data.api_key || getSettings().api_key;
+        if (data.key) {
+          revealed = data.key;
+          notice('API key created — copy it now; it will not be shown again.', 'ok');
+        } else {
+          revealed = null;
+          notice(`API key ${operation}d.`, 'ok');
+        }
         renderApiKey();
       }));
       actions.append(button);
     };
     if (metadata.status === 'created') { add('Regenerate', 'regenerate'); add('Revoke', 'revoke', 'tvr-danger'); }
     else add('Create key', 'create', 'tvr-primary');
+    if (revealed) actions.append(revealRow());
   }
 
   function renderInstances() {

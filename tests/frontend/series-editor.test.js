@@ -37,8 +37,11 @@ const ruleFixture = (overrides = {}) => ({
 const findText = (node, value) => node.textContent === value ? node
   : (node.children || []).map((child) => findText(child, value)).find(Boolean);
 
-async function harness(initialRules, match = (settings) => settings, passResult = {}) {
+async function harness(initialRules, match = (settings) => settings, passResult = {}, options = {}) {
   const elements = new Map();
+  // Most tests never want the debounced count refresh to fire. One does, and it needs
+  // to control when, so it can put two requests in flight and answer them out of order.
+  const queued = [];
   const context = vm.createContext({
     document: {
       createElement: (tag) => new FakeElement(tag),
@@ -49,7 +52,8 @@ async function harness(initialRules, match = (settings) => settings, passResult 
       },
     },
     // Background counts and notice expiry are deliberately not fired by save tests.
-    setTimeout: () => 1, clearTimeout() {},
+    setTimeout: options.timers ? (fn) => queued.push(fn) : () => 1,
+    clearTimeout() {},
   });
   const modules = new Map();
   const assets = path.join(__dirname, '../../src/assets');
@@ -71,6 +75,9 @@ async function harness(initialRules, match = (settings) => settings, passResult 
     calls.push({ action, payload: copy(payload) });
     if (action === 'match') return { settings: copy(match(copy(settings))) };
     if (action === 'scope-pass') return passResult;
+    if (action === 'scope-counts' && options.scopeCounts) return options.scopeCounts(payload);
+    if (action === 'episodes' && options.timers) return { seasons: [] };
+    if (action === 'automation' && options.timers) return {};
     if (action === 'set-monitored') return {};
     throw new Error(`Unexpected RPC: ${action}`);
   };
@@ -98,6 +105,7 @@ async function harness(initialRules, match = (settings) => settings, passResult 
   });
   return {
     editor, saves, calls, checks, elements,
+    drainTimers: () => { const due = queued.splice(0); due.forEach((fn) => fn()); return due.length; },
     get settings() { return settings; },
     replace: (rules) => { settings = { ...settings, rules: copy(rules) }; },
     open: (rule = settings.rules[0], series) => {
@@ -211,4 +219,65 @@ test('a rule missing after matching cannot redirect monitoring or checks to anot
   assert.deepEqual(h.settings.rules, [other]);
   assert.deepEqual(h.calls.map((call) => call.action), ['match']);
   assert.deepEqual(h.checks, []);
+});
+
+test('a slow count for an old keep value cannot overwrite the answer for the current one', async () => {
+  // These counts say how many episodes a save would unmonitor and how many sit outside
+  // the window. Debouncing the timer does not stop two requests being in flight, and
+  // nothing makes them answer in order, so a slow reply for "3" landing after a quick
+  // reply for "30" left the panel describing a keep window nobody was looking at.
+  const deferred = [];
+  const scopeCounts = (payload) => new Promise((resolve) => {
+    deferred.push({ days: payload.draft.keep_days, resolve });
+  });
+
+  const fixture = await harness([ruleFixture()], (settings) => settings, {}, {
+    timers: true, scopeCounts,
+  });
+  const form = fixture.open();
+  // Settle whatever the editor asks for on open, so what follows is only this test's.
+  for (let round = 0; round < 5; round += 1) {
+    fixture.drainTimers();
+    await new Promise((resolve) => setImmediate(resolve));
+    deferred.splice(0).forEach(({ resolve }) => resolve({ known: false }));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  deferred.length = 0;
+
+  const days = form.context.conditions.days;
+  const fire = (value) => {
+    days.value = value;
+    (days.listeners.input || []).forEach((fn) => fn({ target: days }));
+    fixture.drainTimers();
+  };
+
+  const counts = (inScope) => ({ known: true, in_scope: inScope, in_scope_unmonitored: 0,
+                                 out_scope: 0, out_scope_monitored: 0 });
+
+  fire('3');                                   // request A, for the half-typed value
+  fire('30');                                  // request B, for what is actually typed
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(deferred.length, 2, 'both requests are genuinely in flight');
+  const [first, second] = deferred;
+  assert.equal(first.days, '3');
+  assert.equal(second.days, '30');
+
+  second.resolve(counts(30));                  // the newer question answers first
+  await new Promise((resolve) => setImmediate(resolve));
+  const root = fixture.elements.get('tvr-details');
+  const says = (pattern) => {
+    let hit = null;
+    (function visit(node) {
+      if (!node || hit) return;
+      if (typeof node.textContent === 'string' && pattern.test(node.textContent)) hit = node;
+      (node.children || []).forEach(visit);
+    }(root));
+    return hit;
+  };
+  assert.ok(says(/of 30 episodes/), 'the current keep value is described');
+
+  first.resolve(counts(3));                    // and now the stale one finally lands
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(says(/of 30 episodes/), 'the current value still stands');
+  assert.ok(!says(/of 3 episodes/), 'the superseded answer is discarded, not displayed');
 });

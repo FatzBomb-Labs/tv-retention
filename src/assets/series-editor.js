@@ -467,15 +467,24 @@ export function createSeriesEditor({
         // window moves. Debounced because typing a keep value changes it on every keystroke.
         const title = series.title || rule.series_title || 'this series';
         let countTimer = null;
+        // Debouncing the timer is not enough. Once a request is away a later keystroke
+        // starts a second one, and nothing makes them answer in order: a slow reply for
+        // "3" landing after a quick reply for "30" leaves the panel stating how many
+        // episodes a keep window nobody is looking at would delete. These counts are
+        // read to decide whether to save a rule that deletes things, so the answer on
+        // screen has to be the answer to the question currently typed.
+        let countGeneration = 0;
         const refreshCounts = () => {
           clearTimeout(countTimer);
           countTimer = setTimeout(() => guarded('', async () => {
+            const generation = ++countGeneration;
             const scope = draftScope();
             const counts = await api('scope-counts', {
               rule_id: rule.id || '', instance_id: series.instance_id, series_id: series.series_id,
               draft: Object.assign({}, scope, { include_specials: specials.value,
                                                 previous_scope: existing ? before : null }),
             }, '', true);
+            if (generation !== countGeneration) return;   // a newer question is outstanding
             sayCounts(counts.known ? counts : null);
             sayNext(counts.known ? counts : null);
             if (counts.plan) sayPlan(counts.plan);

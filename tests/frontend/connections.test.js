@@ -107,3 +107,63 @@ test('toggling a stale instance card is reported, not a crash that invents the i
   const message = elements.get('tvr-notice').textContent;
   assert.match(message, /no longer here/, 'the operator is told plainly, not shown a TypeError');
 });
+
+function allButtons(node) {
+  const found = [];
+  (function visit(current) {
+    if (!current) return;
+    if (current.tagName === 'BUTTON') found.push(current);
+    (current.children || []).forEach(visit);
+  }(node));
+  return found;
+}
+
+test('a revealed API key survives a background render until it is dismissed', async () => {
+  // The full key comes back once and never again. renderInstances() runs on the
+  // heartbeat, and revealing a key does not make the settings dirty, so the dirty
+  // guard that protects the rest of the form does not protect this one. Wiping it
+  // before it was copied means regenerating and invalidating whatever already holds it.
+  const elements = installFakeDom();
+  const createConnections = await loadCreateConnections();
+
+  const settings = { instances: [], api_key: { status: 'not_created' } };
+  const connections = createConnections({
+    api: async (action, body) => {
+      assert.equal(action, 'api-key');
+      assert.equal(body.operation, 'create');
+      return { key: 'tvr-secret-value', api_key: { status: 'created', prefix: 'tvr-sec' } };
+    },
+    getSettings: () => settings,
+    getSnapshot: () => ({ health: {} }),
+    saveSettings: async () => {},
+    forgetSeriesCache: () => {},
+  });
+
+  connections.renderInstances();
+  const actions = elements.get('tvr-api-key-actions');
+  const create = allButtons(actions).find((button) => button.textContent === 'Create key');
+  assert.ok(create, 'a configuration with no key offers to create one');
+
+  create.listeners.click[0]();
+  await flush();
+
+  const shown = () => allInputs(elements.get('tvr-api-key-actions'))
+    .some((input) => input.value === 'tvr-secret-value');
+  assert.ok(shown(), 'the key is revealed once it is created');
+
+  // The heartbeat redraws the panel. This is the moment the key used to disappear.
+  connections.renderInstances();
+  assert.ok(shown(), 'a background render must not take the key away before it is copied');
+  connections.renderInstances();
+  assert.ok(shown(), 'and must not take it away on the next one either');
+
+  const done = allButtons(elements.get('tvr-api-key-actions'))
+    .find((button) => button.textContent === 'Done');
+  assert.ok(done, 'dismissal is offered, so the reveal is not permanent either');
+  done.listeners.click[0]();
+  await flush();
+
+  assert.ok(!shown(), 'dismissing clears it');
+  connections.renderInstances();
+  assert.ok(!shown(), 'and it does not come back on the next render');
+});

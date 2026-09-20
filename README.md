@@ -238,8 +238,8 @@ disabled with a blocking alert. Provider connection success does not validate da
 **Settings → Connections** can create a key reserved for future API operations. Its full
 value is returned once for display/copy; settings store a hash, prefix and lifecycle
 metadata. **Regenerate** replaces the active key; **Revoke** disables it. This is not a
-working public automation API. Background rendering can prematurely clear the one-time
-display; preserving it until deliberate dismissal is still planned.
+working public automation API. The one-time display stays until you dismiss it with
+**Done** — a background refresh will not take it away before you have copied it.
 
 ## Backups and Status
 
