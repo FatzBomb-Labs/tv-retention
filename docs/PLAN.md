@@ -46,9 +46,37 @@ this was the confirmation's honesty rather than a safety hole).
 Left:
 
 - Restore reload behaviour through a background refresh.
-- The accessibility and responsive-layout fixes that affect primary actions. Name them
-  before starting — "finish the a11y fixes" is not a list, and an unbounded one is how
-  this section grows rather than closes.
+
+Accessibility and responsive layout, audited 2026-09-21 and now a list rather than a
+placeholder. Scoped deliberately to primary actions; this is not a general WCAG pass,
+because an unbounded one is how this section grows rather than closes.
+
+- **A series can only be opened with a mouse.** `library.js` builds each card as a
+  `<div>` and hangs a click handler on it, and `openEditor` has no other caller — there
+  is no `tabindex` anywhere in the interface. So retention settings, exclusions, the
+  monitoring controls and Delete are all behind a target that cannot be tabbed to or
+  activated by keyboard. This is the one that matters. It is also not a one-line fix:
+  the card already contains buttons, so it cannot simply become a `<button>` — nesting
+  interactive elements is invalid and breaks the inner controls. Wants a deliberate
+  choice between a focusable card with an explicit key handler and a named control
+  inside it.
+- **The season caret has no accessible name and no `aria-expanded`.** Two instances of
+  one control (`episode-trees.js`, in both tree builders). It reads as an unlabelled
+  button and never says whether the season is open.
+- **The busy overlay is not announced.** `#tvr-busy` and the `#tvr-checking` sweep
+  banner carry no `role`/`aria-live`. Lower stakes than it sounds: the overlay only
+  ever appears for a foreground action the operator just triggered, never for a
+  background read.
+- **The dialog has no accessible name** — `<dialog>` with no `aria-labelledby` pointing
+  at the `h3` the body builds.
+
+Already correct, checked so nobody audits them twice: the notice region is
+`role="status" aria-live="polite"`; destructive confirmations use native `showModal()`,
+so focus trapping, Escape and focus restoration come free; sidebar section heads are
+real buttons carrying `aria-expanded`; no stylesheet resets the focus ring, and the
+custom switch styles `:focus-visible` explicitly; responsive breakpoints exist at 560,
+700, 860, 900, 1100 and 1250px, including one that reflows the top bar holding Run, and
+`prefers-reduced-motion` is honoured.
 
 Fix concrete state failures in the existing modules. Do not expand the frontend
 architecture.
