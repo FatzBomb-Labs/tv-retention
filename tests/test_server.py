@@ -336,7 +336,7 @@ class Worker(unittest.TestCase):
         self.assertIn('threading.Thread(target=main.serve_forever', block)
         self.assertIn('daemon=True', block)
         # Started before the socket opens, so a container with nobody watching still works.
-        self.assertLess(block.index('worker.start()'), block.index('serve_forever()'))
+        self.assertLess(block.index('worker.start()'), block.index('http_thread.start()'))
 
 
 if __name__ == '__main__':
@@ -658,3 +658,85 @@ class Posters(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body, b'freshly fetched')
 
+
+
+class GracefulShutdown(unittest.TestCase):
+    """A container runs this as PID 1, and a container is stopped with SIGTERM.
+
+    Confirmed against a real container, not assumed: an idle one took the full `docker
+    stop` timeout and only died to the SIGKILL that follows it, every time, because the
+    kernel does not apply a default action for an unhandled signal to PID 1 the way it
+    would for any other process, and nothing here had ever registered one. Fixed to
+    10.19s -> 0.21s and exit 137 -> 0, measured the same way, before this was written.
+
+    `signal.signal` is mocked here rather than really installed: a real SIGTERM sent to
+    the shared test process, mistimed by even a little, terminates the whole gate rather
+    than failing one test — a worse failure than the one being guarded against. Mocking
+    it also sidesteps the constraint that only the main thread may call the real
+    function, which would otherwise force serve() onto the test runner's own main
+    thread. The mock still proves the real thing: it captures the exact callable passed
+    to signal.signal(signal.SIGTERM, ...) and invokes it as the OS would, so what runs is
+    the production closure, not a stand-in for it.
+    """
+
+    def test_the_registered_handler_unblocks_serve_and_it_returns_promptly(self):
+        import signal
+        import threading
+        import time
+        from unittest import mock
+        server_module = load(TVR_AUTH='none')
+
+        class FakeHTTPServer:
+            def __init__(self, *args, **kwargs):
+                self.daemon_threads = False
+                self._stop = threading.Event()
+
+            def serve_forever(self):
+                # The real server's loop; calling shutdown() from this same thread's
+                # call frame is exactly the deadlock this design avoids.
+                self._stop.wait()
+
+            def shutdown(self):
+                self._stop.set()
+
+        captured = {}
+
+        def fake_signal(sig, handler):
+            if sig == signal.SIGTERM:
+                captured['handler'] = handler
+
+        with mock.patch.object(server_module, 'startup_error', return_value=''), \
+                mock.patch.object(server_module, 'take_the_volume'), \
+                mock.patch.object(server_module.main, 'serve_forever'), \
+                mock.patch.object(server_module, 'ThreadingHTTPServer', FakeHTTPServer), \
+                mock.patch.object(server_module, 'PORT', 0), \
+                mock.patch.object(server_module.signal, 'signal', side_effect=fake_signal):
+            result = {}
+            thread = threading.Thread(
+                target=lambda: result.__setitem__('code', server_module.serve()), daemon=True)
+            thread.start()
+            try:
+                for _ in range(200):
+                    if 'handler' in captured:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail('serve() never registered a SIGTERM handler')
+
+                # A thread still alive here means the registration happened but the main
+                # thread has not yet reached its wait — giving the handler nothing to
+                # unblock would prove nothing about it, so this would be the test lying.
+                self.assertTrue(thread.is_alive(),
+                                'serve() returned before any signal arrived')
+
+                started = time.monotonic()
+                captured['handler'](signal.SIGTERM, None)  # exactly what the OS would call
+                thread.join(timeout=5)
+                elapsed = time.monotonic() - started
+            finally:
+                thread.join(timeout=1)  # never leave a stray thread behind on failure
+
+            self.assertFalse(thread.is_alive(), 'serve() did not return after the signal')
+            self.assertLess(elapsed, 2, 'the handler must unblock it promptly, not '
+                            'leave it to an external timeout')
+            self.assertEqual(result.get('code'), 0)

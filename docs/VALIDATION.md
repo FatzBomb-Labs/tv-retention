@@ -6,14 +6,64 @@ or re-run the gate.
 
 ## Current gate — 2026-09-20
 
-Authoritative Linux host gate on `fatzserver-host`: **635 Python tests in 9.715s** and
-**33 frontend tests**, `All required checks passed`, exit code `0`. Worker imports and
-shipped-module syntax checks passed.
+Authoritative Linux host gate on `fatzserver-host`: **650 Python tests in 9.574s** (1
+skipped — this host's trimmed zone database lacks `America/Detroit`) and **34 frontend
+tests**, `All required checks passed`, exit code `0`. Worker imports and shipped-module
+syntax checks passed.
 
 Down from 741: the `test_build.py` trim removed 100 assertions about appearance, and
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
+
+## Graceful shutdown and mid-run interruption recovery — 2026-09-21
+
+PLAN §2 listed "shutdown during a run" and readiness as unverified. Investigating it found
+a real, previously invisible defect: `server.py` runs as PID 1, and the Linux kernel does
+not apply a default action to an unhandled signal for PID 1 the way it would for any other
+process. Nothing here had ever registered a SIGTERM handler, so `docker stop` was silently
+running out its full timeout and falling back to SIGKILL on every stop — including every
+deployment earlier in this session. Measured against a real, otherwise-idle container:
+
+| | before | after |
+|---|---|---|
+| `docker stop -t 10` | 10.19s, exit 137 (SIGKILL) | 0.21s, exit 0 |
+
+Fixed by moving `serve_forever()` onto its own thread and having the main thread wait on
+an `Event` a SIGTERM handler sets, then call `shutdown()` — `HTTPServer.shutdown()`
+deadlocks if called from the same thread already running `serve_forever()`, which is why
+the two cannot share a thread.
+
+Separately, and precisely the scenario PLAN's item was asking about: does an interrupted
+run recover safely? Built a disposable rig for this — a synthetic HTTP fixture standing in
+for Sonarr (one series, one episode, its delete endpoint deliberately slow) and a throwaway
+`tv-retention` container on an isolated Docker network, entirely disconnected from the
+operator's real Sonarr and real library. A run was triggered through the real HTTP RPC path
+(login, CSRF, `POST /api`) so the work executed on the container's actual PID 1, then the
+container was hard-killed (`docker kill`, SIGKILL, uncatchable) at the instant the delete
+request was sent, confirmed via the fixture's own log:
+
+- the on-disk intent correctly recorded `set-monitored: done` and `delete-episode-file:
+  in-progress` with no `finished_at` — an accurate, non-falsified checkpoint of exactly
+  how far execution had gotten;
+- on restart, a fresh run re-read the fixture from scratch, resumed cleanly, and finished
+  `complete` with both operations `done` and `attempts: 1` each — no duplicate deletion,
+  no lost unmonitor, no re-execution of already-terminal work;
+- the same result held whether the container was killed with `docker kill` (SIGKILL) or,
+  after the shutdown fix, with `docker stop` mid-run (prompt exit, 0.54s, exit 0) — the
+  fix makes shutdown responsive without changing what an interruption leaves behind,
+  because `shutdown()` stops the accept loop but still does not wait for an in-flight
+  request, which continues to rely on the same checkpoint durability either way.
+
+The rig (network, fixture container, throwaway `tv-retention` instance, scratch config)
+was fully torn down afterward. The operator's Sonarr, library and production container
+were not reachable from it and were not touched at any point.
+
+A regression test (`test_server.GracefulShutdown`) checked in both directions on the host:
+fails within 3s against the pre-fix code with a clear message, passes in 0.07s against the
+fix. It mocks `signal.signal` rather than sending a real OS signal to the test process — a
+real SIGTERM to the shared test runner, mistimed, terminates the whole gate rather than
+failing one test, which would be a worse outcome than the bug it is meant to catch.
 
 ## Build 27 deployment — 2026-09-20
 

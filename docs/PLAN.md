@@ -63,10 +63,19 @@ Shown incidentally by the build 23 deployment, on the running instance:
   intact, no run in flight;
 - the health endpoint answers on a remapped port (`18787` → `8787`).
 
+Done: graceful shutdown. It did not previously exist — a container is PID 1, and the
+kernel applies no default action to an unhandled signal for PID 1 the way it would for
+any other process, so `docker stop` was silently running out its full timeout and
+falling back to SIGKILL every time. Confirmed against a real container (idle: 10.19s,
+exit 137 → 0.21s, exit 0) before and after a SIGTERM handler was added. Also confirmed,
+against a synthetic Sonarr and a genuinely interrupted delete: a hard kill mid-write
+checkpoints correctly (`in-progress`, not falsely `done`) and a subsequent run resumes
+and completes without duplicating the deletion or losing the unmonitor that already
+succeeded. See VALIDATION.
+
 Still unverified, and none of it is shown by a container that merely stays up:
 
 - `UMASK`, and permissions on an optional separate backup mount;
-- shutdown *during* a run, which is the case restart recovery exists for;
 - readiness as distinct from liveness, and how a failed worker is reported;
 - startup refusing missing or too-short credentials.
 
@@ -101,8 +110,9 @@ schedules off when finished.
 
 Done in part: a bounded run on 2026-09-20 (2 planned, 2 deleted, 2705 MiB, 0 errors,
 `test_mode: false` in the journal — see VALIDATION) exercised the deletion path itself.
-Not covered by it: shared multi-episode files, recycle-bin recovery, and restart
-recovery interrupted mid-run.
+Restart recovery interrupted mid-run is now also covered, against a synthetic Sonarr
+rather than the operator's own library — see §2. Not covered by either: shared
+multi-episode files and recycle-bin recovery, both of which need the real library.
 
 **4. Read-only smoke on the target.** Copied config under `/tmp`, schedules off, Test Mode
 on. Verify login, version/build display, asset loading and browser refresh, library and
@@ -119,8 +129,8 @@ and one real run against one real show does what it said it would. That is 1.0.
 
 ## Explicitly unresolved
 
-- Readiness, shutdown during a run and backup-mount permissions need an image-level
-  check; the privilege drop and plain restart recovery no longer do.
+- Readiness and backup-mount permissions need an image-level check; the privilege drop,
+  plain restart recovery, graceful shutdown and mid-run interruption recovery no longer do.
 - Real-browser interaction and large-library performance need practical evidence. Open a
   browser; do not build a new frontend architecture to obtain it.
 - No live target deletion or production canary is authorized by this document.

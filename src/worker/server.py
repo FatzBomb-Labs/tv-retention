@@ -20,6 +20,7 @@ import http.cookies
 import json
 import os
 import secrets
+import signal
 import threading
 import time
 import urllib.error
@@ -664,7 +665,26 @@ def serve() -> int:
     server.daemon_threads = True
     print(f'TV Retention listening on :{PORT}'
           + ('  (no authentication: TVR_AUTH=none)' if OPEN else ''), flush=True)
-    server.serve_forever()
+
+    # A container runs this as PID 1, and the kernel does not apply a default action for
+    # an unhandled signal to PID 1 the way it would for any other process — SIGTERM is
+    # simply discarded. Confirmed, not assumed: an idle container took the full `docker
+    # stop` timeout and only died to the SIGKILL that follows it, every time, because
+    # nothing here had ever registered a handler. `docker stop` looked like it worked —
+    # the container did eventually go — but only by way of the timeout, not because
+    # anything responded to the signal meant to ask it to.
+    #
+    # HTTPServer.shutdown() deadlocks if called from the thread running serve_forever():
+    # it blocks until that loop's next iteration acknowledges the request, which cannot
+    # happen while the same thread is inside the signal handler asking for it. So
+    # serve_forever() runs on its own thread here, and the main thread does nothing but
+    # wait for a signal to set this flag.
+    stopping = threading.Event()
+    signal.signal(signal.SIGTERM, lambda signum, frame: stopping.set())
+    http_thread = threading.Thread(target=server.serve_forever, name='http', daemon=True)
+    http_thread.start()
+    stopping.wait()
+    server.shutdown()
     return 0
 
 
