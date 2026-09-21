@@ -15,6 +15,28 @@ flooring migration at version 13 removed the tests for twelve upgrade steps no s
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
 
+## Build 26 deployment — 2026-09-20
+
+Replaced `dev-build25` with `dev-build26`: the timezone control clusters by actual
+offset behaviour (486 raw names down to 58 for this image) instead of listing every
+IANA identifier, adds a search box, and now genuinely saves on its own -- it was never
+in `wire()`'s autosave array, so an edit alone reverted on the next heartbeat. Config
+already at version 14, so nothing migrated.
+
+- Preflight against a `/tmp` copy, `--rm`: version 14, 32 rules, 4 presets, Test Mode
+  on, schedule off, `integrity_errors` clean, 58 zones offered, `America/New_York`
+  present as the canonical pick for its cluster, and the stored `America/Detroit`
+  correctly appended even though it is not that cluster's own preferred name.
+- The three fix components (`common_zones`, the search wiring, `PREFERRED_ZONE_NAMES`)
+  confirmed present in the built image before it replaced anything.
+- After replacement: healthy, worker uid 99, safety posture unchanged (Test Mode on,
+  schedule off), stored timezone unchanged.
+- One preflight redo mid-deploy: a bash quoting error aborted the first copy command
+  under `set -e` before `cp -a` ran, and the resulting empty directory was checked
+  against by mistake, reporting 0 rules until the copy was redone and re-verified
+  present before drawing any conclusion from it.
+- Rollback is `tv-retention:rollback` (build 25) plus `pre-build26-20260920-2323.tar.gz`.
+
 ## Build 25 deployment — 2026-09-20
 
 Replaced `dev-build24` with `dev-build25`: the timezone control is now a grouped
