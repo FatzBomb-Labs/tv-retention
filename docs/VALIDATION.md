@@ -15,6 +15,19 @@ flooring migration at version 13 removed the tests for twelve upgrade steps no s
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
 
+## Build 27 deployment — 2026-09-20
+
+Replaced `dev-build26` with `dev-build27`: an untrustworthy plan (an enabled rule with
+no reading yet) now states the preview may be incomplete instead of asserting "No
+changes are currently expected." Config already at version 14, so nothing migrated.
+
+- Preflight against a `/tmp` copy, `--rm`: version 14, 32 rules, 4 presets, Test Mode
+  on, schedule off, `integrity_errors` clean.
+- The fix text confirmed present in the built image before it replaced anything.
+- After replacement: healthy, worker uid 99, safety posture and stored timezone
+  unchanged.
+- Rollback is `tv-retention:rollback` (build 26) plus `pre-build27-<timestamp>.tar.gz`.
+
 ## Build 26 deployment — 2026-09-20
 
 Replaced `dev-build25` with `dev-build26`: the timezone control clusters by actual
