@@ -108,6 +108,21 @@ fix. It mocks `signal.signal` rather than sending a real OS signal to the test p
 real SIGTERM to the shared test runner, mistimed, terminates the whole gate rather than
 failing one test, which would be a worse outcome than the bug it is meant to catch.
 
+## Build 29 deployment — 2026-09-21
+
+Replaced `dev-build28` with `dev-build29`: the accessibility work. Config already at
+version 14, so nothing migrated.
+
+- Preflight against a `/tmp` copy, `--rm`: version 14, 32 rules, 4 presets, Test Mode
+  on, schedule off, `integrity_errors` clean; the card-title button and the dialog's
+  `aria-labelledby` both confirmed present in the built image before it shipped.
+- The `docker stop` preceding the swap took **0.46s** rather than running out its 30s
+  grace period — the first deployment to benefit from the SIGTERM fix, and incidental
+  confirmation of it in production rather than on a test rig.
+- After replacement: healthy, worker uid 99, safety posture and stored timezone
+  unchanged.
+- Rollback is `tv-retention:rollback` (build 28) plus `pre-build29-<timestamp>.tar.gz`.
+
 ## Build 28 deployment — 2026-09-21
 
 Replaced `dev-build27` with `dev-build28`: the SIGTERM fix. Config already at version
