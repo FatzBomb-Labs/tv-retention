@@ -478,13 +478,28 @@ class Wiring(Sources):
     }
 
     def test_every_schedule_control_is_wired_to_save(self):
-        # A control added to the panel and not to the list would silently not persist.
-        wired = set(re.findall(r"'(tvr-(?:schedule-enabled|test-mode|freq|minute|hour|weekday|"
-                               r"monthly-mode|monthly-day|monthly-weekday|cron|timezone|match-freq|"
-                               r"match-hour|match-minute|connectivity))'", self.js))
+        """A control added to the panel and not to wire()'s save array would silently
+        not persist.
+
+        Scoped to `wire()`'s own body rather than the whole joined file: a looser scan
+        matching any quoted occurrence of an id passed here, because `tvr-timezone`
+        appeared quoted elsewhere (the render assignment, `collectSchedule`) without
+        ever being in the array that actually saves on change — so changing it alone,
+        touching nothing else, did not persist, and the very next heartbeat's
+        unconditional `renderSchedule()` silently put the old value back.
+        """
+        # Every feature module has its own wire(); function_body matches the first
+        # declaration in the joined graph, which is a different module's. Scope to
+        # settings.js by source, then to the specific array passed to the autosave
+        # forEach — not wire()'s whole body, which also names tvr-timezone in the
+        # unrelated search-filter listener beside it.
+        block = function_body(module_js('settings.js'), 'wire')
+        array = re.search(r"\[\s*'tvr-schedule-enabled'.*?\]\.forEach", block, re.S).group(0)
+        wired = set(re.findall(r"'(tvr-[a-z-]+)'", array))
         panel = self.html.split('id="tvr-view-settings-schedule"')[1].split('</section>')[0]
         for identifier in re.findall(r'id="(tvr-[a-z-]+)"', panel):
-            if identifier in ('tvr-schedule-summary', 'tvr-match-summary', 'tvr-test-mode-label') or 'field' in identifier:
+            if identifier in ('tvr-schedule-summary', 'tvr-match-summary', 'tvr-test-mode-label',
+                              'tvr-timezone-search') or 'field' in identifier:
                 continue
             self.assertIn(identifier, wired, f'{identifier} is on the schedule panel but never saved')
 

@@ -125,6 +125,117 @@ def available_zones() -> list[str]:
     return sorted(zones)
 
 
+# A tie-break preference for which member of an offset cluster is shown, not a filter:
+# a cluster with no member here still gets a canonical pick, just an alphabetical one.
+# Deliberately includes zones that must NOT cluster with a neighbour despite a similar
+# offset — Phoenix keeps no summer clock change while Denver does, Darwin does not move
+# while Adelaide does, Brisbane stays put while Sydney moves and moves in the opposite
+# season from anything in the northern hemisphere — so the signature below has to earn
+# telling them apart, not just this list.
+PREFERRED_ZONE_NAMES = (
+    'Pacific/Honolulu', 'America/Anchorage', 'America/Los_Angeles', 'America/Phoenix',
+    'America/Denver', 'America/Chicago', 'America/Mexico_City', 'America/New_York',
+    'America/Bogota', 'America/Halifax', 'America/St_Johns', 'America/Sao_Paulo',
+    'America/Argentina/Buenos_Aires', 'Atlantic/Azores', 'Etc/UTC', 'Europe/London',
+    'Europe/Paris', 'Africa/Lagos', 'Europe/Athens', 'Africa/Cairo',
+    'Africa/Johannesburg', 'Europe/Moscow', 'Asia/Riyadh', 'Asia/Tehran', 'Asia/Dubai',
+    'Asia/Kabul', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Kathmandu', 'Asia/Dhaka',
+    'Asia/Yangon', 'Asia/Bangkok', 'Asia/Shanghai', 'Australia/Perth', 'Asia/Tokyo',
+    'Asia/Seoul', 'Australia/Darwin', 'Australia/Adelaide', 'Australia/Brisbane',
+    'Australia/Sydney', 'Pacific/Guadalcanal', 'Pacific/Auckland', 'Pacific/Fiji',
+    'Pacific/Tongatapu', 'Pacific/Kiritimati',
+)
+
+
+def _resolved(name: str):
+    """A usable ZoneInfo for a name, or None. Never raises."""
+    try:
+        return ZoneInfo(name) if name not in ('UTC', 'Etc/UTC', 'GMT') else dt.timezone.utc
+    except ZoneInfoNotFoundError:
+        return None
+
+
+def _offset_minutes(zone, year: int, month: int) -> int:
+    return int(dt.datetime(year, month, 1, tzinfo=zone).utcoffset().total_seconds() // 60)
+
+
+def _standard_offset_minutes(zone, year: int) -> int:
+    """The non-DST offset, for a label that does not change with the season.
+
+    January and July are six months apart, which is enough to guarantee landing on a
+    standard-time instant for any real DST scheme regardless of hemisphere: a zone that
+    observes DST for at most nine or ten months of the year cannot be in it at both
+    probes. Checked, not assumed — a zone with no DST at all answers the same at both.
+    """
+    for month in (1, 7):
+        probe = dt.datetime(year, month, 1, tzinfo=zone)
+        if (probe.dst() or dt.timedelta(0)) == dt.timedelta(0):
+            return int(probe.utcoffset().total_seconds() // 60)
+    return _offset_minutes(zone, year, 1)  # both probes mid-DST should not happen; January is closest to a fallback
+
+
+def _zone_label(name: str) -> str:
+    return name.rsplit('/', 1)[-1].replace('_', ' ')
+
+
+def common_zones(current: str = '', year: int = 0) -> list[dict]:
+    """One entry per distinct offset behaviour, for a dropdown that is a choice rather
+    than a scroll.
+
+    A tzdata release carries roughly fifteen separate `America/*` zones that have kept
+    identical civil time since the US unified its DST rule in 2007 — Detroit, the four
+    Indiana zones, Louisville, Toronto and more are all, today and for the scheduling
+    horizon this application cares about, "Eastern Time" with no distinguishing fact
+    between them. Offering fifteen names for one choice is what a free-standing list of
+    482 IANA identifiers looks like; a person picking a schedule time does not.
+
+    Clustering is by (January offset, July offset) rather than a curated equivalence
+    table, so it is correct for whatever `available_zones()` actually returns rather
+    than a list that could drift from the running database. Two zones landing on the
+    same pair across the whole year is deliberately treated as "no distinguishing fact
+    between them" for this picker; `zone_for` still resolves the exact stored name for
+    everything the scheduler actually does, so a cosmetic merge here changes nothing
+    about how a run is timed.
+
+    `current` — the already-saved value — is appended if no cluster already contains it,
+    so changing nothing never changes what is shown, even for a zone this function
+    would not itself have picked as a cluster's representative.
+    """
+    year = year or dt.datetime.now().year
+    clusters: dict[tuple[int, int], list[str]] = {}
+    for name in available_zones():
+        # Etc/GMT+N is POSIX, not a place, and inverts the sign everyone expects —
+        # Etc/GMT+12 is UTC-12. No picker worth copying shows these; Etc/UTC is the one
+        # exception, and it is a fixed point in `available_zones()` rather than reached
+        # through this loop only by coincidence.
+        if name.startswith('Etc/') and name != 'Etc/UTC':
+            continue
+        zone = _resolved(name)
+        if zone is None:
+            continue
+        signature = (_offset_minutes(zone, year, 1), _offset_minutes(zone, year, 7))
+        clusters.setdefault(signature, []).append(name)
+
+    preferred_rank = {name: rank for rank, name in enumerate(PREFERRED_ZONE_NAMES)}
+    entries = []
+    seen = set()
+    for members in clusters.values():
+        canonical = min(members, key=lambda name: (preferred_rank.get(name, len(preferred_rank)), name))
+        zone = _resolved(canonical)
+        entries.append({'name': canonical, 'offset_minutes': _standard_offset_minutes(zone, year),
+                        'label': _zone_label(canonical)})
+        seen.add(canonical)
+
+    if current and current not in seen:
+        zone = _resolved(current)
+        if zone is not None:
+            entries.append({'name': current, 'offset_minutes': _standard_offset_minutes(zone, year),
+                            'label': _zone_label(current)})
+
+    entries.sort(key=lambda entry: (entry['offset_minutes'], entry['label']))
+    return entries
+
+
 def _aware(moment: dt.datetime) -> dt.datetime:
     if moment.tzinfo is None:
         return moment.replace(tzinfo=dt.timezone.utc)

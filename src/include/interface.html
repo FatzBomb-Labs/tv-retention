@@ -204,7 +204,7 @@
         <label class="tvr-field" id="tvr-field-minute"><span>Minute</span><select id="tvr-minute"></select></label>
       </div>
       <label class="tvr-field" id="tvr-field-cron"><span>Cron expression</span><input type="text" id="tvr-cron" spellcheck="false"><small>Five fields: minute hour day month weekday.</small></label>
-      <label class="tvr-field"><span>Timezone</span><select id="tvr-timezone"></select><small>Schedule times are read in this zone. Only zones this container can resolve are offered.</small></label>
+      <label class="tvr-field"><span>Timezone</span><input type="text" id="tvr-timezone-search" placeholder="Search…" autocomplete="off" spellcheck="false"><select id="tvr-timezone"></select><small>Schedule times are read in this zone. Only zones this container can resolve are offered.</small></label>
       <p class="tvr-lede"><small>A run missed while the server was off is caught up at the next opportunity. Sonarr is read again immediately before a run, so nothing acts on a stale reading.</small></p>
     </div>
   </section>

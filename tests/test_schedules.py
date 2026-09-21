@@ -265,3 +265,127 @@ class OfferedZones(unittest.TestCase):
         offered = schedules.available_zones()
         self.assertEqual(offered, sorted(offered))
         self.assertEqual(len(offered), len(set(offered)))
+
+
+class CommonZones(unittest.TestCase):
+    """One dropdown entry per distinct offset behaviour, not one per IANA name.
+
+    A release carries roughly fifteen America/* zones that have kept identical civil
+    time since the US unified its 2007 DST rule -- Detroit, four Indiana zones,
+    Louisville, Toronto and more are all, today and for as far ahead as scheduling
+    matters, indistinguishable from New York. Verified against the actual database
+    rather than a fixture, because the whole point is not drifting from what
+    `zone_for` can resolve.
+    """
+
+    def test_a_cluster_of_identical_zones_collapses_to_one_entry(self):
+        # America/Detroit and America/New_York have shared every DST transition since
+        # 2007; both zones existing separately in tzdata is a historical artifact this
+        # picker has no reason to expose.
+        if 'America/Detroit' not in schedules.available_zones() or \
+                'America/New_York' not in schedules.available_zones():
+            self.skipTest('this host does not carry both reference zones')
+        names = [z['name'] for z in schedules.common_zones()]
+        self.assertIn('America/New_York', names)
+        self.assertNotIn('America/Detroit', names)
+
+    def test_new_york_is_the_preferred_name_for_its_cluster(self):
+        # The example the feature was asked for by name: picking the well-known city
+        # over whichever cluster member happens to sort first alphabetically
+        # (America/Detroit precedes America/New_York).
+        if 'America/New_York' not in schedules.available_zones():
+            self.skipTest('this host does not carry the reference zone')
+        names = [z['name'] for z in schedules.common_zones()]
+        self.assertIn('America/New_York', names)
+
+    def test_zones_with_different_dst_behaviour_are_never_merged(self):
+        # Same standard offset, opposite DST behaviour: merging any of these pairs
+        # would be a wrong answer wearing a tidy list's clothes.
+        pairs = (('America/Phoenix', 'America/Denver'),      # Arizona never changes clocks
+                 ('Australia/Darwin', 'Australia/Adelaide'),  # NT never changes clocks
+                 ('Australia/Brisbane', 'Australia/Sydney'))  # QLD never changes clocks
+        available = set(schedules.available_zones())
+        names = {z['name'] for z in schedules.common_zones()}
+        for still, moves in pairs:
+            if not ({still, moves} <= available):
+                continue
+            self.assertIn(still, names, f'{still} was merged away')
+            self.assertIn(moves, names, f'{moves} was merged away')
+
+    def test_posix_offset_zones_are_not_offered(self):
+        # Etc/GMT+12 is UTC-12: the sign is inverted from every reader's expectation,
+        # and it names an offset rather than a place. Etc/UTC is the one exception.
+        names = [z['name'] for z in schedules.common_zones()]
+        self.assertNotIn('Etc/GMT+12', names)
+        self.assertTrue(all(not n.startswith('Etc/') or n == 'Etc/UTC' for n in names))
+
+    def test_the_current_zone_is_appended_when_it_is_not_the_cluster_pick(self):
+        # A stored value that clusters with something else, but is not the cluster's
+        # own preferred name, must still be selectable -- changing nothing must never
+        # change what is shown.
+        available = schedules.available_zones()
+        candidates = [n for n in available
+                     if n != 'America/New_York' and n not in schedules.PREFERRED_ZONE_NAMES]
+        target = next((n for n in candidates
+                       if schedules.common_zones(current=n) != schedules.common_zones()), None)
+        if target is None:
+            self.skipTest('no non-canonical cluster member available on this host')
+        with_current = [z['name'] for z in schedules.common_zones(current=target)]
+        self.assertIn(target, with_current)
+
+    def test_a_current_value_already_offered_is_not_duplicated(self):
+        zones = schedules.common_zones(current=schedules.DEFAULT_TIMEZONE)
+        names = [z['name'] for z in zones]
+        self.assertEqual(names.count(schedules.DEFAULT_TIMEZONE), 1)
+
+    def test_an_unresolvable_current_value_does_not_raise(self):
+        # A corrupted settings document must not take the whole snapshot down over a
+        # cosmetic list; the real error surfaces through zone_for at the point of use.
+        zones = schedules.common_zones(current='Not/AZone')
+        self.assertNotIn('Not/AZone', [z['name'] for z in zones])
+
+    def test_every_offered_zone_still_resolves(self):
+        for entry in schedules.common_zones():
+            schedules.zone_for({'timezone': entry['name']})
+
+    def test_entries_are_sorted_by_offset_then_label(self):
+        zones = schedules.common_zones()
+        keys = [(z['offset_minutes'], z['label']) for z in zones]
+        self.assertEqual(keys, sorted(keys))
+
+    def test_half_and_quarter_hour_offsets_are_labelled_correctly(self):
+        if 'Asia/Kolkata' not in schedules.available_zones():
+            self.skipTest('this host does not carry the reference zone')
+        kolkata = next(z for z in schedules.common_zones() if z['name'] == 'Asia/Kolkata')
+        self.assertEqual(kolkata['offset_minutes'], 330)
+
+    def test_the_label_is_the_last_path_segment_with_underscores_as_spaces(self):
+        if 'America/New_York' not in schedules.available_zones():
+            self.skipTest('this host does not carry the reference zone')
+        entry = next(z for z in schedules.common_zones() if z['name'] == 'America/New_York')
+        self.assertEqual(entry['label'], 'New York')
+
+
+class StandardOffset(unittest.TestCase):
+    """The label offset never changes with the season, even in the hemisphere where
+    DST falls across the calendar year boundary."""
+
+    def test_a_southern_hemisphere_zone_reports_its_non_dst_offset(self):
+        # Sydney observes DST across the southern summer (roughly Oct-Apr), so a naive
+        # "read January" would report the DST offset, not standard time.
+        if 'Australia/Sydney' not in schedules.available_zones():
+            self.skipTest('this host does not carry the reference zone')
+        zone = schedules._resolved('Australia/Sydney')
+        self.assertEqual(schedules._standard_offset_minutes(zone, 2026), 600)  # +10:00
+
+    def test_a_northern_hemisphere_zone_reports_its_non_dst_offset(self):
+        if 'America/New_York' not in schedules.available_zones():
+            self.skipTest('this host does not carry the reference zone')
+        zone = schedules._resolved('America/New_York')
+        self.assertEqual(schedules._standard_offset_minutes(zone, 2026), -300)  # -05:00
+
+    def test_a_zone_with_no_dst_is_unaffected_by_which_probe_answers(self):
+        if 'America/Phoenix' not in schedules.available_zones():
+            self.skipTest('this host does not carry the reference zone')
+        zone = schedules._resolved('America/Phoenix')
+        self.assertEqual(schedules._standard_offset_minutes(zone, 2026), -420)  # -07:00

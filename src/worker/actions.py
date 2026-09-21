@@ -135,10 +135,10 @@ def action_snapshot(settings, request):
         'suppressed_alerts': hidden_alerts,
         'alert_summary': alerts.summarise(current_alerts),
         'schedule_text': schedules.describe(settings.get('schedule') or {}),
-        # Static per image, and only the schedule panel wants it — but it is the zone
-        # database this container actually has, so offering anything else would put a
-        # name in the list that validation then refuses.
-        'timezones': schedules.available_zones(),
+        # One entry per distinct offset behaviour, not one per IANA name — the fifteen
+        # US Eastern zones collapse to one. The stored value is passed through so it is
+        # guaranteed a place in the list even when it is not a cluster's own pick.
+        'timezones': schedules.common_zones(current=(settings.get('schedule') or {}).get('timezone', '')),
         'jobs': job_state(settings),
         'plan': plan_summary(settings, load_health(settings)),
         'sync': main.last_sync(settings),

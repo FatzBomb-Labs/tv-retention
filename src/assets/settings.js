@@ -29,32 +29,47 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
   const WEEKDAYS = [[0, 'Sunday'], [1, 'Monday'], [2, 'Tuesday'], [3, 'Wednesday'],
                     [4, 'Thursday'], [5, 'Friday'], [6, 'Saturday']];
 
-  // Grouped by region, because 486 flat options is a scroll rather than a choice, and
-  // built from the list the worker sends rather than one kept here: that list is the
+  // Built from the list the worker sends rather than one kept here: that list is the
   // container's own zone database, so every option offered is one validation accepts.
   // A free-text field could not promise that — you found out at save time.
+  // "UTC−05:00" rather than "UTC-5": the padded, signed, colon form is what every
+  // operating system's own picker shows, and it is what lines the list up cleanly at a
+  // glance regardless of whether a neighbouring zone happens to sit on the half hour.
+  function timezoneOffsetText(minutes) {
+    const sign = minutes < 0 ? '−' : '+';
+    const magnitude = Math.abs(minutes);
+    const hours = String(Math.floor(magnitude / 60)).padStart(2, '0');
+    const rest = String(magnitude % 60).padStart(2, '0');
+    return `UTC${sign}${hours}:${rest}`;
+  }
+
+  const timezoneOptionText = (zone) => `${timezoneOffsetText(zone.offset_minutes)}  ${zone.label}`;
+
+  // Flat and offset-led, the way a system clock's own timezone picker reads, rather
+  // than grouped by continent: the offset is the fact that decides when a schedule
+  // fires, so it leads. The worker has already collapsed the roughly fifteen zones
+  // that are all, today, "US Eastern" into one; what is left still runs to several
+  // dozen, so the search box narrows it the way typing does in any such picker.
   function renderTimezones(current) {
     const select = $('tvr-timezone');
-    if (!select) return;
-    const offered = (snapshot().timezones || []).slice();
-    // A stored zone this image no longer carries still has to be selectable. Dropping
-    // it would silently move the schedule to whichever zone happened to render first,
-    // which is the one thing a timezone control must never do on its own.
-    if (current && !offered.includes(current)) offered.push(current);
-    const regions = new Map();
-    offered.forEach((name) => {
-      const region = name.split('/')[0];
-      if (!regions.has(region)) regions.set(region, []);
-      regions.get(region).push(name);
-    });
-    select.replaceChildren(...[...regions.keys()].sort().map((region) => {
-      const group = el('optgroup', { label: region });
-      regions.get(region).sort().forEach((name) => group.append(
-        // The region is already the group heading, so the option says the rest.
-        el('option', { value: name, textContent: name.slice(region.length + 1).replace(/_/g, ' ') })));
-      return group;
-    }));
-    select.value = current;
+    const search = $('tvr-timezone-search');
+    if (!select || !search) return;
+    const zones = snapshot().timezones || [];
+    const term = search.value.trim().toLowerCase();
+    const matches = term
+      ? zones.filter((zone) => timezoneOptionText(zone).toLowerCase().includes(term))
+      : zones;
+    // Typing a filter must never make the active selection disappear out from under
+    // it. A stored zone the worker did not offer at all — one this image no longer
+    // carries, or one merged into another cluster's name — still needs a row of its
+    // own, or picking nothing would silently read as picking whatever renders first.
+    const present = matches.some((zone) => zone.name === current);
+    const shown = present || !current ? matches
+      : [...matches, zones.find((zone) => zone.name === current)
+                     || { name: current, offset_minutes: 0, label: current }];
+    const ordered = shown.slice().sort((a, b) =>
+      a.offset_minutes - b.offset_minutes || a.label.localeCompare(b.label));
+    options(select, ordered.map((zone) => [zone.name, timezoneOptionText(zone)]), current);
   }
 
   function renderSchedule() {
@@ -457,8 +472,14 @@ function createSettings({ api, render, testMode, getSettings, getSnapshot, apply
     ['tvr-freq', 'tvr-monthly-mode'].forEach((id) => $(id).addEventListener('change', applyScheduleVisibility));
 
     ['tvr-schedule-enabled', 'tvr-test-mode', 'tvr-freq', 'tvr-minute', 'tvr-hour', 'tvr-weekday',
-     'tvr-monthly-mode', 'tvr-monthly-day', 'tvr-monthly-weekday', 'tvr-cron'
+     'tvr-monthly-mode', 'tvr-monthly-day', 'tvr-monthly-weekday', 'tvr-cron', 'tvr-timezone',
     ].forEach((id) => $(id).addEventListener('change', () => guarded('', saveScheduleNow)));
+
+    // Filtering never fires 'change' on its own — only rebuilding the option list — so
+    // this cannot itself trigger a save; picking a filtered-down option still goes
+    // through the listener above like any other choice.
+    $('tvr-timezone-search').addEventListener('input',
+      () => renderTimezones($('tvr-timezone').value));
 
     document.querySelectorAll('.tvr-view:has(.tvr-save)').forEach((view) => {
       view.addEventListener('change', (event) => {
