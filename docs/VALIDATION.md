@@ -65,6 +65,25 @@ fix. It mocks `signal.signal` rather than sending a real OS signal to the test p
 real SIGTERM to the shared test runner, mistimed, terminates the whole gate rather than
 failing one test, which would be a worse outcome than the bug it is meant to catch.
 
+## Build 28 deployment — 2026-09-21
+
+Replaced `dev-build27` with `dev-build28`: the SIGTERM fix. Config already at version
+14, so nothing migrated.
+
+- Preflight against a `/tmp` copy, `--rm`: version 14, 32 rules, 4 presets, Test Mode
+  on, schedule off, `integrity_errors` clean.
+- Before touching production, timed `docker stop -t 10` against a disposable container
+  running this exact built image, config-copy mounted, otherwise idle: **0.24s, exit
+  0** — confirming the fix was genuinely present and working in the artifact about to
+  ship, not just in source.
+- The `docker stop -t 30` that preceded the build27→build28 swap itself, still on the
+  unfixed build27 image, was not specially timed but is consistent with the ~10s+
+  SIGKILL-fallback behaviour recorded above.
+- After replacement: healthy, worker uid 99, safety posture and stored timezone
+  unchanged. A direct stop/start cycle against the live production container
+  afterward: **0.55s, exit 0**, config intact on restart.
+- Rollback is `tv-retention:rollback` (build 27) plus `pre-build28-<timestamp>.tar.gz`.
+
 ## Build 27 deployment — 2026-09-20
 
 Replaced `dev-build26` with `dev-build27`: an untrustworthy plan (an enabled rule with
