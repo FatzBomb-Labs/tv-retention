@@ -18,7 +18,7 @@ import { remember, remembered } from './storage.js';
 // `alerts.js`, and sibling modules cannot import each other here. That is also why the
 // entry has to build `createAlerts` before this.
 export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, getLibrary,
-                               applySync, forgetLibrary,
+                               applySync, readingGeneration, forgetLibrary,
                                refresh, render, showResult, testMode, ruleFor, isBlocked,
                                worstSeverity, seriesAlertList, seriesAlertCard,
                                systemAlertCard, getStatus }) {
@@ -206,12 +206,15 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
     // The one control that waits on Sonarr, and it says so. Everything else on this page is
     // answered from the stored reading, which is why nothing else makes you wait.
     $('tvr-refresh-all').addEventListener('click', () => guarded('Reading Sonarr…', async () => {
+      // Same reason as the background sync: a restore activating while this is away
+      // replaces the documents this reply describes.
+      const generation = readingGeneration();
       const data = await api('sync', { reason: 'manual', force: true }, 'Reading Sonarr…');
       if (data.busy) {
         notice('A Sonarr read or retention run is already in progress.', 'ok');
         return;
       }
-      applySync(data);
+      if (!applySync(data, generation)) return;
       // Sonarr has just been read: what the page is holding is the reading before it.
       forgetLibrary();
       render();

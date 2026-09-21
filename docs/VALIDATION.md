@@ -6,8 +6,8 @@ or re-run the gate.
 
 ## Current gate — 2026-09-21
 
-Authoritative Linux host gate on `fatzserver-host`: **650 Python tests in 9.861s** (1
-skipped — this host's trimmed zone database lacks `America/Detroit`) and **35 frontend
+Authoritative Linux host gate on `fatzserver-host`: **650 Python tests in 9.887s** (1
+skipped — this host's trimmed zone database lacks `America/Detroit`) and **36 frontend
 tests**, `All required checks passed`, exit code `0`. Worker imports and shipped-module
 syntax checks passed.
 
@@ -15,6 +15,43 @@ Down from 741: the `test_build.py` trim removed 100 assertions about appearance,
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
+
+## Restore reload through a background refresh — 2026-09-21
+
+The last item in PLAN §1, and the one with real consequences behind it. A `sync` already
+in flight when a restore activates comes back carrying the settings from *before* it.
+`applySync` writes `settings` wholesale, so that reply would have put the replaced
+document straight back into the page — including `test_mode`, which a restore
+deliberately forces on. The page would then show Test Mode off, and the next save would
+write that back to disk, quietly undoing a safety guarantee the restore had just
+established.
+
+`restoreActivated` already called `stopPolling()`, which looks like it covers this and
+does not: it clears the poll timer, the check queue and the checking sets, none of which
+is a request already away. There was no cancellation and no staleness check on the
+reply, and nothing in the payload says it is stale — only knowing it was asked for
+against a document that no longer exists does.
+
+The entry owns the shared documents, so it now stamps them: a counter moved on whenever
+something replaces them wholesale, which a full refresh does and therefore a restore
+does. Both background sync callers — `checks.requestFreshness` and the top bar's
+refresh-all — capture the stamp before asking and discard a reply that no longer
+matches. Same shape as the scope-count generation guard, one level up.
+
+Two notes from doing it:
+
+- The first version made `readingGeneration` a `const` arrow. The feature factories are
+  constructed above where it is defined, so it was still in its temporal dead zone when
+  they took it, and the page threw on load. `applySaved` and `applySync` only work there
+  because they are hoisted declarations; this now is one too. The frontend harness
+  caught it on the first run, which is exactly what that harness is for.
+- The test drives the reload through a completed run rather than through the restore UI.
+  A run calls the same `refresh()` a restore does, so it exercises the same seam, and a
+  stale sync landing after a run is a real case in its own right.
+
+Checked both ways: with the guard removed from the background sync the test fails on
+"the superseded sync must not reinstate the document the reload replaced", and passes
+with it.
 
 ## Accessibility, scoped to primary actions — 2026-09-21
 

@@ -86,6 +86,7 @@ function start(root) {
     applyAlerts,
     applySuppressed,
     applySync,
+    readingGeneration,
     forgetLibrary: () => libraryView.forgetLibrary(),
     render: () => render(),
     renderLibrary: () => libraryView.renderLibrary(),
@@ -200,11 +201,28 @@ function start(root) {
     if (data.status) snapshot.status = data.status;
   }
 
+  // Moved on whenever something replaces the shared documents wholesale — a full
+  // refresh, and so a restore, which goes through one. A background sync captures this
+  // before it asks and is discarded on the way back if it no longer matches.
+  //
+  // The case that matters is a restore. A `sync` already in flight when one activates
+  // comes back carrying the settings from *before* it, and applying those would put the
+  // replaced document straight back into the page — including `test_mode`, which a
+  // restore deliberately forces on. The page would then show Test Mode off, and the
+  // next save would write that back. Nothing about the response says it is stale; only
+  // knowing it was asked for against a document that no longer exists does.
+  let documentGeneration = 0;
+  // A declaration, not a const arrow: the feature factories above are constructed before
+  // this line runs, and a const would still be in its temporal dead zone when they take
+  // it. `applySaved` and `applySync` are hoisted for the same reason.
+  function readingGeneration() { return documentGeneration; }
+
   // A `sync` reply carries the whole shared state back at once, and the entry owns those
   // documents, so applying one belongs here rather than in every feature that can ask for
   // a sync. checks.js and topbar.js held byte-identical copies of this sequence, which is
   // also why the top bar took four apply capabilities it no longer needs.
-  function applySync(data) {
+  function applySync(data, generation) {
+    if (generation !== undefined && generation !== documentGeneration) return false;
     applySaved(data);
     // Unconditional, unlike the guarded calls inside applySaved: a sync reporting no
     // alerts is saying there are none, not declining to answer.
@@ -214,10 +232,13 @@ function start(root) {
     snapshot.plan = data.plan;
     snapshot.sync = data.sync;
     snapshot.sync_due = !!data.sync_due;
+    return true;
   }
 
   async function refresh(fresh) {
     snapshot = await api('snapshot', {}, 'Loading…');
+    // Installed, so anything asked for against the previous documents is now stale.
+    documentGeneration += 1;
     settings = snapshot.settings;
     applyHealth(snapshot.health);
     applyAlerts(snapshot.alerts || []);
@@ -283,6 +304,7 @@ function start(root) {
     getSystemAlerts: () => systemAlerts,
     getLibrary: () => libraryView.getLibrary(),
     applySync,
+    readingGeneration,
     forgetLibrary: () => libraryView.forgetLibrary(),
     refresh: (fresh) => refresh(fresh),
     render: () => render(),

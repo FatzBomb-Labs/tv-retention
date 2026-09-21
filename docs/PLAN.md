@@ -33,19 +33,27 @@ This is the part that is earned. Everything else on this page is scheduling.
 
 ## Remaining work
 
-### 1. UI state correctness
+### 1. UI state correctness — closed
 
-Done: concurrent tabs (the save round-trips `settings_revision` and the server rejects a
-stale one — `test_settings_revision`), late scope-count responses (a generation guard in
-`series-editor.js`), the one-time API-key reveal surviving a background render, drafts
-surviving a look at another series, and the Run confirmation on an untrustworthy plan
-(it read "No changes are currently expected" — a plan nobody had actually finished
-reading, stated as fact; the actual run always reads every series fresh regardless, so
-this was the confirmation's honesty rather than a safety hole).
+Done, and this section is now closed:
 
-Left:
-
-- Restore reload behaviour through a background refresh.
+- concurrent tabs — the save round-trips `settings_revision` and the server rejects a
+  stale one (`test_settings_revision`);
+- late scope-count responses — a generation guard in `series-editor.js`;
+- the one-time API-key reveal surviving a background render;
+- drafts surviving a look at another series;
+- the Run confirmation on an untrustworthy plan, which read "No changes are currently
+  expected" — a plan nobody had finished reading, stated as fact. The run always reads
+  every series fresh regardless, so this was the confirmation's honesty rather than a
+  safety hole;
+- **restore reload through a background refresh.** A `sync` already in flight when a
+  restore activated came back carrying the settings from before it, and `applySync`
+  would have put that replaced document straight back into the page — including
+  `test_mode`, which a restore deliberately forces on. The page would then have shown
+  Test Mode off and the next save would have written it back. `stopPolling()` did not
+  help: it clears the poll timer and the check queue, not a request already away. The
+  entry now stamps its documents, every background sync captures that stamp before
+  asking, and a reply describing a document that has since been replaced is discarded.
 
 Accessibility and responsive layout: audited 2026-09-21, and the four things it found
 are done. Scoped deliberately to primary actions; this was not a general WCAG pass,
@@ -145,8 +153,10 @@ Docker is unavailable on the Windows development machine, so 2-4 run on the Linu
 
 ## Ship criterion
 
-The safety list holds, §1 is fixed, the container starts non-root and survives a restart,
-and one real run against one real show does what it said it would. That is 1.0.
+The safety list holds, §1 is fixed (it is), the container starts non-root and survives a
+restart (it does), and one real run against one real show does what it said it would (it
+did, 2026-09-20). What is left of 1.0 is §2's remaining container checks and the two
+acceptance items that need the real library.
 
 ## Explicitly unresolved
 

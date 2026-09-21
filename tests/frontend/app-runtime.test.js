@@ -698,3 +698,47 @@ test('a failed schedule save leaves the held document unchanged', async () => {
   assert.equal(saves[1].settings.schedule.enabled, false,
     'the second save reflects the control, not the refused first attempt');
 });
+
+test('a sync already in flight cannot put the replaced document back', async () => {
+  // The case this exists for is a restore. A `sync` asked for before one activates comes
+  // back carrying the settings from *before* it, and applying those would reinstate the
+  // replaced document -- including test_mode, which a restore deliberately forces on.
+  // The page would then show Test Mode off and the next save would write that back.
+  // Restore reaches the reload through refresh(); a completed run reaches the same one,
+  // which is what this drives, and it is a real case in its own right.
+  let releaseSync;
+  const stale = snapshotFixture({ testMode: false });
+  // Held here so the reload can be pointed at a different document mid-test; the
+  // harness's routes read this object on every call rather than capturing it.
+  const fixtures = {
+    snapshot: snapshotFixture({ testMode: false }),
+    // Never resolves until the test says so, so it is genuinely still in flight.
+    sync: () => new Promise((resolve) => { releaseSync = () => resolve({
+      busy: false, report: null,
+      settings: stale.settings,          // the document as it was before the reload
+      health: stale.health, alerts: [], suppressed_alerts: [],
+      plan: stale.plan, sync: stale.sync, sync_due: false,
+    }); }),
+    confirm: () => true,
+    run: () => ({ result: { dry_run: false, planned: 0, deleted: 0, rules: [],
+                            duration_seconds: 1, freed_bytes: 0 } }),
+  };
+  const page = await loadPage(() => fixtures);
+  await page.flush();
+  assert.ok(releaseSync, 'a sync is genuinely in flight before the reload');
+  assert.equal(page.$('tvr-test-chip').hidden, true, 'Test Mode starts off');
+
+  // What the reload will find: the replacement document, Test Mode forced on.
+  fixtures.snapshot = snapshotFixture({ testMode: true });
+
+  page.click('tvr-run');
+  await page.flush();
+  assert.equal(page.$('tvr-test-chip').hidden, false,
+    'the reload installed the replacement document');
+
+  releaseSync();
+  await page.flush();
+
+  assert.equal(page.$('tvr-test-chip').hidden, false,
+    'the superseded sync must not reinstate the document the reload replaced');
+});

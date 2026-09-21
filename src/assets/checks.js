@@ -10,7 +10,7 @@ import { $, el, text } from './dom.js';
 // and `snapshot` are handed over as getters because the entry reassigns both wholesale
 // (a refresh replaces them), while this module only ever writes *into* them.
 export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, applyAlerts,
-                               applySuppressed, applySync, forgetLibrary,
+                               applySuppressed, applySync, readingGeneration, forgetLibrary,
                                render, renderLibrary, renderAlerts, renderCounts }) {
   const checking = new Set();
   const forced = new Set();
@@ -133,10 +133,13 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     if (syncRunning || !getSnapshot()) return;
     syncRunning = true;
     renderCheckBanner({ syncing: true });
+    // Captured before asking: a restore activating while this is in flight replaces the
+    // documents, and the reply describes the ones it replaced.
+    const generation = readingGeneration();
     try {
       const data = await api('sync', { reason: reason || 'opened', force: !!force }, '', true);
       if (data.busy) return;
-      applySync(data);
+      if (!applySync(data, generation)) return;
       if (data.report) forgetLibrary();
       render();
     } catch (error) {
