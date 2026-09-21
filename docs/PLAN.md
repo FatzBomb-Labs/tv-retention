@@ -37,14 +37,14 @@ This is the part that is earned. Everything else on this page is scheduling.
 
 Done: concurrent tabs (the save round-trips `settings_revision` and the server rejects a
 stale one — `test_settings_revision`), late scope-count responses (a generation guard in
-`series-editor.js`), the one-time API-key reveal surviving a background render, and
-drafts surviving a look at another series.
+`series-editor.js`), the one-time API-key reveal surviving a background render, drafts
+surviving a look at another series, and the Run confirmation on an untrustworthy plan
+(it read "No changes are currently expected" — a plan nobody had actually finished
+reading, stated as fact; the actual run always reads every series fresh regardless, so
+this was the confirmation's honesty rather than a safety hole).
 
 Left:
 
-- Keep Run and confirmation tied to a current, complete plan and current source readings.
-  The Run button already hides only on a complete plan; the confirmation text and the
-  readings behind it have not been checked the same way.
 - Restore reload behaviour through a background refresh.
 - The accessibility and responsive-layout fixes that affect primary actions. Name them
   before starting — "finish the a11y fixes" is not a list, and an unbounded one is how
@@ -98,6 +98,11 @@ Test Mode off, one rollback image and one matching config archive. Verify monito
 changes, shared multi-episode files, recycle-bin behavior, partial failure and restart
 recovery, and truthful run history, journal and byte totals. Restore Test Mode on and
 schedules off when finished.
+
+Done in part: a bounded run on 2026-09-20 (2 planned, 2 deleted, 2705 MiB, 0 errors,
+`test_mode: false` in the journal — see VALIDATION) exercised the deletion path itself.
+Not covered by it: shared multi-episode files, recycle-bin recovery, and restart
+recovery interrupted mid-run.
 
 **4. Read-only smoke on the target.** Copied config under `/tmp`, schedules off, Test Mode
 on. Verify login, version/build display, asset loading and browser refresh, library and

@@ -472,6 +472,32 @@ test('an actionable Run states the actual plan, and accepting it sends exactly o
   assert.equal(page.$('tvr-dialog').shown, 1, 'the run report opened');
 });
 
+test('an untrustworthy plan says the preview may be incomplete, not that nothing is expected', async () => {
+  // trustworthy is false whenever an enabled rule has no reading yet. The Run button
+  // stays visible in that state on purpose (there might be work once it is read), but
+  // the confirmation used to fall through to "No changes are currently expected" --
+  // stated as fact about a question nobody had actually answered yet. The real run
+  // still reads every series fresh regardless, so nothing unsafe followed; only the
+  // dialog's own honesty was at stake.
+  const page = await loadPage(() => ({
+    snapshot: snapshotFixture({ plan: { actionable: 0, trustworthy: false } }),
+    confirm: () => true,
+    run: () => ({ result: { dry_run: true, planned: 0, deleted: 0, rules: [],
+                            duration_seconds: 1, freed_bytes: 0 } }),
+  }));
+  await page.flush();
+
+  page.click('tvr-run');
+  await page.flush();
+
+  assert.equal(page.confirmCalls.length, 1);
+  const text = page.confirmCalls[0];
+  assert.ok(text.includes('have not been read yet'), text);
+  assert.ok(text.includes('may be incomplete'), text);
+  assert.ok(!text.includes('No changes are currently expected'),
+            'an unread plan must not be presented as a known answer');
+});
+
 test('a run that only removes queued series reports the removal, not "0 files deleted"', async () => {
   // Removals are a separate list from the retention pass's own deleted/freed_bytes
   // counters. A run with nothing to delete under retention but real series removed used

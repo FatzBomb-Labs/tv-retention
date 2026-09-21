@@ -232,7 +232,18 @@ export function createTopBar({ api, getSettings, getSnapshot, getSystemAlerts, g
       // The confirmation states the actual plan rather than describing runs in general.
       let warning = `Run ${plural(runnable.length, 'series')} now?\n\n`;
       const changes = changeSummary(plan).map((row) => `• ${row.text}`).join('\n');
-      warning += plan.actionable ? `Scheduled changes:\n${changes}\n\n` : 'No changes are currently expected.\n\n';
+      if (plan.actionable) {
+        warning += `Scheduled changes:\n${changes}\n\n`;
+      } else if (plan.trustworthy) {
+        warning += 'No changes are currently expected.\n\n';
+      } else {
+        // trustworthy is false whenever a rule has no reading yet — "no changes
+        // expected" would be a preview standing in for an answer nobody has. The run
+        // itself reads every series fresh regardless, so nothing unsafe follows from
+        // this being incomplete; only the confirmation's own honesty was at stake.
+        warning += 'Some series have not been read yet, so this preview may be '
+          + 'incomplete. The run will read every series fresh before acting.\n\n';
+      }
       if (testMode()) {
         warning += 'Test mode is on, so this changes nothing: it reports exactly what it would '
           + 'have done and writes neither to your files nor to Sonarr.';
