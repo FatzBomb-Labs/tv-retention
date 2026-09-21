@@ -416,11 +416,35 @@ export function createLibrary({
     const card = el('div', { className: marks.join(' ') });
     card.addEventListener('click', (event) => {
       if (event.target.closest('button, input, select, a, label')) return;
-      if (isOpen(rule, series)) { closeEditor(); renderLibrary(); renderDetails(); return; }
-      openEditor(rule, rule ? undefined : series);
-      renderLibrary();
+      toggleRow(row);
     });
     return card;
+  }
+
+  // Opening a series is the only way to its retention settings, its exclusions and its
+  // Delete, and for a long time the only way to open one was to click the card — a div
+  // with a handler on it, reachable by pointer and by nothing else.
+  //
+  // The card cannot itself become the button: it already contains buttons, and nesting
+  // interactive elements is invalid and breaks the inner ones. So the title carries the
+  // name and the focus, the way a card with a linked heading normally does, and the
+  // card's own click handler stands aside for anything landing on a real control —
+  // which now includes this.
+  function toggleRow(row) {
+    const { series, rule } = row;
+    if (isOpen(rule, series)) { closeEditor(); renderLibrary(); renderDetails(); return; }
+    openEditor(rule, rule ? undefined : series);
+    renderLibrary();
+  }
+
+  function titleButton(row, className) {
+    const { series, rule } = row;
+    const button = el('button', { type: 'button', className: `${className} tvr-card-open`,
+                                  textContent: series.title, title: series.title });
+    // It opens and closes the pane beside it, so it says which of those it would do.
+    button.setAttribute('aria-expanded', String(!!isOpen(rule, series)));
+    button.addEventListener('click', () => toggleRow(row));
+    return button;
   }
 
   const seriesFacts = (series) => [series.year, series.network,
@@ -502,7 +526,7 @@ export function createLibrary({
     art.append(retentionPill(rule));
     card.append(art);
     card.append(el('div', { className: 'tvr-rule-main' }, [
-      el('div', { className: 'tvr-grid-title', textContent: series.title, title: series.title }),
+      titleButton(row, 'tvr-grid-title'),
       el('div', { className: 'tvr-grid-sub', textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
     ]));
     return card;
@@ -526,7 +550,7 @@ export function createLibrary({
     const main = el('div', { className: 'tvr-rule-main' }, [
       ...(changes ? [changes] : []),
       el('div', { className: 'tvr-rule-head' }, [
-        el('span', { className: 'tvr-rule-title', textContent: series.title, title: series.title }),
+        titleButton(row, 'tvr-rule-title'),
       ]),
       el('div', { className: 'tvr-row-sub', textContent: [series.year, series.network].filter(Boolean).join(' · ') }),
     ]);

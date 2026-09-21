@@ -817,8 +817,15 @@ class Styling(Sources):
 
         At `#tv-retention button` it is (1,0,1), so every dense list built from buttons
         silently reverted to the page's paragraph spacing however tight its own rule was.
+
+        Checked for every `#tv-retention button…` rule rather than only the bare one.
+        The card title is a button too, and it is drawn against a `.tvr-grid-title` that
+        supplies the line-height its two-line clamp needs — the shorthand there would
+        take that away exactly as it did the first time, just somewhere new.
         """
-        self.assertNotRegex(self.css, r'#tv-retention button \{[^}]*font:\s*inherit')
+        for rule in re.findall(r'#tv-retention button[^{]*\{[^}]*\}', self.css):
+            self.assertNotRegex(rule, r'font:\s*inherit',
+                                f'the shorthand takes line-height with it: {rule[:60]}')
         self.assertRegex(self.css, r'#tv-retention button \{[^}]*font-family:\s*inherit')
 
     def test_no_colour_is_defined_only_in_the_dark(self):

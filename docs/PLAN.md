@@ -1,6 +1,6 @@
 # TV Retention plan of record
 
-Updated September 20, 2026. What is left before release. Completed work belongs in git
+Updated September 21, 2026. What is left before release. Completed work belongs in git
 history, not here; delete from this file as things land.
 
 ## Current state
@@ -47,35 +47,28 @@ Left:
 
 - Restore reload behaviour through a background refresh.
 
-Accessibility and responsive layout, audited 2026-09-21 and now a list rather than a
-placeholder. Scoped deliberately to primary actions; this is not a general WCAG pass,
+Accessibility and responsive layout: audited 2026-09-21, and the four things it found
+are done. Scoped deliberately to primary actions; this was not a general WCAG pass,
 because an unbounded one is how this section grows rather than closes.
 
-- **A series can only be opened with a mouse.** `library.js` builds each card as a
-  `<div>` and hangs a click handler on it, and `openEditor` has no other caller — there
-  is no `tabindex` anywhere in the interface. So retention settings, exclusions, the
-  monitoring controls and Delete are all behind a target that cannot be tabbed to or
-  activated by keyboard. This is the one that matters. It is also not a one-line fix:
-  the card already contains buttons, so it cannot simply become a `<button>` — nesting
-  interactive elements is invalid and breaks the inner controls. Wants a deliberate
-  choice between a focusable card with an explicit key handler and a named control
-  inside it.
-- **The season caret has no accessible name and no `aria-expanded`.** Two instances of
-  one control (`episode-trees.js`, in both tree builders). It reads as an unlabelled
-  button and never says whether the season is open.
-- **The busy overlay is not announced.** `#tvr-busy` and the `#tvr-checking` sweep
-  banner carry no `role`/`aria-live`. Lower stakes than it sounds: the overlay only
-  ever appears for a foreground action the operator just triggered, never for a
-  background read.
-- **The dialog has no accessible name** — `<dialog>` with no `aria-labelledby` pointing
-  at the `h3` the body builds.
+- **A series could only be opened with a mouse** — the headline. `library.js` built each
+  card as a `<div>` with a click handler, `openEditor` had no other caller, and there was
+  no `tabindex` anywhere in the interface, so retention settings, exclusions and Delete
+  all sat behind a target no keyboard could reach. The card could not itself become the
+  button: it already contains buttons, and interactive elements cannot nest. The title is
+  now a real button carrying the name, the focus and an `aria-expanded` saying whether
+  the pane beside it is open; the whole-card click stays for pointers.
+- **The season caret** now has an accessible name and a live `aria-expanded`, in both
+  tree builders.
+- **The busy overlay and the sweep banner** are `role="status" aria-live="polite"`.
+- **The dialog** takes its accessible name from the heading its body builds.
 
-Already correct, checked so nobody audits them twice: the notice region is
-`role="status" aria-live="polite"`; destructive confirmations use native `showModal()`,
-so focus trapping, Escape and focus restoration come free; sidebar section heads are
-real buttons carrying `aria-expanded`; no stylesheet resets the focus ring, and the
-custom switch styles `:focus-visible` explicitly; responsive breakpoints exist at 560,
-700, 860, 900, 1100 and 1250px, including one that reflows the top bar holding Run, and
+Already correct before the audit, recorded so nobody checks them twice: the notice
+region is a polite live region; destructive confirmations use native `showModal()`, so
+focus trapping, Escape and focus restoration come free; sidebar section heads are real
+buttons carrying `aria-expanded`; no stylesheet resets the focus ring, and the custom
+switch styles `:focus-visible` explicitly; responsive breakpoints exist at 560, 700,
+860, 900, 1100 and 1250px, including one that reflows the top bar holding Run, and
 `prefers-reduced-motion` is honoured.
 
 Fix concrete state failures in the existing modules. Do not expand the frontend

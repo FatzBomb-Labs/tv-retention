@@ -26,7 +26,9 @@ function dialog(title, buildBody, onOk, okLabel) {
   const box = $('tvr-dialog');
   const body = $('tvr-dialog-body');
   const cancel = box.querySelector('button[value="cancel"]');
-  body.replaceChildren(el('h3', { textContent: title }));
+  // The dialog's aria-labelledby points here, so every dialog is announced by its
+  // own title rather than as an unnamed modal.
+  body.replaceChildren(el('h3', { id: 'tvr-dialog-title', textContent: title }));
   $('tvr-dialog-extra').replaceChildren();
   $('tvr-dialog-ok').disabled = false;
   const context = buildBody(body);

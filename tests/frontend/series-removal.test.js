@@ -36,6 +36,8 @@ class FakeElement {
     this.returnValue = '';
   }
 
+  setAttribute(name, value) { (this.attributes ||= {})[name] = String(value); }
+  getAttribute(name) { return (this.attributes || {})[name] ?? null; }
   append(...nodes) { nodes.forEach((node) => { if (node != null) this.children.push(node); }); }
   replaceChildren(...nodes) { this.children = [...nodes]; }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }

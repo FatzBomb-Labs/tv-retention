@@ -4,10 +4,10 @@ The current gate result and what it does not cover. Per-change history is in git
 file records only what is true now. Never quote a test count from memory — read it here,
 or re-run the gate.
 
-## Current gate — 2026-09-20
+## Current gate — 2026-09-21
 
-Authoritative Linux host gate on `fatzserver-host`: **650 Python tests in 9.574s** (1
-skipped — this host's trimmed zone database lacks `America/Detroit`) and **34 frontend
+Authoritative Linux host gate on `fatzserver-host`: **650 Python tests in 9.861s** (1
+skipped — this host's trimmed zone database lacks `America/Detroit`) and **35 frontend
 tests**, `All required checks passed`, exit code `0`. Worker imports and shipped-module
 syntax checks passed.
 
@@ -15,6 +15,49 @@ Down from 741: the `test_build.py` trim removed 100 assertions about appearance,
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
+
+## Accessibility, scoped to primary actions — 2026-09-21
+
+PLAN had carried "the accessibility and responsive-layout fixes" as an unnamed
+placeholder through several passes. Audited and closed; four findings, all fixed.
+
+The one that mattered: a series could only be opened with a pointer. `library.js` built
+each card as a `<div>` with a click handler, `openEditor` had no other caller anywhere,
+and there was no `tabindex` in the interface at all — so retention settings, exclusions,
+the monitoring controls and Delete sat behind a target no keyboard could reach. It is
+worth recording how that happened, because it was not carelessness: an earlier change
+deliberately removed a read-only card's Edit button as a step that "only ever had one
+answer," which was right for pointers and silently took away the only focusable way in.
+
+The card could not simply become a button — it already contains buttons, and interactive
+elements cannot nest. The title is now the control, as in any card with a linked
+heading: it carries the accessible name, takes focus, and reports `aria-expanded` for
+the pane it opens. The whole-card click is unchanged for pointer users, and its handler
+already stood aside for anything landing on a real control, so the two do not collide.
+
+The other three were small: the season caret had no accessible name and no expanded
+state (two instances of one control); the busy overlay and sweep banner announced
+nothing; the dialog had no accessible name.
+
+Recorded so it is not re-audited — already correct beforehand: the notice region is a
+polite live region, destructive confirmations use native `showModal()` and inherit focus
+trapping, Escape and focus restoration, sidebar heads are real buttons with
+`aria-expanded`, nothing resets the focus ring, the custom switch styles
+`:focus-visible`, six responsive breakpoints exist including one reflowing the top bar
+that holds Run, and `prefers-reduced-motion` is honoured. The placeholder had implied
+considerably more outstanding work than actually existed.
+
+Two things the work turned up on the way:
+
+- The CSS nearly repeated a bug the suite already guards against. `font: inherit` on the
+  new title button would have reset the `line-height` its two-line clamp is drawn
+  against — exactly what `test_buttons_do_not_inherit_the_font_shorthand` exists to
+  prevent, just in a new rule its regex did not reach. That test now checks every
+  `#tv-retention button…` rule rather than only the bare one.
+- Three frontend harnesses had `FakeElement`s with no `setAttribute`, and one with no
+  `classList`, so production code that legitimately uses both could not be exercised
+  there. Added for real rather than stubbed to no-ops: a `classList.add` that silently
+  discards cannot tell a selected card from a plain one.
 
 ## Graceful shutdown and mid-run interruption recovery — 2026-09-21
 

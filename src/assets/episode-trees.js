@@ -54,12 +54,19 @@ function exclusionTree(seasons, current) {
     const box = el('input', { type: 'checkbox', className: 'tvr-pick',
                               checked: wholeSeason, disabled: locked });
     const count = el('span', { className: 'tvr-tree-count' });
-    const caret = el('button', { type: 'button', className: 'tvr-tree-caret' },
+    // Named and stateful: an icon alone reads as an unlabelled button, and the caret
+    // glyph says open-or-closed to the eye and to nothing else.
+    const caretName = season.season === 0 ? 'Specials' : `Season ${season.season}`;
+    const caret = el('button', { type: 'button', className: 'tvr-tree-caret',
+                                 title: `Show episodes in ${caretName}` },
                      [el('i', { className: 'fa fa-caret-right' })]);
+    caret.setAttribute('aria-label', `Show episodes in ${caretName}`);
+    caret.setAttribute('aria-expanded', 'false');
     const list = el('div', { className: 'tvr-tree-episodes', hidden: true });
     caret.addEventListener('click', (event) => {
       event.preventDefault();
       list.hidden = !list.hidden;
+      caret.setAttribute('aria-expanded', String(!list.hidden));
       caret.firstChild.className = `fa fa-caret-${list.hidden ? 'right' : 'down'}`;
     });
     const header = el('label', { className: 'tvr-tree-row tvr-tree-season',
@@ -228,8 +235,14 @@ function monitorTree(seasons, options) {
 
     const box = el('input', { type: 'checkbox', className: 'tvr-pick' });
     const count = el('span', { className: 'tvr-tree-count' });
-    const caret = el('button', { type: 'button', className: 'tvr-tree-caret' },
+    // Named and stateful: an icon alone reads as an unlabelled button, and the caret
+    // glyph says open-or-closed to the eye and to nothing else.
+    const caretName = season.season === 0 ? 'Specials' : `Season ${season.season}`;
+    const caret = el('button', { type: 'button', className: 'tvr-tree-caret',
+                                 title: `Show episodes in ${caretName}` },
                      [el('i', { className: 'fa fa-caret-right' })]);
+    caret.setAttribute('aria-label', `Show episodes in ${caretName}`);
+    caret.setAttribute('aria-expanded', 'false');
     const list = el('div', { className: 'tvr-tree-episodes', hidden: true });
     const header = el('label', { className: 'tvr-tree-row tvr-tree-season' }, [
       box, el('span', { textContent: season.season === 0 ? 'Specials' : `Season ${season.season}` }), count,
@@ -237,6 +250,7 @@ function monitorTree(seasons, options) {
     caret.addEventListener('click', (event) => {
       event.preventDefault();
       list.hidden = !list.hidden;
+      caret.setAttribute('aria-expanded', String(!list.hidden));
       caret.firstChild.className = `fa fa-caret-${list.hidden ? 'right' : 'down'}`;
     });
     const wrap = el('div', { className: 'tvr-tree-season-wrap' },

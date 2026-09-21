@@ -1,6 +1,6 @@
 <!-- Anything that stops work sits above everything, including the chrome: a message about
      the array being down belongs over the page, not inside it. -->
-<div id="tvr-checking" class="tvr-banner" hidden></div>
+<div id="tvr-checking" class="tvr-banner" role="status" aria-live="polite" hidden></div>
 
 <!-- Three zones rather than two ends: what this is on the left, what needs attention in
      the middle, what you can do about it on the right. -->
@@ -462,6 +462,6 @@
 </main>
 </div>
 
-<dialog id="tvr-dialog" class="tvr-dialog"><form method="dialog"><div id="tvr-dialog-body"></div>
+<dialog id="tvr-dialog" class="tvr-dialog" aria-labelledby="tvr-dialog-title"><form method="dialog"><div id="tvr-dialog-body"></div>
 <menu class="tvr-dialog-actions"><span id="tvr-dialog-extra"></span><span class="tvr-spacer"></span><button value="cancel" class="tvr-secondary">Cancel</button><button value="ok" id="tvr-dialog-ok" class="tvr-primary">Save</button></menu></form></dialog>
-<div id="tvr-busy" class="tvr-busy" hidden><div class="tvr-busy-box"><span class="tvr-spinner"></span><span id="tvr-busy-text">Working…</span></div></div>
+<div id="tvr-busy" class="tvr-busy" role="status" aria-live="polite" hidden><div class="tvr-busy-box"><span class="tvr-spinner"></span><span id="tvr-busy-text">Working…</span></div></div>

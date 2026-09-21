@@ -30,6 +30,17 @@ class FakeElement {
     this.style = { setProperty() {} };
   }
 
+  get classList() {
+    const self = this;
+    return {
+      add(...names) { self.className = [...new Set([...self.className.split(' ').filter(Boolean), ...names])].join(' '); },
+      remove(...names) { self.className = self.className.split(' ').filter((c) => c && !names.includes(c)).join(' '); },
+      toggle(name, on) { on ? this.add(name) : this.remove(name); },
+      contains(name) { return self.className.split(' ').includes(name); },
+    };
+  }
+  setAttribute(name, value) { (this.attributes ||= {})[name] = String(value); }
+  getAttribute(name) { return (this.attributes || {})[name] ?? null; }
   append(...nodes) { nodes.forEach((node) => { if (node != null) this.children.push(node); }); }
   replaceChildren(...nodes) { this.children = [...nodes]; }
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
@@ -151,4 +162,39 @@ test('the retry control asks again, once, and can succeed', async () => {
   assert.equal(seriesCalls, 2, 'the explicit retry is the one thing allowed to ask again');
   assert.ok(!collectText(elements.get('tvr-rules')).includes('unreachable'),
     'a successful retry clears the failure rather than leaving it on screen');
+});
+
+test('a series can be opened from the keyboard, not only by clicking the card', async () => {
+  // The card is a div with a click handler, and openEditor has no other caller, so for a
+  // long time retention settings, exclusions and Delete sat behind a target nothing but
+  // a pointer could reach. The card cannot itself be the button -- it already contains
+  // buttons, and interactive elements cannot nest -- so the title carries the name and
+  // the focus, the way a card with a linked heading normally does.
+  const elements = installFakeDom();
+  const createLibrary = await loadCreateLibrary();
+  const opened = [];
+  const series = { series_id: 7, instance_id: 'i1', title: 'Reachable Show', sort_title: 'reachable show' };
+  const library = createLibrary(minimalDeps({
+    api: async (action) => (action === 'series' ? { series: [series] } : {}),
+    openEditor: (rule, chosen) => opened.push(chosen || rule),
+  }));
+
+  library.renderLibrary();
+  await flush();
+
+  const buttons = [];
+  (function walk(node) {
+    if (!node) return;
+    if (node.tagName === 'BUTTON') buttons.push(node);
+    (node.children || []).forEach(walk);
+  }(elements.get('tvr-rules')));
+
+  const title = buttons.find((button) => button.textContent === 'Reachable Show');
+  assert.ok(title, 'the title is a real button, so it can be tabbed to and activated');
+  assert.equal(title.getAttribute('aria-expanded'), 'false',
+    'it says whether the pane it controls is open');
+
+  title.click();
+  await flush();
+  assert.equal(opened.length, 1, 'activating the title opens the series');
 });

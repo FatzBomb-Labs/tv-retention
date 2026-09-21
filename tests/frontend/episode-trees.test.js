@@ -32,6 +32,8 @@ class FakeElement {
     this.listeners = {};
   }
 
+  setAttribute(name, value) { (this.attributes ||= {})[name] = String(value); }
+  getAttribute(name) { return (this.attributes || {})[name] ?? null; }
   append(...nodes) { nodes.forEach((node) => { if (node != null) this.children.push(node); }); }
 
   addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
