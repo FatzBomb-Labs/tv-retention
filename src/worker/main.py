@@ -2274,6 +2274,27 @@ def cli() -> int:
     return 0
 
 
+# The worker loop's own account of itself. `alive` is not in here on purpose: a dead
+# thread cannot report that it died, so the front door reads thread state directly and
+# only asks this for what the loop alone knows — whether it is getting anywhere.
+#
+# A tick does not raise for a Sonarr that is merely unreachable; `_tick_locked` suppresses
+# that. What reaches here is a local fault that stops the worker functioning at all, which
+# is why consecutive failures are worth reporting rather than smoothing over.
+WORKER = {'ticks': 0, 'failures': 0, 'last_error': ''}
+# Three in a row at a thirty-second tick is a minute and a half of getting nowhere: long
+# enough not to flap on one bad read, short enough that an operator looking at the
+# container learns the truth from it.
+UNREADY_AFTER_FAILURES = 3
+
+
+def worker_progress() -> dict:
+    """What the loop knows about itself, for the readiness endpoint."""
+    return {'ticks': WORKER['ticks'], 'failures': WORKER['failures'],
+            'last_error': WORKER['last_error'],
+            'stuck': WORKER['failures'] >= UNREADY_AFTER_FAILURES}
+
+
 def serve_forever() -> int:
     """The process that stays alive: decide what is due, sleep, decide again.
 
@@ -2285,11 +2306,30 @@ def serve_forever() -> int:
     Nothing is expensive unless something is due: the common case is reading two small
     files and comparing timestamps.
     """
-    log_line(load_settings(), 'info', 'worker started')
+    # Inside the guard, not above it. This reads the settings, and reading them raises on
+    # a settings file that will not parse — so a corrupt document used to kill this thread
+    # before the loop it protects had started. The thread is a daemon, so the process
+    # carried on serving and the container went on reporting itself healthy with nothing
+    # deciding the schedule behind it, and fixing the file changed nothing until someone
+    # restarted the container. Surviving means the next tick picks the repair up.
+    with contextlib.suppress(Exception):
+        log_line(load_settings(), 'info', 'worker started')
     while True:
         try:
             tick()
+            WORKER['ticks'] += 1
+            WORKER['failures'] = 0
+            WORKER['last_error'] = ''
         except Exception as error:  # noqa: BLE001 - a bad tick must never stop the loop
+            WORKER['failures'] += 1
+            WORKER['last_error'] = str(error)
+            # The log lives in the state directory, and the settings say where that is —
+            # so the failures most worth reporting are exactly the ones that cannot be
+            # logged. stderr is the container's own channel and needs nothing to work,
+            # which is why the first one goes there: surviving a broken configuration
+            # silently is not better than dying loudly, it is only quieter.
+            if WORKER['failures'] == 1:
+                print(f'tv-retention: tick failed: {error}', file=sys.stderr, flush=True)
             with contextlib.suppress(Exception):
                 log_line(load_settings(), 'error', f'tick failed: {error}')
         time.sleep(TICK_SECONDS)

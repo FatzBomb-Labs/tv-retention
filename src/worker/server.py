@@ -124,6 +124,10 @@ def startup_error() -> str:
 # operator: nothing to persist, nothing to leak, and no session store to invalidate.
 _sessions: dict[str, dict] = {}
 _lock = threading.Lock()
+# Set by serve() once the worker is running. The request handler reads it to answer
+# /health: thread aliveness is exact and cheap, and unlike tick recency it cannot be
+# made to look dead by a long retention run legitimately holding the loop.
+_worker_thread = None
 # Enough to make guessing over a LAN pointless without maintaining per-address state.
 _failures = 0
 
@@ -468,7 +472,26 @@ class Handler(BaseHTTPRequestHandler):
         route, query = parsed.path, urllib.parse.parse_qs(parsed.query)
 
         if route == '/health':
-            return self.send_json(200, {'ok': True})
+            # Liveness and readiness are not the same question, and this endpoint used to
+            # answer only the first: `{"ok": true}` meant the HTTP thread could answer a
+            # socket, which it can do perfectly well with the scheduler dead behind it.
+            # The worker is a daemon thread, so a corrupt settings file that killed it at
+            # startup left a container reporting itself healthy that would never run
+            # anything again. What the healthcheck is actually for is whether this thing
+            # is doing its job, and its job is the schedule.
+            # Two ways to be unwell, and they need separating. A dead thread cannot
+            # report that it died, so that is read from the thread itself. A live thread
+            # that cannot complete a tick — an unreadable settings file, say — knows it,
+            # and says so through `worker_progress`: surviving a broken configuration is
+            # better than dying of one, but only if it is not survived in silence.
+            alive = _worker_thread is not None and _worker_thread.is_alive()
+            progress = main.worker_progress() if alive else {}
+            ok = alive and not progress.get('stuck')
+            state = 'running' if ok else ('stuck' if alive else 'stopped')
+            body = {'ok': ok, 'worker': state}
+            if progress.get('last_error'):
+                body['last_error'] = progress['last_error']
+            return self.send_json(200 if ok else 503, body)
 
         if route.startswith('/assets/'):
             return self.serve_asset(route[len('/assets/'):])
@@ -659,8 +682,10 @@ def serve() -> int:
         print(problem)
         return 1
     take_the_volume()
+    global _worker_thread
     worker = threading.Thread(target=main.serve_forever, name='worker', daemon=True)
     worker.start()
+    _worker_thread = worker
     server = ThreadingHTTPServer(('', PORT), Handler)
     server.daemon_threads = True
     print(f'TV Retention listening on :{PORT}'

@@ -740,3 +740,127 @@ class GracefulShutdown(unittest.TestCase):
             self.assertLess(elapsed, 2, 'the handler must unblock it promptly, not '
                             'leave it to an external timeout')
             self.assertEqual(result.get('code'), 0)
+
+
+class Readiness(unittest.TestCase):
+    """/health answers whether this thing is doing its job, and its job is the schedule.
+
+    It used to return `{"ok": true}` unconditionally, which says only that the HTTP
+    thread can answer a socket — something it does perfectly well with the scheduler
+    dead behind it. Demonstrated against a real container before this was written: a
+    settings file that would not parse killed the worker thread at startup, and the
+    container reported `running / healthy` and served `{"ok": true}` while nothing
+    would ever be scheduled again.
+    """
+
+    def health(self, server, thread, progress=None):
+        from unittest import mock
+        captured = {}
+
+        class Fake:
+            headers = {}
+            path = '/health'
+            def send_json(self, status, body): captured['status'] = status; captured['body'] = body
+
+        default = {'ticks': 1, 'failures': 0, 'last_error': '', 'stuck': False}
+        with mock.patch.object(server, '_worker_thread', thread),                 mock.patch.object(server.main, 'worker_progress',
+                                  return_value=progress or default):
+            server.Handler.do_GET(Fake())
+        return captured
+
+    def test_a_live_worker_is_reported_ready(self):
+        import threading
+        server = load(TVR_AUTH='none')
+        running = threading.Event()
+        thread = threading.Thread(target=running.wait, daemon=True)
+        thread.start()
+        try:
+            answer = self.health(server, thread)
+            self.assertEqual(answer['status'], 200)
+            self.assertTrue(answer['body']['ok'])
+            self.assertEqual(answer['body']['worker'], 'running')
+        finally:
+            running.set()
+            thread.join(timeout=2)
+
+    def test_a_dead_worker_is_not_reported_healthy(self):
+        import threading
+        server = load(TVR_AUTH='none')
+        thread = threading.Thread(target=lambda: None, daemon=True)
+        thread.start()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive(), 'the fixture thread must actually be finished')
+
+        answer = self.health(server, thread)
+        self.assertEqual(answer['status'], 503,
+                         'a dead scheduler must not answer 200 — the healthcheck reads the status')
+        self.assertFalse(answer['body']['ok'])
+        self.assertEqual(answer['body']['worker'], 'stopped')
+
+    def test_no_worker_at_all_is_not_reported_healthy(self):
+        server = load(TVR_AUTH='none')
+        answer = self.health(server, None)
+        self.assertEqual(answer['status'], 503)
+        self.assertFalse(answer['body']['ok'])
+
+    def test_a_worker_that_cannot_complete_a_tick_is_not_ready(self):
+        """Alive is not the same as working.
+
+        A settings file that will not parse leaves the loop running and getting nowhere.
+        Before this, surviving that was indistinguishable from being fine: the container
+        reported healthy and said nothing, which is quieter than the crash it replaced
+        but no more use.
+        """
+        import threading
+        server = load(TVR_AUTH='none')
+        running = threading.Event()
+        thread = threading.Thread(target=running.wait, daemon=True)
+        thread.start()
+        try:
+            answer = self.health(server, thread, {
+                'ticks': 0, 'failures': 3, 'stuck': True,
+                'last_error': 'Settings file is unreadable',
+            })
+            self.assertEqual(answer['status'], 503)
+            self.assertFalse(answer['body']['ok'])
+            self.assertEqual(answer['body']['worker'], 'stuck')
+            self.assertIn('unreadable', answer['body']['last_error'],
+                          'the reason belongs in the answer, not only in a log it cannot write')
+        finally:
+            running.set()
+            thread.join(timeout=2)
+
+    def test_one_bad_tick_does_not_make_the_container_unhealthy(self):
+        # Flapping on a single failed read would train an operator to ignore this.
+        import threading
+        server = load(TVR_AUTH='none')
+        running = threading.Event()
+        thread = threading.Thread(target=running.wait, daemon=True)
+        thread.start()
+        try:
+            answer = self.health(server, thread, {
+                'ticks': 5, 'failures': 1, 'stuck': False, 'last_error': 'one bad read',
+            })
+            self.assertEqual(answer['status'], 200)
+            self.assertTrue(answer['body']['ok'])
+        finally:
+            running.set()
+            thread.join(timeout=2)
+
+
+class WorkerSurvivesBadSettings(unittest.TestCase):
+    def test_the_startup_log_cannot_kill_the_loop(self):
+        """It reads the settings, and reading them raises on a file that will not parse.
+
+        Above the guard, a corrupt document killed the worker thread before the loop it
+        protects had started — and because the thread is a daemon, the process carried on
+        serving. Fixing the file then changed nothing until someone restarted the
+        container, because there was no longer a loop to notice.
+        """
+        source = (context.ROOT / 'src' / 'worker' / 'main.py').read_text(encoding='utf-8')
+        block = source.split('def serve_forever()')[1]
+        started = block.index("'worker started'")
+        loop = block.index('while True:')
+        self.assertLess(started, loop, 'the startup log still belongs before the loop')
+        guard = block.rindex('contextlib.suppress', 0, started)
+        self.assertLess(guard, started, 'the startup log must sit inside a suppressed block')

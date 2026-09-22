@@ -102,11 +102,27 @@ checkpoints correctly (`in-progress`, not falsely `done`) and a subsequent run r
 and completes without duplicating the deletion or losing the unmonitor that already
 succeeded. See VALIDATION.
 
-Still unverified, and none of it is shown by a container that merely stays up:
+Verified 2026-09-21, each against a real container rather than by reading the code:
 
-- `UMASK`, and permissions on an optional separate backup mount;
-- readiness as distinct from liveness, and how a failed worker is reported;
-- startup refusing missing or too-short credentials.
+- **`UMASK`** reaches the files the app creates — `022` gives 644/755 and `027` gives
+  640/750 under `/config`. The mount point itself keeps the host's mode, which is
+  correct: the app does not own it.
+- **An unwritable backup mount** fails closed and says so. `backup.create` refuses with
+  "Backup destination is not writable", writes nothing and leaves no partial archive,
+  and a `backup-unavailable` alert appears in Status without anyone having to try a
+  backup first. Checked as uid 99: the first attempt ran under `docker exec`, which is
+  root, and wrote the archive happily — a false pass worth naming.
+- **Startup refuses a missing login** with the full message and exit 1, refuses a
+  password under eight characters, and starts with `TVR_AUTH=none`.
+- **Readiness as distinct from liveness** — this one needed a fix, and found a real
+  failure behind it. `/health` returned `{"ok": true}` unconditionally, which says only
+  that the HTTP thread can answer a socket; the worker is a daemon thread, so it could
+  be dead behind a container reporting itself healthy. Demonstrated: a settings file
+  that would not parse killed the worker at startup and the container stayed `healthy`
+  forever. Now the loop survives a document it cannot read, reports itself stuck after
+  three failed ticks, and `/health` answers 503 with the reason — so the container goes
+  unhealthy (measured: t+180s) instead of lying, and recovers on its own when the file
+  is repaired, without a restart (measured: 503 → 200). See VALIDATION.
 
 Keep the standard-library design. No framework, no database.
 

@@ -6,7 +6,7 @@ or re-run the gate.
 
 ## Current gate — 2026-09-21
 
-Authoritative Linux host gate on `fatzserver-host`: **650 Python tests in 9.887s** (1
+Authoritative Linux host gate on `fatzserver-host`: **656 Python tests in 9.900s** (1
 skipped — this host's trimmed zone database lacks `America/Detroit`) and **36 frontend
 tests**, `All required checks passed`, exit code `0`. Worker imports and shipped-module
 syntax checks passed.
@@ -15,6 +15,55 @@ Down from 741: the `test_build.py` trim removed 100 assertions about appearance,
 flooring migration at version 13 removed the tests for twelve upgrade steps no surviving
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
+
+## Container verification: UMASK, backup mounts, credentials, readiness — 2026-09-21
+
+PLAN §2's remaining items, each checked against a real container rather than by reading
+the code. Three passed as they stood; the fourth found a real failure.
+
+**`UMASK` reaches the files the app creates.** `022` gives 644/755 under `/config`,
+`027` gives 640/750. The mount point itself keeps the host's mode, which is right — the
+app does not own it.
+
+**An unwritable backup mount fails closed and says so.** `backup.create` refuses with
+"Backup destination is not writable", writes nothing and leaves no partial archive, and
+Status carries a `backup-unavailable` alert without anyone having to attempt a backup
+first. Worth recording how nearly this was a false pass: the first attempt ran through
+`docker exec`, which is root, and wrote the archive happily. Re-run as uid 99 — the
+identity the worker actually has — it refused. A test that runs as the wrong user proves
+nothing about the right one.
+
+**Startup refuses a missing login** with its full message and exit 1, refuses a password
+under eight characters, and starts with `TVR_AUTH=none`.
+
+**Readiness was not distinct from liveness, and the gap was real.** `/health` returned
+`{"ok": true}` unconditionally: it proved the HTTP thread could answer a socket, which
+it does perfectly well with the scheduler dead behind it. The worker is a daemon thread,
+and `log_line(load_settings(), ...)` sat *outside* its try — so a settings file that
+would not parse killed it before the loop started. Demonstrated on a real container:
+`running / healthy`, `/health` 200, `worker started` never logged, nothing scheduled
+ever again. Only `docker logs` showed the traceback.
+
+Fixing it took two passes, and the first was wrong in an instructive way. Moving the
+startup log inside the guard kept the thread alive — but it also swallowed the only
+signal there had been, leaving a container that was healthy, silent, and useless. That
+is quieter than the crash it replaced, not better. So the loop now also counts what it
+is getting done:
+
+- a tick that fails increments a counter and prints the reason to stderr the first time,
+  because the log lives in the state directory and the settings say where that is — the
+  failures most worth reporting are exactly the ones that cannot be logged;
+- three consecutive failures (ninety seconds at a thirty-second tick) marks the worker
+  stuck, long enough not to flap on one bad read;
+- `/health` answers 503 with `worker: "stuck"` and the reason, and 200 only when the
+  thread is alive *and* getting somewhere.
+
+Measured end to end on a real container with a corrupt settings file: `/health` 503 with
+the parse error immediately, `tick failed:` in `docker logs`, and Docker's own health
+going `healthy → unhealthy` at t+180s (three failed ticks, then three failed probes).
+Then, with the file repaired and **no restart**, `/health` returned to 200 within a
+tick. The recovery is the point of keeping the thread alive, so it is measured rather
+than asserted.
 
 ## Restore reload through a background refresh — 2026-09-21
 
