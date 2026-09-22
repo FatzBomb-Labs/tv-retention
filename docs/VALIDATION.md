@@ -194,6 +194,15 @@ fix. It mocks `signal.signal` rather than sending a real OS signal to the test p
 real SIGTERM to the shared test runner, mistimed, terminates the whole gate rather than
 failing one test, which would be a worse outcome than the bug it is meant to catch.
 
+## Build 31 deployment — 2026-09-22
+
+Replaced `dev-build30` with `dev-build31`: the readiness work. Config already at version
+14, so nothing migrated. Preflight against a `/tmp` copy, `--rm`: version 14, 32 rules,
+4 presets, Test Mode on, schedule off, integrity clean. Stop took **0.37s**. After
+replacement: healthy, worker uid 99, posture and timezone unchanged, and `/health` now
+answers `{"ok": true, "worker": "running"}` rather than a bare `{"ok": true}`. Rollback
+is `tv-retention:rollback` (build 30) plus `pre-build31-<timestamp>.tar.gz`.
+
 ## Build 30 deployment — 2026-09-21
 
 Replaced `dev-build29` with `dev-build30`: the stale-sync guard. Config already at
