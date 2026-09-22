@@ -16,6 +16,75 @@ flooring migration at version 13 removed the tests for twelve upgrade steps no s
 document can reach. No behavioral coverage was removed; the count has since risen again
 with the scheduler, integrity and UI-state work.
 
+## Read-only smoke on the target — 2026-09-22
+
+PLAN §3 step 4, against the running demo instance (`tv-retention-demo`, `dev-build31`),
+config at `/mnt/user/appdata/tv-retention`, `America/Detroit`, Test Mode on, schedule off.
+Read-only throughout: no save, no rule, no monitoring change, no recycle-bin change, no API
+key, no restore and no run. The evidence for the last of those is the state directory itself
+— `journal.jsonl`, `run-intent.json` and `state.json` all still carry their Sep 20 17:43
+mtime. The page's own background refresh did rewrite the local cache and health files,
+which is the reading path doing its job rather than an external write.
+
+- **Login.** `/` answers `303 → /login` unauthenticated, and the demo credentials sign in
+  and land on the shell.
+- **Version and build display.** The banner reads `v0.3.0` beside a `TEST MODE` badge, and
+  Status carries all three — `0.3.0 · 31`, `built 9/22/2026`. The banner stays on the
+  semantic version alone.
+- **Assets.** One digest (`1490c09dae12`) across every script and stylesheet, so a module
+  graph cannot straddle releases. `app.js` (19146 B), `app.css` (66314 B) and `icons.css`
+  (6988 B) serve `200`; a missing file inside a held digest and a digest the server does
+  not hold are both `404` — the second refused rather than served from the current release
+  — and the non-public extensions (`interface.html`, `app.js.map`) are `404`.
+- **Browser refresh.** A reload re-establishes the session with no login prompt and
+  re-runs a background sync; the library repaints from the cached reading.
+- **Ages.** The Sonarr sync reads `just now` under a `Cached reading` label, and the
+  connections row shows the live instance (`Sonarr 4.0.19.3009 · 3019 series`).
+- **Config and state permissions.** `/config` and `/config/state` are `755`, owned by
+  uid 99, gid `users`; Status reports `Config readable: yes` and `State writable: yes`.
+  Nothing is root-owned and no manual `chown` is needed.
+
+Not done as written: step 4 asks for a *copied* config under `/tmp`, and this ran against
+the instance's own config. It therefore establishes the read paths and the permissions of
+the real volume, not isolation. No write path was exercised.
+
+### The target Sonarr has no recycle bin
+
+The Status pane carries a live `Sonarr has no recycle bin` alert — "Sonarr-Series deletes
+files outright; nothing is recoverable". It is correct, and it was checked at the source
+rather than believed: `GET /api/v3/config/mediamanagement` on that instance returns
+`recycleBin: ""`, with `recycleBinCleanupDays: 7` and `deleteEmptyFolders: true`.
+
+Two things follow. PLAN §3's recycle-bin item cannot be closed on recollection — on this
+instance deletions are permanent, and the 2026-09-20 live run's 2705 MiB was not
+recoverable, which nothing recorded at the time. And Unraid's own per-share recycle bin
+does not cover it either: that intercepts deletions over SMB, while Sonarr runs in a
+container unlinking files directly.
+
+### Mode bits on this volume are wider than the code asks for
+
+Measured and not explained, so recorded as measured: the JSON files under `/config`
+(`settings.json`, `catalogue.json`, `health.json`, `jobs.json`, `state.json`, `sync.json`,
+`tmdb-cache.json`, `run-intent.json`) are `0666`, while `tv-retention.log` and
+`journal.jsonl` are `0644`. The application contains no `chmod`, and `server.py` declares
+`0o22` as the default mask, under which the `open(..., 'w')` that `core.atomic_json` uses
+yields `0644`. The earlier `UMASK` check measured `644/755` on a fresh directory, so it
+measured the request; this volume is on Unraid's FUSE `/mnt/user` and every file on it
+carries an ACL. The cause is not established here and this is not a claim of a defect. It
+is a fact about the target that matters to anyone reading permissions off it: the mode on
+the settings document reads as group- and world-writable.
+
+### One tick counted lock contention as a failure
+
+`[ERROR] tick failed: A TV Retention run is already in progress.` at 00:25:52, then
+`sync (opened)` at 00:25:57 and a `/health` reading `{"ok": true, "worker": "running"}`.
+The collision cleared on its own, so nothing was stuck. Worth naming because of how the
+count works: any exception out of `tick()` increments `WORKER['failures']`, and three
+consecutive failures mark the worker stuck and take the container unhealthy — so three
+ticks in a row landing on a legitimate lock holder would do that to a container that is
+working correctly. `actions.py` already tolerates that exact message on the action path.
+Not reproduced; recorded so it is not rediscovered later from a health blip.
+
 ## Container verification: UMASK, backup mounts, credentials, readiness — 2026-09-21
 
 PLAN §2's remaining items, each checked against a real container rather than by reading
@@ -376,15 +445,29 @@ No live Sonarr mutation, media access or deletion occurred.
 
 ## Evidence still missing
 
-One bounded live run has now exercised the deletion path end to end (above). It did not
-cover shared multi-episode files, recycle-bin recovery, partial failure or restart
-recovery during a run, and it says nothing about whether the confirmation text matched
-the plan.
+One bounded live run has now exercised the deletion path end to end (above). Restart
+recovery interrupted mid-run has since been covered against a synthetic Sonarr, and a
+read-only smoke now covers the browser read paths and the volume's permissions (above).
 
-Still without practical evidence: monitoring-write correctness beyond that run, real
+Still without practical evidence: monitoring-write correctness beyond that one run, real
 provider behaviour with live keys, API-key lifecycle, backup and restore against a real
-configuration, `UMASK` and backup-mount permissions, dropped-privilege restore, readiness
-as distinct from liveness, real-browser workflows and large-library performance.
+configuration, and any browser *write* path — a save, a queued removal, a run. Large-library
+performance has a reading, not a measurement: 3019 series render in the list at 385 shown,
+and nothing has timed the interaction.
 
-Isolated contract tests do not replace those checks. Keep schedules off and Test Mode on,
+Two items are now *known* rather than missing, and both want a decision rather than a test:
+
+- **Recycle-bin recovery is not available on the target.** Sonarr's `recycleBin` is empty,
+  so deletions there are permanent and the earlier run's 2705 MiB was not recoverable.
+  Configure Sonarr's recycle bin or accept permanent deletion — but this item cannot be
+  recorded as verified.
+- **Shared multi-episode files need no live evidence.** A file is judged by its latest
+  member (`_order_key` orders by effective date, with season and episode number only
+  breaking ties), and a file with any undated or future-dated member votes `unknown`, which
+  keeps it under both `combine` modes — no retention mode turns missing information into
+  permission to delete. `tests/test_shared_files.py` exercises that through the real Sonarr
+  mapping. The one caveat is the documented one: with `retention.allow_estimated_dates` on,
+  an episode with no air date is dated by its import instead.
+
+Isolated contract tests do not replace live checks. Keep schedules off and Test Mode on,
 and follow the acceptance ladder in [PLAN.md](PLAN.md) before any live write.

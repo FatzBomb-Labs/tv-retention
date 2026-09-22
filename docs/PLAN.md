@@ -82,7 +82,7 @@ switch styles `:focus-visible` explicitly; responsive breakpoints exist at 560, 
 Fix concrete state failures in the existing modules. Do not expand the frontend
 architecture.
 
-### 2. Container verification
+### 2. Container verification — closed
 
 Shown incidentally by the build 23 deployment, on the running instance:
 
@@ -124,6 +124,11 @@ Verified 2026-09-21, each against a real container rather than by reading the co
   unhealthy (measured: t+180s) instead of lying, and recovers on its own when the file
   is repaired, without a restart (measured: 503 → 200). See VALIDATION.
 
+Closed on 2026-09-22 by the read-only smoke (step 4 of §3) on the running instance: login
+and its refusal, the version/build display, one asset digest with unheld digests refused,
+browser refresh, sync ages and config/state permissions. It found a recycle bin that is
+not there — see §3.
+
 Keep the standard-library design. No framework, no database.
 
 ### 3. Acceptance
@@ -156,8 +161,16 @@ schedules off when finished.
 Done in part: a bounded run on 2026-09-20 (2 planned, 2 deleted, 2705 MiB, 0 errors,
 `test_mode: false` in the journal — see VALIDATION) exercised the deletion path itself.
 Restart recovery interrupted mid-run is now also covered, against a synthetic Sonarr
-rather than the operator's own library — see §2. Not covered by either: shared
-multi-episode files and recycle-bin recovery, both of which need the real library.
+rather than the operator's own library — see §2.
+
+Shared multi-episode files need no live evidence and should stop being carried as a gap: a
+file is judged by its latest member, and any undated or future-dated member keeps it, which
+`tests/test_shared_files.py` exercises through the real mapping.
+
+Recycle-bin recovery is not a gap in coverage but a gap in the target. Sonarr's
+`recycleBin` is empty on the instance this points at, so a deletion there is permanent and
+the 2705 MiB above was not recoverable. That needs a decision — configure it, or accept
+permanent deletion — before any further live run.
 
 **4. Read-only smoke on the target.** Copied config under `/tmp`, schedules off, Test Mode
 on. Verify login, version/build display, asset loading and browser refresh, library and
@@ -165,21 +178,29 @@ cache ages, read-only Sonarr refreshes, and config/state permissions. Do not sav
 queue removals, run retention, change monitoring, alter the recycle bin, change API keys
 or restore during this step.
 
+Done 2026-09-22 against the running instance, read-only, schedules off and Test Mode on.
+One deviation: it ran against the instance's own config rather than a `/tmp` copy, so it
+establishes the read paths and the real volume's permissions rather than isolation. See
+VALIDATION for what it found.
+
 Docker is unavailable on the Windows development machine, so 2-4 run on the Linux host.
 
 ## Ship criterion
 
-The safety list holds, §1 is fixed (it is), the container starts non-root and survives a
-restart (it does), and one real run against one real show does what it said it would (it
-did, 2026-09-20). What is left of 1.0 is §2's remaining container checks and the two
-acceptance items that need the real library.
+The safety list holds, §1 is fixed (it is), §2 is verified against a real container (it
+is), the container starts non-root and survives a restart (it does), and one real run
+against one real show does what it said it would (it did, 2026-09-20). What is left of 1.0
+is one decision rather than one piece of work: the target Sonarr has no recycle bin, so a
+deletion there is permanent. Shared multi-episode files need no live evidence.
 
 ## Explicitly unresolved
 
-- Readiness and backup-mount permissions need an image-level check; the privilege drop,
-  plain restart recovery, graceful shutdown and mid-run interruption recovery no longer do.
-- Real-browser interaction and large-library performance need practical evidence. Open a
-  browser; do not build a new frontend architecture to obtain it.
+- The target Sonarr has no recycle bin, so nothing it deletes is recoverable. Configure it
+  or accept that, deliberately — and do not run against a library whose files matter until
+  that is settled.
+- Large-library performance, and any browser *write* path — a save, a queue, a run — still
+  need practical evidence. The read paths have some now; do not build a new frontend
+  architecture to obtain the rest.
 - No live target deletion or production canary is authorized by this document.
 
 ## Out of scope
