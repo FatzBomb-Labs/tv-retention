@@ -23,7 +23,7 @@
   <DonateLink/>
   <Requires/>
   <Config Name="Application data (required)" Target="/config" Default="/mnt/user/appdata/tv-retention" Mode="rw" Description="Persistent application settings, state, and cache. Keep this host path; this is the only required volume." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tv-retention</Config>
-  <Config Name="Backup storage (optional)" Target="/backups" Default="/mnt/user/appdata/tv-retention-backups" Mode="rw" Description="Optional separate persistent folder for backup archives. If used, make this host path writable by PUID:PGID and set System → Backup to /backups." Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/tv-retention-backups</Config>
+  <Config Name="Backup storage (optional)" Target="/backups" Default="" Mode="rw" Description="Optional separate persistent folder for backup archives. Leave blank unless using external backup storage; if configured, make it writable by PUID:PGID and set System → Backup to /backups." Type="Path" Display="always" Required="false" Mask="false"></Config>
   <Config Name="Web UI port" Target="8787" Default="8787" Mode="tcp" Description="Web interface and API port" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
   <Config Name="Login username" Target="TVR_USERNAME" Default="admin" Mode="" Description="Login username" Type="Variable" Display="always" Required="true" Mask="false">admin</Config>
   <Config Name="Login password" Target="TVR_PASSWORD" Default="" Mode="" Description="Required. Choose at least 8 characters before starting the container." Type="Variable" Display="always" Required="true" Mask="true"></Config>

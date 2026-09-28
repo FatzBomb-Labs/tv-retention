@@ -53,11 +53,11 @@ listing is in beta and uses the `beta` image tag; a listing is not a readiness g
 Start with a disposable configuration and Sonarr instance, not a production library.
 
 The Unraid template stores application data under `/mnt/user/appdata/tv-retention`
-(the required `/config` mapping), exposes port 8787, and requires you to set a login
-password of at least eight characters before starting. It also offers an optional,
-separate `/backups` mapping at `/mnt/user/appdata/tv-retention-backups`; make that host
-folder writable by `PUID:PGID` (commonly `99:100` on Unraid) and set **System → Backup**
-to `/backups` to use it. The template does not mount media. Test Mode defaults on and
+(the required `/config` mapping) and exposes port 8787. Before starting, set both a login
+username and a password of at least eight characters. The optional `/backups` mapping is left empty by
+default; only set it to a separate persistent host folder if you want external backup
+storage, make that folder writable by `PUID:PGID` (commonly `99:100` on Unraid), and set
+**System → Backup** to `/backups`. The template does not mount media. Test Mode defaults on and
 schedules default off. Configure Sonarr and any provider addresses or API keys in the
 application's Settings pages after installation; they are not Docker template variables.
 The CA listing will appear in Apps search only after the repository and image are public and
