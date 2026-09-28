@@ -5,7 +5,8 @@ gate before quoting test counts or making a release decision.
 
 ## Automated gate
 
-Last recorded Linux host gate: **September 28, 2026** on `fatzserver-host`.
+Last recorded Linux host gate: **September 28, 2026** on `fatzserver-host`, rerun after
+the isolated acceptance checks were requested.
 
 - 657 Python tests ran; 1 skipped because the host lacks `America/Detroit` zone data.
 - 37 frontend tests passed.
@@ -44,14 +45,23 @@ durable execution/recovery, backup/restore contracts, scheduling, settings revis
 frontend module behavior. The Linux gate also imports worker modules and syntax-checks
 shipped modules.
 
-The scheduled-run regression checks a Sonarr sync after live writes, and the browser
-regression checks that an open page reloads the stored library when that sync advances.
-Partial Sonarr reads remain due for retry. Build 32 was built on the Linux host and its
-shipped worker and build marker checked in a network-isolated container. The running demo
-has not been replaced or checked against the fix.
+The Linux gate's fake-Sonarr fixtures cover Test Mode write boundaries, run execution,
+partial failure, process interruption/retry, recovery errors and backup/restore staging.
+The gate passed; it contacts no live Sonarr and writes only within disposable `/tmp`
+staging. Partial Sonarr reads remain due for retry. Build 32 was built on the Linux host and its
+shipped worker and build marker checked in a network-isolated container. On September 28,
+the demo was replaced with build 32 after a preflight against a config copy (32 rules,
+integrity clean, Test Mode on and schedule off in the copy). The replacement is healthy,
+the worker reports running, and the live settings were preserved as requested: Test Mode
+off and schedule on. One running container remains; rollback is build 31 plus a matching
+config archive in a root-only directory. The next scheduled run completed at 05:22:29 UTC
+on build 32 with no pending run. Its post-run Sonarr sync finished at 05:22:36 UTC with
+reason `after the run` and no errors. The already-open browser reflected the refreshed
+reading; confirmed indirectly by the operator.
 
-Still lacking practical evidence: browser write workflows, monitoring-write correctness
-beyond the bounded live run, real-provider behavior with live keys, API-key lifecycle,
-backup/restore against a real configuration, and large-library interaction timing. The
-bounded September 20 live run completed two deletions (2705 MiB) with zero errors; this is
-not broad write-path acceptance.
+Still lacking practical evidence: broader browser write workflows, monitoring-write
+correctness beyond the bounded live run, real-provider behavior with live keys, API-key
+lifecycle, and backup/restore against a real configuration. These are unverified scenarios,
+not known defects. No large-library performance issue has been reported. The bounded
+September 20 live run completed two deletions (2705 MiB) with zero errors; this is not broad
+write-path acceptance.

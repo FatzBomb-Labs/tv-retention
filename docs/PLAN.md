@@ -10,9 +10,10 @@ protection, undoable queued removals, durable run recovery, backup/restore, prov
 safety and civil-time scheduling. UI state protections and container behavior have been
 verified. The target's empty Sonarr recycle bin is accepted; deletions there are permanent.
 
-**Not approved for unattended destructive use. Keep Test Mode on and schedules off.**
-Permanent deletion is an accepted target condition, not a recovery guarantee or approval
-to run.
+The operator approved the demo's live schedule with Test Mode off. Build 32 has completed
+a scheduled run and an error-free post-run sync; do not change those live settings without
+operator approval. This is approval for the current deployment, not blanket release
+acceptance or a guarantee of recovery from permanent deletion.
 
 ## Safety requirements
 
@@ -26,17 +27,22 @@ to run.
 
 ## Remaining acceptance work
 
-1. Run focused fixtures and the Linux host gate; record its current result in
-   [VALIDATION.md](VALIDATION.md).
-2. Against isolated config and fake Sonarr, verify settings, queue, backup/restore,
-   Test Mode and restart behavior; record external requests for writes.
-3. Obtain practical evidence for browser write paths, partial-failure behavior, monitoring
-   changes, run history and byte totals. Use a throwaway series, rollback image and matching
-   config archive. Never use a production library.
-4. Measure large-library performance. Existing target reading: 3,019 series, with 385
-   displayed; interaction timing has not been measured.
-5. Keep schedules off and Test Mode on except during an explicitly bounded, approved
-   acceptance run; restore both afterward. No production canary is authorized here.
+1. Re-run focused fixtures and the Linux host gate after code changes; record the current
+   result in [VALIDATION.md](VALIDATION.md).
+2. Use isolated config and fake Sonarr for destructive failure and recovery cases that a
+   successful live run cannot establish: partial writes, Test Mode, restart and restore.
+   Record attempted external writes. Do not repeat the live run just to prove it works.
+3. The build-32 scheduled run and post-run sync succeeded, and the browser's refreshed
+   reading was confirmed afterward. No performance complaint has been reported for the
+   3,019-series target; performance measurement is not currently a release blocker.
+4. Remaining evidence gaps are broader browser write workflows, monitoring changes beyond
+   the bounded live run, and behavior with real provider credentials. These are unverified
+   scenarios, not known defects. Any further destructive acceptance exercise needs a
+   throwaway series and explicit approval; never use a production library for it.
+5. Preserve the approved demo schedule and Test Mode setting. Use Test Mode on and schedules
+   off for isolated acceptance exercises; restore the live settings only when returning
+   to the approved demo deployment. Do not authorize additional live write exercises by
+   changing this document.
 
 The target's recycle-bin setting is empty. Sonarr deletes are permanent, and Unraid's SMB
 recycle bin does not cover container-level deletes. The Status alert remains correct.
