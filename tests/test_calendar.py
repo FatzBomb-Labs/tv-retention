@@ -118,6 +118,33 @@ class Calendar(unittest.TestCase):
         self.assertEqual(runs[0][1], dt.datetime(2026, 11, 1, 5, 30,
                                                   tzinfo=dt.timezone.utc))
 
+    def test_expired_files_are_forecast_once_not_re_evaluated_on_every_schedule_day(self):
+        import actions
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings()
+            rule = settings['rules'][0]
+            rule.update(queue={'removal': None, 'fixes': []}, keep_days=2, combine='any', enabled=True,
+                        keep_episodes=None, keep_seasons=None)
+            settings['schedule'].update(enabled=True, frequency='daily', hour=12, minute=0,
+                                        timezone='Etc/UTC', test_mode=True)
+            fixture.store.save_settings(settings)
+            episodes = [{
+                'episode_id': 101, 'file_id': 50, 'has_file': True, 'series_id': 1,
+                'season': 1, 'episode': 1, 'title': 'Old episode',
+                'air_date': '2026-08-01', 'air_source': 'sonarr', 'monitored': False,
+                'path': '/tv/Fixture/old.mkv', 'size': 1000,
+            }]
+            fixture.store.store_episodes(settings, rule, episodes, {})
+
+            with patch.object(actions, 'evaluate', wraps=actions.evaluate) as evaluate_mock:
+                result = self.call(fixture, settings)
+
+            self.assertTrue(result['ok'], result)
+            forecasts = [event for event in result['events'] if event['kind'] == 'estimate']
+            self.assertEqual(len(forecasts), 1)
+            self.assertEqual(evaluate_mock.call_count, 1)
+            fixture.sonarr.assert_finished()
+
     def test_queued_actions_follow_the_schedule_but_off_schedules_project_nothing(self):
         with IsolatedWorker() as fixture:
             settings = fixture.settings()

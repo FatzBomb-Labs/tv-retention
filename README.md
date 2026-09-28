@@ -14,6 +14,7 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ### Unreleased
 
+- Improved Calendar forecast performance for large episode libraries.
 - Added **Series → Calendar** with list and month views for upcoming airings, queued actions,
   and clearly labeled estimates for scheduled retention deletions.
 - Moved the browser theme toggle into **Settings → General** and kept manual settings saves

@@ -13,6 +13,7 @@ export function createCalendar({ api }) {
   let syncedAt = '';
   let loaded = false;
   let pending = false;
+  let requestGeneration = 0;
   let mode = remembered('calendar.layout', 'list') === 'calendar' ? 'calendar' : 'list';
   let month = today().slice(0, 7);
 
@@ -85,17 +86,21 @@ export function createCalendar({ api }) {
   async function load() {
     if (pending) return;
     pending = true;
+    const generation = ++requestGeneration;
     renderCalendar();
     try {
       const data = await api('calendar', {}, '', true);
+      if (generation !== requestGeneration) return;
       events = data.events || [];
       syncedAt = data.synced_at || '';
       loaded = true;
     } catch (error) {
-      notice(`Could not read calendar: ${error.message}`, 'bad');
+      if (generation === requestGeneration) notice(`Could not read calendar: ${error.message}`, 'bad');
     } finally {
-      pending = false;
-      renderCalendar();
+      if (generation === requestGeneration) {
+        pending = false;
+        renderCalendar();
+      }
     }
   }
 

@@ -24,8 +24,8 @@ import backup
 import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
-                  describe_selectability, effective_rule, evaluate, exclusion_summary,
-                  excluded_causes, new_id, next_episode, normalise, redact, removal_target,
+                  describe_selectability, effective_date, effective_rule, evaluate, exclusion_summary,
+                  excluded_causes, excluded_episodes, new_id, next_episode, normalise, redact, removal_target,
                   validate_conditions, validate_settings, validate_text)
 from sonarr import SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
@@ -230,14 +230,38 @@ def action_calendar(settings, request):
                      'instance_id': rule.get('instance_id'), 'episode': {'season': episode.get('season'), 'number': episode.get('episode'),
                                  'title': episode.get('title') or ''}, 'detail': detail})
 
-        # Forecast a file only on its first schedule date whose evaluator result says
-        # delete. Candidate dates between runs are not deletion dates.
-        reported_files = set()
+        # Forecast is retention-specific: fixed keep windows have one possible expiry
+        # date. Evaluate there once rather than rerunning the full plan for every schedule
+        # date across a six-week window. Rank-based keep rules do not expire with time.
+        keep_days = active.get('keep_days')
+        if not keep_days or not scheduled_runs:
+            continue
+        candidates_by_file = {}
+        excluded = excluded_episodes(episodes, active, settings)
+        for episode in episodes:
+            if not episode.get('has_file') or not episode.get('file_id') or not episode.get('path'):
+                continue
+            if episode.get('episode_id') in excluded:
+                continue
+            candidates_by_file.setdefault(episode['file_id'], []).append(episode)
+        first_forecast = scheduled_runs[0][1]
+        expiry_dates = {}
+        for file_id, members in candidates_by_file.items():
+            dates = [effective_date(member, bool((settings.get('retention') or {}).get('allow_estimated_dates', True)))[0]
+                     for member in members]
+            if not dates or any(date is None or date > first_forecast.date() for date in dates):
+                continue
+            expiry_dates[file_id] = max(dates) + dt.timedelta(days=int(keep_days) + 1)
         for run_day, forecast_at in scheduled_runs:
+            due_ids = [file_id for file_id, expiry in expiry_dates.items()
+                       if run_day >= expiry and any(day >= expiry for day, _ in scheduled_runs)]
+            if not due_ids:
+                continue
             planned = evaluate(episodes, active, settings, now=forecast_at)
+            allowed = set(due_ids)
             for candidate in planned['delete']:
                 file_id = candidate.get('file_id')
-                if not candidate.get('has_file') or not file_id or file_id in reported_files:
+                if file_id not in allowed:
                     continue
                 title = rule.get('series_title') or rule.get('path') or 'Retention candidate'
                 episode_detail = {'season': candidate.get('season'),
@@ -247,7 +271,9 @@ def action_calendar(settings, request):
                      'title': title, 'instance_id': rule.get('instance_id'),
                      'episode': episode_detail,
                      'detail': f'Possible retention deletion based on cached data read {fetched_at or "at an unknown time"}; exclusions and evaluator protections were applied, but Sonarr state may change before the scheduled run.'})
-                reported_files.add(file_id)
+                expiry_dates.pop(file_id, None)
+            if not expiry_dates:
+                break
 
     # Series-level nextAiring is the broadest cache and may be absent for unmanaged
     # catalogues. Never fetch episodes here: no calendar request should block on Sonarr.

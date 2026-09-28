@@ -1237,10 +1237,14 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
     for episode in sorted(candidates, key=lambda e: _order_key(e, allow_estimates)):
         latest[file_key(episode)] = episode
     votes = {key: [] for key in latest}
+    # Group once rather than rescanning every episode for every file. Calendar forecasts
+    # evaluate this against many future run dates, so a quadratic scan compounds quickly.
+    members_by_file = {}
+    for episode in candidates:
+        members_by_file.setdefault(file_key(episode), []).append(episode)
     # A shared file must not hide an unknown or forthcoming sibling behind the
     # dated episode used as its cutoff. Single-episode behavior is unchanged.
-    for key in latest:
-        members = [e for e in candidates if file_key(e) == key]
+    for key, members in members_by_file.items():
         if len(members) > 1 and any(
                 effective_date(e, allow_estimates)[0] is None
                 or effective_date(e, allow_estimates)[0] > now.date() for e in members):
