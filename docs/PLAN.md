@@ -32,13 +32,14 @@ acceptance or a guarantee of recovery from permanent deletion.
 2. Use isolated config and fake Sonarr for destructive failure and recovery cases that a
    successful live run cannot establish: partial writes, Test Mode, restart and restore.
    Record attempted external writes. Do not repeat the live run just to prove it works.
-3. The build-32 scheduled run and post-run sync succeeded, and the browser's refreshed
-   reading was confirmed afterward. No performance complaint has been reported for the
-   3,019-series target; performance measurement is not currently a release blocker.
-4. Remaining evidence gaps are broader browser write workflows, monitoring changes beyond
-   the bounded live run, and behavior with real provider credentials. These are unverified
-   scenarios, not known defects. Any further destructive acceptance exercise needs a
-   throwaway series and explicit approval; never use a production library for it.
+3. A real-series acceptance test completed successfully. Along with the build-32 scheduled
+   run, error-free post-run sync and confirmed browser refresh, this establishes the tested
+   live workflows. No bugs are currently known. Report any bug found through the repository
+   so it can be reproduced and tracked.
+4. Real-provider behavior with live credentials, API-key lifecycle and backup/restore
+   against a real configuration have not had separate practical acceptance runs. These are
+   optional confidence checks, not known defects or blockers to the already tested flows.
+   No performance complaint has been reported for the 3,019-series target.
 5. Preserve the approved demo schedule and Test Mode setting. Use Test Mode on and schedules
    off for isolated acceptance exercises; restore the live settings only when returning
    to the approved demo deployment. Do not authorize additional live write exercises by

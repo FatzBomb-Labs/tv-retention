@@ -57,11 +57,12 @@ off and schedule on. One running container remains; rollback is build 31 plus a 
 config archive in a root-only directory. The next scheduled run completed at 05:22:29 UTC
 on build 32 with no pending run. Its post-run Sonarr sync finished at 05:22:36 UTC with
 reason `after the run` and no errors. The already-open browser reflected the refreshed
-reading; confirmed indirectly by the operator.
+reading, and a real-series acceptance test completed successfully; both confirmed by the
+operator.
 
-Still lacking practical evidence: broader browser write workflows, monitoring-write
-correctness beyond the bounded live run, real-provider behavior with live keys, API-key
-lifecycle, and backup/restore against a real configuration. These are unverified scenarios,
-not known defects. No large-library performance issue has been reported. The bounded
-September 20 live run completed two deletions (2705 MiB) with zero errors; this is not broad
-write-path acceptance.
+No bugs are currently known. Real-provider behavior with live credentials, API-key
+lifecycle and backup/restore against a real configuration have not had separate practical
+acceptance runs; these are unverified scenarios, not known defects. Report any bug found
+through the repository for reproduction and tracking. No large-library performance issue
+has been reported. The bounded September 20 live run completed two deletions (2705 MiB)
+with zero errors.
