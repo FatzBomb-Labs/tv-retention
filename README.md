@@ -52,10 +52,15 @@ Use [docker-compose.yml](docker-compose.yml) for the published-image configurati
 listing is in beta and uses the `beta` image tag; a listing is not a readiness guarantee.
 Start with a disposable configuration and Sonarr instance, not a production library.
 
-The Unraid template stores data under `/mnt/user/appdata/tv-retention`, exposes port
-8787, and requires you to set a login password of at least eight characters before
-starting. It does not mount media. Test Mode defaults on and schedules default off. The
-CA listing will appear in Apps search only after the repository and image are public and
+The Unraid template stores application data under `/mnt/user/appdata/tv-retention`
+(the required `/config` mapping), exposes port 8787, and requires you to set a login
+password of at least eight characters before starting. It also offers an optional,
+separate `/backups` mapping at `/mnt/user/appdata/tv-retention-backups`; make that host
+folder writable by `PUID:PGID` (commonly `99:100` on Unraid) and set **System → Backup**
+to `/backups` to use it. The template does not mount media. Test Mode defaults on and
+schedules default off. Configure Sonarr and any provider addresses or API keys in the
+application's Settings pages after installation; they are not Docker template variables.
+The CA listing will appear in Apps search only after the repository and image are public and
 the repository is accepted by Community Applications. Until then, add the template URL
 manually in Docker → Add Container → Template repositories:
 `https://raw.githubusercontent.com/FatzBomb-Labs/tv-retention/main/templates/tv-retention.xml`.
