@@ -139,8 +139,9 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
     try {
       const data = await api('sync', { reason: reason || 'opened', force: !!force }, '', true);
       if (data.busy) return;
+      const changed = (data.sync || {}).synced_at !== (getSnapshot().sync || {}).synced_at;
       if (!applySync(data, generation)) return;
-      if (data.report) forgetLibrary();
+      if (data.report || changed) forgetLibrary();
       render();
     } catch (error) {
       // Background freshness is opportunistic. The cached reading remains visible with
@@ -161,6 +162,11 @@ export function createChecks({ api, getSnapshot, getMonitoring, applyHealth, app
       return;  // a heartbeat that misses a beat is not worth interrupting anyone for
     }
     if ((data.progress || {}).running) { startPolling(); return; }
+    const newerSync = (data.sync || {}).synced_at !== (getSnapshot().sync || {}).synced_at;
+    if (newerSync) {
+      requestFreshness('opened');
+      return;
+    }
     getSnapshot().sync = data.sync || getSnapshot().sync;
     getSnapshot().sync_due = !!data.sync_due;
     if (data.status) getSnapshot().status = data.status;

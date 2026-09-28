@@ -5,10 +5,10 @@ gate before quoting test counts or making a release decision.
 
 ## Automated gate
 
-Last recorded Linux host gate: **September 21, 2026** on `fatzserver-host`.
+Last recorded Linux host gate: **September 28, 2026** on `fatzserver-host`.
 
-- 656 Python tests passed; 1 skipped because the host lacks `America/Detroit` zone data.
-- 36 frontend tests passed.
+- 657 Python tests ran; 1 skipped because the host lacks `America/Detroit` zone data.
+- 37 frontend tests passed.
 - Worker imports and shipped-module syntax checks passed; gate exited 0.
 
 These counts are historical until the gate is run again. From Windows, use
@@ -43,6 +43,12 @@ Automated tests cover retention decisions, exclusions, shared-file protection, T
 durable execution/recovery, backup/restore contracts, scheduling, settings revisions and
 frontend module behavior. The Linux gate also imports worker modules and syntax-checks
 shipped modules.
+
+The scheduled-run regression checks a Sonarr sync after live writes, and the browser
+regression checks that an open page reloads the stored library when that sync advances.
+Partial Sonarr reads remain due for retry. Build 32 was built on the Linux host and its
+shipped worker and build marker checked in a network-isolated container. The running demo
+has not been replaced or checked against the fix.
 
 Still lacking practical evidence: browser write workflows, monitoring-write correctness
 beyond the bounded live run, real-provider behavior with live keys, API-key lifecycle,

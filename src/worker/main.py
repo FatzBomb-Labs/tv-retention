@@ -1529,8 +1529,9 @@ def last_sync(settings: dict) -> dict:
 
 def sync_is_due(settings: dict, max_age_seconds: int = SYNC_FRESH_SECONDS) -> bool:
     """True when the stored reading has aged past the interval, or there is none."""
-    age = age_seconds(last_sync(settings).get('synced_at'))
-    return age is None or age > max_age_seconds
+    sync = last_sync(settings)
+    age = age_seconds(sync.get('synced_at'))
+    return bool(sync.get('errors')) or age is None or age > max_age_seconds
 
 
 def status_snapshot(settings: dict, health=None) -> dict:
@@ -2004,6 +2005,17 @@ def tick() -> int:
         return _tick_locked()
 
 
+def _sync_after_run(settings: dict) -> None:
+    try:
+        report = sync_from_sonarr(load_settings(), reason='after the run')
+        if report.get('errors'):
+            log_line(settings, 'warning', 'post-run Sonarr sync incomplete: '
+                     + '; '.join(report['errors'])[:600])
+    except (Rejected, SonarrError) as error:
+        mark_synced(settings, {'errors': [str(error)]})
+        log_line(settings, 'warning', f'post-run Sonarr sync failed: {error}')
+
+
 def seed_last_occurrence(schedule: dict, state: dict) -> bool:
     """Credit a run recorded by an older build with the occurrence it answered.
 
@@ -2075,6 +2087,8 @@ def _tick_locked() -> int:
                 state['last_run'] = now_iso()
                 state['last_occurrence'] = pending_occurrence
                 actions.append('released the run that was waiting for Sonarr')
+                if not (settings.get('schedule') or {}).get('test_mode', True):
+                    _sync_after_run(settings)
 
     # Refresh regularly even with no page open. Browsing and editing still use the stored
     # reading; only this resident path and explicit background requests contact Sonarr.
@@ -2118,6 +2132,8 @@ def _tick_locked() -> int:
                 state = job_state(settings)
                 state['last_run'] = now_iso()
                 state['last_occurrence'] = due_id
+                if not scheduled_test:
+                    _sync_after_run(settings)
 
     save_job_state(settings, state)
     for message in actions:

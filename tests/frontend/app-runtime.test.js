@@ -241,6 +241,7 @@ async function loadPage(setup) {
     'check-rule': (payload) => (fixtures.checkRule ? fixtures.checkRule(payload)
       : { rule_id: payload.rule_id, state: {}, alerts: [] }),
     progress: () => (fixtures.progress ? fixtures.progress() : { progress: { running: false } }),
+    watch: () => (fixtures.watch ? fixtures.watch() : {}),
     alerts: () => ({ alerts: (fixtures.alerts && fixtures.alerts()) || [] }),
     sync: () => (fixtures.sync ? fixtures.sync() : {
       busy: false,
@@ -308,6 +309,7 @@ async function loadPage(setup) {
     fetchLog,
     confirmCalls,
     intervals,
+    setVisible: () => { document.hidden = false; },
     $: (id) => document.getElementById(id),
     flush,
     click: (id) => { document.getElementById(id).click(); },
@@ -384,6 +386,31 @@ test('page-open freshness shows a non-blocking Sonarr sync banner', async () => 
   });
   await page.flush();
   assert.equal(banner.hidden, true);
+});
+
+test('an open page reloads the stored library after a scheduled Sonarr sync', async () => {
+  const initial = snapshotFixture();
+  let updated = false;
+  const page = await loadPage(() => ({
+    snapshot: initial,
+    series: [],
+    watch: () => ({ sync: updated ? { synced_at: '2099-01-01T00:00:00Z' } : initial.sync,
+                   progress: { running: false } }),
+    sync: () => ({ busy: false, report: null, settings: initial.settings,
+                  health: initial.health, alerts: [], suppressed_alerts: [],
+                  plan: initial.plan,
+                  sync: updated ? { synced_at: '2099-01-01T00:00:00Z' } : initial.sync,
+                  sync_due: false }),
+  }));
+  await page.flush();
+  const before = page.actions('series');
+  updated = true;
+  // The page is visible when its heartbeat checks for a new resident-worker reading.
+  page.setVisible();
+  await page.fire([...page.intervals.keys()][0]);
+  await page.flush();
+  assert.equal(page.actions('sync'), 2);
+  assert.ok(page.actions('series') > before, 'the stored library is reread after the sync');
 });
 
 test('a read-only run report labels its dismiss button Close', async () => {

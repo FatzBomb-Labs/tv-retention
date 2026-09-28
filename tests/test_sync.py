@@ -238,6 +238,7 @@ class Sync(unittest.TestCase):
         report = main.sync_from_sonarr(self.settings)
         self.assertTrue(report['errors'])
         self.assertEqual(len(main.catalogue_for(self.settings, 'i1')), 1, 'yesterday beats nothing')
+        self.assertTrue(main.sync_is_due(self.settings), 'a partial read must be retried')
 
     def test_a_sync_cannot_write_to_sonarr(self):
         """Opening the plugin must never delete anything.

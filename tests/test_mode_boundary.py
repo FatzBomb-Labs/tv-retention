@@ -236,7 +236,7 @@ class ModeBoundary(unittest.TestCase):
                                   return_value=fixture.main.dt.datetime.now(fixture.main.dt.timezone.utc)), \
                         patch.object(fixture.main, 'sync_is_due', return_value=False), \
                         patch.object(fixture.main, 'sonarr_reachable', return_value=True), \
-                        patch.object(fixture.main, 'sync_from_sonarr', return_value={}):
+                        patch.object(fixture.main, 'sync_from_sonarr', return_value={}) as sync:
                     if not mode:
                         fixture.sonarr.expect('GET', 'series', [SERIES])
                     fixture.sonarr.expect('GET', 'series/1', SERIES)
@@ -246,8 +246,31 @@ class ModeBoundary(unittest.TestCase):
                         fixture.sonarr.expect('PUT', 'episode/monitor', body={
                             'episodeIds': [101], 'monitored': False})
                     self.assertEqual(fixture.main.tick(), 0)
+                    self.assertEqual([call.kwargs['reason'] for call in sync.call_args_list],
+                                     ['before the run'] if mode else ['before the run', 'after the run'])
                 self.assertEqual(len(fixture.sonarr.mutations), 0 if mode else 1)
                 fixture.sonarr.assert_finished()
+
+    def test_post_run_sync_failure_keeps_the_completed_schedule(self):
+        from core import Rejected
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings(test_mode=False)
+            settings['schedule']['enabled'] = True
+            fixture.store.save_settings(settings)
+            fixture.store.save_job_state(settings, {'last_connectivity': fixture.store.now_iso()})
+            with patch.object(fixture.main.schedules, 'due_occurrence',
+                              return_value=fixture.main.dt.datetime.now(fixture.main.dt.timezone.utc)), \
+                    patch.object(fixture.main, 'sync_is_due', return_value=False), \
+                    patch.object(fixture.main, 'sonarr_reachable', return_value=True), \
+                    patch.object(fixture.main, 'sync_from_sonarr', side_effect=[{}, Rejected('offline')]), \
+                    patch.object(fixture.main, 'run', return_value={'test_mode': False}) as run:
+                self.assertEqual(fixture.main.tick(), 0)
+            run.assert_called_once_with(preview=False, scheduled=True)
+            state = fixture.store.job_state(settings)
+            self.assertIsNotNone(state['last_run'])
+            self.assertIsNotNone(state['last_occurrence'])
+            self.assertTrue(fixture.main.sync_is_due(settings))
+            fixture.sonarr.assert_finished()
 
     def test_recovered_pending_run_is_not_scheduled_again_in_the_same_tick(self):
         with IsolatedWorker() as fixture:
