@@ -1,0 +1,7 @@
+<CommunityApplications>
+  <Profile>
+    TV Retention provides per-series retention for a TV library through Sonarr. This repository contains its Unraid Community Applications template. The project is in beta; review the safety notes and start with Test Mode on and schedules off. For support, use the GitHub Issues page linked from the app template.
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/FatzBomb-Labs/tv-retention/main/src/assets/icon-512.png</Icon>
+  <WebPage>https://github.com/FatzBomb-Labs/tv-retention</WebPage>
+</CommunityApplications>

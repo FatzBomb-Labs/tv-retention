@@ -1,0 +1,33 @@
+<Container version="2">
+  <Name>TV Retention</Name>
+  <Repository>ghcr.io/fatzbomb-labs/tv-retention:beta</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/FatzBomb-Labs/tv-retention/issues</Support>
+  <TemplateURL>https://raw.githubusercontent.com/FatzBomb-Labs/tv-retention/main/templates/tv-retention.xml</TemplateURL>
+  <Beta>true</Beta>
+  <Description>TV Retention applies per-series retention through Sonarr. It uses no media mounts and asks Sonarr to perform removals. Beta software: use a disposable configuration and Sonarr instance first. The Unraid template requires a login password of at least eight characters. Test Mode defaults on and schedules default off. Sonarr deletions may be permanent.</Description>
+  <Project>https://github.com/FatzBomb-Labs/tv-retention</Project>
+  <Overview>Beta: per-series TV retention applied through Sonarr. No media mounts; Test Mode starts on and schedules off.</Overview>
+  <Category>MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:8787]</WebUI>
+  <Icon>https://raw.githubusercontent.com/FatzBomb-Labs/tv-retention/main/src/assets/icon-512.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled></DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="App data" Target="/config" Default="/mnt/user/appdata/tv-retention" Mode="rw" Description="Container path: /config. Keep this persistent application data; it is the only required volume." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/tv-retention</Config>
+  <Config Name="Web UI port" Target="8787" Default="8787" Mode="tcp" Description="Web interface and API port" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
+  <Config Name="Login username" Target="TVR_USERNAME" Default="admin" Mode="" Description="Login username" Type="Variable" Display="always" Required="true" Mask="false">admin</Config>
+  <Config Name="Login password" Target="TVR_PASSWORD" Default="" Mode="" Description="Required. Choose at least 8 characters before starting the container." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Timezone" Target="TZ" Default="Etc/UTC" Mode="" Description="Container timezone used for scheduling (for example America/New_York)" Type="Variable" Display="always" Required="true" Mask="false">Etc/UTC</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID used for /config ownership on startup (99 is the usual Unraid nobody UID)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID used for /config ownership on startup (100 is the usual Unraid users GID)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="022" Mode="" Description="File creation mask" Type="Variable" Display="advanced" Required="false" Mask="false">022</Config>
+</Container>

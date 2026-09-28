@@ -1,6 +1,6 @@
 services:
   tv-retention:
-    image: ghcr.io/fatzserver/tv-retention:latest
+    image: ghcr.io/fatzbomb-labs/tv-retention:beta
     container_name: tv-retention
     restart: unless-stopped
     ports:

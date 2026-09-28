@@ -48,9 +48,23 @@ Do not treat a preview, a green Status page, a typed confirmation or a recycle b
 ## Installing
 
 Use [docker-compose.yml](docker-compose.yml) for the published-image configuration, or
-[Dockerfile](Dockerfile) for a local image build. The example's `latest` tag is not a
-readiness guarantee. Start with a disposable configuration and Sonarr instance, not a
-production library.
+[Dockerfile](Dockerfile) for a local image build. The Unraid Community Applications
+listing is in beta and uses the `beta` image tag; a listing is not a readiness guarantee.
+Start with a disposable configuration and Sonarr instance, not a production library.
+
+The Unraid template stores data under `/mnt/user/appdata/tv-retention`, exposes port
+8787, and requires you to set a login password of at least eight characters before
+starting. It does not mount media. Test Mode defaults on and schedules default off. The
+CA listing will appear in Apps search only after the repository and image are public and
+the repository is accepted by Community Applications. Until then, add the template URL
+manually in Docker → Add Container → Template repositories:
+`https://raw.githubusercontent.com/FatzBomb-Labs/tv-retention/main/templates/tv-retention.xml`.
+
+This project is in beta. Read the safety notes below, use a disposable configuration and
+Sonarr instance first, and understand that Sonarr deletions may be permanent. Container
+images are published to GHCR by the GitHub Actions workflow when a `v*` tag is pushed;
+prerelease tags (for example, `v0.3.0-beta.1`) also update the `beta` tag. The GHCR
+package must be set to public before Unraid can pull it without registry credentials.
 
 The Compose example exposes `http://<host>:8787` and mounts `./config` at `/config`, the
 only required persistent volume. Replace the deliberately invalid `EDIT-ME` password
