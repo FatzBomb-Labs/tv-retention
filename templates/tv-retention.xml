@@ -27,7 +27,6 @@
   <Config Name="Web UI port" Target="8787" Default="8787" Mode="tcp" Description="Web interface and API port" Type="Port" Display="always" Required="true" Mask="false">8787</Config>
   <Config Name="Login username" Target="TVR_USERNAME" Default="admin" Mode="" Description="Login username" Type="Variable" Display="always" Required="true" Mask="false">admin</Config>
   <Config Name="Login password" Target="TVR_PASSWORD" Default="" Mode="" Description="Required. Choose at least 8 characters before starting the container." Type="Variable" Display="always" Required="true" Mask="true"></Config>
-  <Config Name="Timezone" Target="TZ" Default="Etc/UTC" Mode="" Description="Container timezone used for scheduling (for example America/New_York)" Type="Variable" Display="always" Required="true" Mask="false">Etc/UTC</Config>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID used for /config ownership on startup (99 is the usual Unraid nobody UID)" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID used for /config ownership on startup (100 is the usual Unraid users GID)" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
   <Config Name="UMASK" Target="UMASK" Default="022" Mode="" Description="File creation mask" Type="Variable" Display="advanced" Required="false" Mask="false">022</Config>

@@ -42,7 +42,7 @@ DEFAULTS = {
                  'test_mode': True,
                  'frequency': 'daily', 'minute': 0, 'hour': 4,
                  'weekday': 0, 'monthly_mode': 'day', 'monthly_day': 1,
-                 'monthly_weekday': '', 'cron': '0 4 * * *', 'timezone': 'Etc/UTC'},
+                 'monthly_weekday': '', 'cron': '0 4 * * *', 'timezone': 'America/New_York'},
     # How old a reading may get before it is read again. The only knob here: the sweep
     # that honours it is spread across the ticks, and confirming Sonarr answers happens on
     # its own fixed interval and before anything that needs it — neither was ever a

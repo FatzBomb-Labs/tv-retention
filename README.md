@@ -12,9 +12,14 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ## Changelog
 
-### Unreleased
+### v0.3.0-beta.3 (build 35)
 
+- Consolidated timezone choice in Settings → Schedule; new installs default to New York
+  time, existing saved choices remain unchanged, and application logs use the chosen zone.
 - Improved Calendar forecast performance for large episode libraries.
+
+### v0.3.0-beta.2 (build 33)
+
 - Added **Series → Calendar** with list and month views for upcoming airings, queued actions,
   and clearly labeled estimates for scheduled retention deletions.
 - Moved the browser theme toggle into **Settings → General** and kept manual settings saves
@@ -104,11 +109,14 @@ Requirements: a container runtime and a reachable Sonarr v3 or v4 instance. No m
 | `TVR_PORT` | `8787` | HTTP listen port; port mapping and health-check compatibility must be checked if changed. |
 | `PUID`, `PGID` | `1000` | Runtime identity and `/config` ownership on root-start; commonly `99`/`100` on Unraid. Explicit `user:` skips ownership adjustment and privilege drop. |
 | `UMASK` | `022` | File-creation mask; non-root startup/permission validation remains in PLAN. |
-| `TVR_TZ` | `Etc/UTC` | Compose variable forwarded as container `TZ`, e.g. `America/New_York`. |
 
 Startup refuses missing credentials unless `TVR_AUTH=none` is explicit. Login controls
 access to the interface, not the worker: schedules do not require an open browser or session.
-New settings default to Test Mode on and no retention schedule; verify copied settings too.
+New settings default to Test Mode on, no retention schedule, and **Settings → Schedule →
+Timezone** set to `America/New_York`. This saved setting controls both scheduled runs and
+application log timestamps; change it in the app for another location. Existing settings
+keep their saved timezone when the container updates. A pre-existing Docker `TZ` variable
+may remain but does not override the saved schedule timezone. Verify copied settings too.
 
 ## Getting around
 

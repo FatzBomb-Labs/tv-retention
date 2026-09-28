@@ -47,6 +47,21 @@ class TheFloor(unittest.TestCase):
         self.assertEqual(migrate(None)['settings_version'], SETTINGS_VERSION)
         self.assertEqual(migrate([])['settings_version'], SETTINGS_VERSION)
 
+    def test_a_new_install_defaults_to_new_york_without_rewriting_an_existing_timezone(self):
+        import tempfile
+        import store
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'settings.json'
+            original = store.CONFIG
+            store.CONFIG = path
+            try:
+                self.assertEqual(store.load_settings()['schedule']['timezone'], 'America/New_York')
+                path.write_text(json.dumps({'settings_version': SETTINGS_VERSION,
+                                            'schedule': {'timezone': 'America/Detroit'}}))
+                self.assertEqual(store.load_settings()['schedule']['timezone'], 'America/Detroit')
+            finally:
+                store.CONFIG = original
+
     def test_the_refusal_reaches_the_loader_as_a_settings_error(self):
         """store turns it into the same Rejected every other broken-settings path uses,
         so the interface still loads and Status can name the problem."""

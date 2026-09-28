@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     import fcntl
@@ -636,7 +637,12 @@ def log_line(settings: dict, level: str, message: str) -> None:
     configured = (settings.get('logging') or {}).get('level', 'warning')
     if LOG_RANK.get(level, 3) > LOG_RANK.get(configured, 2):
         return
-    stamp = dt.datetime.now(dt.timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')
+    zone_name = (settings.get('schedule') or {}).get('timezone') or DEFAULTS['schedule']['timezone']
+    try:
+        zone = ZoneInfo(zone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = dt.timezone.utc
+    stamp = dt.datetime.now(zone).strftime('%Y-%m-%d %H:%M:%S')
     prefix = ''
     line = f'{stamp} [{level.upper()}] {prefix}{message}\n'
     try:

@@ -22,9 +22,6 @@ services:
       # Or, if nothing untrusted can reach the port — behind Tailscale or a VPN — and you
       # would rather have no login at all:
       # - TVR_AUTH=none
-      # Scheduling follows the container's local time. Set TVR_TZ in .env (for example,
-      # America/New_York); the image itself receives the standard TZ variable.
-      - TZ=${TVR_TZ:-Etc/UTC}
       # Who owns /config. The container takes it on start, so no chown is asked of you.
       # 1000:1000 by default; on Unraid use 99:100.
       # - PUID=1000

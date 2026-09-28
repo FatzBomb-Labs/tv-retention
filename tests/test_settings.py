@@ -31,7 +31,7 @@ class Cron(unittest.TestCase):
 class Settings(unittest.TestCase):
     def test_defaults_are_valid(self):
         self.assertEqual(validate_settings(DEFAULTS)['schedule']['test_mode'], True)
-        self.assertEqual(validate_settings(DEFAULTS)['schedule']['timezone'], 'Etc/UTC')
+        self.assertEqual(validate_settings(DEFAULTS)['schedule']['timezone'], 'America/New_York')
 
     def test_schedule_timezone_is_preserved_and_invalid_zones_are_refused(self):
         document = validate_settings(base(schedule={'timezone': 'America/New_York'}))

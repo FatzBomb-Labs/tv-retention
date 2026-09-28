@@ -30,6 +30,17 @@ class ReadLog(unittest.TestCase):
     def write(self, data: bytes):
         self.log.write_bytes(data)
 
+    def test_log_uses_saved_schedule_timezone_not_container_timezone(self):
+        from datetime import datetime, timezone
+        self.settings['logging'] = {'level': 'info'}
+        self.settings['schedule'] = {'timezone': 'America/New_York'}
+        instant = datetime(2026, 9, 28, 9, 15, tzinfo=timezone.utc)
+        with mock.patch.dict(os.environ, {'TZ': 'Etc/UTC'}), \
+                mock.patch.object(store.dt, 'datetime') as clock:
+            clock.now.side_effect = lambda tz: instant.astimezone(tz)
+            store.log_line(self.settings, 'info', 'zone check')
+        self.assertIn('2026-09-28 05:15:00 [INFO] zone check', self.log.read_text())
+
     def test_a_missing_log_is_reported_as_empty_not_an_error(self):
         self.assertEqual(read_log(self.settings), {'offset': 0, 'size': 0, 'text': ''})
 
