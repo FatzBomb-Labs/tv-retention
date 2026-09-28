@@ -12,12 +12,18 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ## Status and safety
 
-**Not yet approved for unattended destructive use. Keep retention schedules off and Test
-Mode on.** Test Mode blocks external Sonarr mutations on every path, manual or scheduled,
-including the immediate ones: the monitoring pickers, the scope pass on save and the
-recycle-bin fix. Settings stay editable, and local cache/log writes still occur.
+**Release status:** the documented build-32 demo has operator approval for its scheduled
+live run with Test Mode off. A scheduled run, post-run Sonarr sync and real-series test
+completed successfully. This approval applies to that deployment; it is not a blanket
+guarantee for other installations. For a new installation, start with Test Mode on and
+schedules off, review the plan and settings, and enable live actions only when ready.
 
-The [plan](docs/PLAN.md) lists the remaining acceptance work. Until it is complete, use TV Retention as a supervised tool.
+Test Mode blocks external Sonarr mutations on every path, manual or scheduled, including
+the immediate ones: the monitoring pickers, the scope pass on save and the recycle-bin fix.
+Settings stay editable, and local cache/log writes still occur.
+
+The [plan](docs/PLAN.md) records verified behavior and remaining optional confidence checks.
+Use TV Retention with an understanding that Sonarr deletions may be permanent.
 
 Do not treat a preview, a green Status page, a typed confirmation or a recycle bin as proof of safe execution. There is no deletion-percentage guard. On the documented target, Sonarr has no recycle bin and deletions are permanent; an Unraid SMB recycle bin does not cover Sonarr's container-level deletes. Start with a disposable configuration and Sonarr instance.
 
@@ -42,9 +48,9 @@ Do not treat a preview, a green Status page, a typed confirmation or a recycle b
 ## Installing
 
 Use [docker-compose.yml](docker-compose.yml) for the published-image configuration, or
-[Dockerfile](Dockerfile) for a local image build. Image publication and release acceptance
-still need evidence; the example's `latest` tag is not a readiness guarantee. Start with a
-disposable configuration and Sonarr instance, not a production library.
+[Dockerfile](Dockerfile) for a local image build. The example's `latest` tag is not a
+readiness guarantee. Start with a disposable configuration and Sonarr instance, not a
+production library.
 
 The Compose example exposes `http://<host>:8787` and mounts `./config` at `/config`, the
 only required persistent volume. Replace the deliberately invalid `EDIT-ME` password
