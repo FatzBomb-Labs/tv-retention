@@ -12,8 +12,11 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ## Changelog
 
-### v0.3.0-beta.3 (build 35)
+### v0.3.0-beta.3 (build 36)
 
+- Calendar requests now log start, completion/failure, and a warning before the browser's
+  60-second deadline; a scheduler tick waiting on a shared lock is reported as deferred,
+  not as a failed run.
 - Consolidated timezone choice in Settings → Schedule; new installs default to New York
   time, existing saved choices remain unchanged, and application logs use the chosen zone.
 - Improved Calendar forecast performance for large episode libraries.

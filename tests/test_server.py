@@ -742,6 +742,64 @@ class GracefulShutdown(unittest.TestCase):
             self.assertEqual(result.get('code'), 0)
 
 
+class CalendarRequestLog(unittest.TestCase):
+    def test_slow_read_logs_the_browser_deadline_and_completion(self):
+        import json
+        from unittest import mock
+        server = load(TVR_AUTH='none')
+        entries = []
+        class Fake:
+            def session(self): return {'csrf': ''}
+            def send_json(self, status, payload): self.status = status
+
+        def dispatch(request):
+            return {'ok': True, 'events': []}
+
+        class ImmediateDeadline:
+            def __init__(self, *args, **kwargs):
+                self.target = kwargs['target']
+                self.args = kwargs.get('args', ())
+            def start(self):
+                self.target(*self.args)
+
+        class TimedOut:
+            def wait(self, timeout):
+                return False
+            def set(self):
+                pass
+
+        handler = Fake()
+        with mock.patch.object(server, 'OPEN', True), \
+                mock.patch.object(server, 'load_settings', return_value={'logging': {'level': 'info'}}), \
+                mock.patch.object(server, 'log_line', side_effect=lambda _, level, msg: entries.append((level, msg))), \
+                mock.patch.object(server, 'dispatch', side_effect=dispatch), \
+                mock.patch.object(server.threading, 'Thread', ImmediateDeadline), \
+                mock.patch.object(server.threading, 'Event', TimedOut):
+            server.Handler.handle_api(handler, {'payload': [json.dumps({'action': 'calendar'})]})
+        self.assertEqual(handler.status, 200)
+        self.assertTrue(any('still in progress after 55s' in msg for _, msg in entries))
+        self.assertTrue(any('finished after' in msg for _, msg in entries))
+
+    def test_calendar_failure_is_recorded_in_the_application_log(self):
+        import json
+        from unittest import mock
+        server = load(TVR_AUTH='none')
+        entries = []
+
+        class Fake:
+            def session(self): return {'csrf': ''}
+            def send_json(self, status, payload): self.status = status
+
+        handler = Fake()
+        with mock.patch.object(server, 'OPEN', True), \
+                mock.patch.object(server, 'load_settings', return_value={'logging': {'level': 'info'}}), \
+                mock.patch.object(server, 'log_line', side_effect=lambda _, level, msg: entries.append((level, msg))), \
+                mock.patch.object(server, 'dispatch', return_value={'ok': False, 'error': 'bad cache'}):
+            server.Handler.handle_api(handler, {'payload': [json.dumps({'action': 'calendar'})]})
+        self.assertEqual(handler.status, 409)
+        self.assertTrue(any(level == 'error' and 'bad cache' in msg for level, msg in entries))
+
+
 class Readiness(unittest.TestCase):
     """/health answers whether this thing is doing its job, and its job is the schedule.
 

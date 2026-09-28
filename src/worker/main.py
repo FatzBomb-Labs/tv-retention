@@ -2337,6 +2337,15 @@ def serve_forever() -> int:
             WORKER['failures'] = 0
             WORKER['last_error'] = ''
         except Exception as error:  # noqa: BLE001 - a bad tick must never stop the loop
+            if isinstance(error, Rejected) and str(error) == 'A TV Retention run is already in progress.':
+                # Syncs and other guarded reads share this lock. A busy tick is deferred,
+                # not a failed run; the next tick will check whether anything is due.
+                with contextlib.suppress(Exception):
+                    log_line(load_settings(), 'info',
+                             'scheduler check deferred: another operation holds the shared lock; '
+                             'no run was started by this tick')
+                time.sleep(TICK_SECONDS)
+                continue
             WORKER['failures'] += 1
             WORKER['last_error'] = str(error)
             # The log lives in the state directory, and the settings say where that is —

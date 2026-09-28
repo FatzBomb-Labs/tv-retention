@@ -31,7 +31,7 @@ from pathlib import Path
 
 import main
 from actions import dispatch
-from store import load_settings, state_dir
+from store import load_settings, log_line, state_dir
 
 HERE = Path(__file__).resolve().parent
 ASSETS = HERE.parent / 'assets'
@@ -417,6 +417,12 @@ def poster_bytes(query: dict) -> tuple[int, bytes]:
 
 # -- the handler ------------------------------------------------------------
 
+def _calendar_deadline(done, settings):
+    if not done.wait(55):
+        log_line(settings, 'warning',
+                 'calendar read still in progress after 55s; the browser stops waiting after 60s')
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'TVRetention'
     sys_version = ''
@@ -631,8 +637,30 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(400, {'ok': False, 'error': 'Malformed request'})
         if not isinstance(request, dict):
             return self.send_json(400, {'ok': False, 'error': 'Malformed request'})
-        result = dispatch(request)
-        self.send_json(200 if result.get('ok') else 409, result)
+        if request.get('action') != 'calendar':
+            result = dispatch(request)
+            return self.send_json(200 if result.get('ok') else 409, result)
+
+        started = time.monotonic()
+        settings = load_settings()
+        log_line(settings, 'info', 'calendar read started (cached Sonarr data)')
+        done = threading.Event()
+
+        threading.Thread(target=_calendar_deadline, args=(done, settings),
+                         name='calendar-deadline', daemon=True).start()
+        try:
+            result = dispatch(request)
+            elapsed = time.monotonic() - started
+            log_line(settings, 'info' if result.get('ok') else 'error',
+                     f'calendar read {"finished" if result.get("ok") else "failed"} after {elapsed:.1f}s'
+                     + (f': {result.get("error", "Unknown error")}' if not result.get('ok') else ''))
+            self.send_json(200 if result.get('ok') else 409, result)
+        except Exception as error:
+            log_line(settings, 'error',
+                     f'calendar request failed after {time.monotonic() - started:.1f}s: {type(error).__name__}')
+            raise
+        finally:
+            done.set()
 
 
 def take_the_volume() -> None:
