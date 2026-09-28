@@ -17,14 +17,9 @@ Mode on.** Test Mode blocks external Sonarr mutations on every path, manual or s
 including the immediate ones: the monitoring pickers, the scope pass on save and the
 recycle-bin fix. Settings stay editable, and local cache/log writes still occur.
 
-What is still open is tracked in the [plan](docs/PLAN.md): cross-tab and late-response
-save conflicts, and container-level acceptance (non-root startup, permissions, graceful
-shutdown, readiness). Until those are done, treat this as a supervised tool.
+The [plan](docs/PLAN.md) lists the remaining acceptance work. Until it is complete, use TV Retention as a supervised tool.
 
-Do not treat a preview, a green Status page, a typed confirmation or a recycle bin as
-proof of safe execution. There is no deletion-percentage guard. Deletions are not
-generally reversible; Sonarr's recycle-bin configuration and actual behavior determine
-recovery. Start with a disposable configuration and Sonarr instance.
+Do not treat a preview, a green Status page, a typed confirmation or a recycle bin as proof of safe execution. There is no deletion-percentage guard. On the documented target, Sonarr has no recycle bin and deletions are permanent; an Unraid SMB recycle bin does not cover Sonarr's container-level deletes. Start with a disposable configuration and Sonarr instance.
 
 ## Contents
 
@@ -267,10 +262,7 @@ Status display does not establish worker readiness or safe execution.
 **Settings → Schedule** has a prominent Test Mode card and supports hourly, daily, weekly,
 monthly by date or weekday, and custom five-field cron schedules. The worker runs without
 an open page and implements missed-run catch-up and pending work while Sonarr is unavailable.
-Scheduling uses validated IANA civil time, and the image installs `tzdata` so DST behaves.
-Restart behavior still needs container acceptance. **Keep retention schedules off** until
-the plan's gates are done, including in copied or restored settings. The mode toggle saves
-immediately.
+Scheduling uses validated IANA civil time, and the image installs `tzdata` for DST handling. **Keep retention schedules off** until the plan's gates are done, including in copied or restored settings. The mode toggle saves immediately.
 
 ## Where things are stored
 
@@ -319,19 +311,9 @@ Browsers use the application API, not Sonarr directly. Assets ship under a share
 digest so static imports stay within one release, and mapping field shapes participate in
 cache invalidation.
 
-The frontend is nineteen modules with `app.js` as the composition root: `dom`, `format`,
-`storage`, `transport`, `feedback`, `changes`, `episode-trees`, `activity`, `settings`,
-`checks`, `series-removal`, `series-editor`, `alerts`, `navigation`, `topbar`, `presets`,
-`connections` and `library`. Sibling modules do not import each other; the entry supplies
-narrow, intent-named capabilities and reads replaceable documents through accessors such
-as `getSettings` and `getSnapshot` rather than captured references. Every module but the
-entry is side-effect-free at import.
+The frontend uses `app.js` as a composition root. Feature modules do not import one another; the entry supplies their shared capabilities. Modules other than the entry are side-effect-free at import.
 
-Sessions are in memory, with `HttpOnly`/`SameSite=Strict` cookies and per-session CSRF
-tokens. There is no proxy-header authentication mode, and forwarding headers are not
-treated as authentication or TLS proof. Restrict reachability to a trusted network or a
-controlled HTTPS reverse proxy. Settings are validated on load and on save; cross-tab
-conflict rejection is still open work.
+Sessions are in memory, with `HttpOnly`/`SameSite=Strict` cookies and per-session CSRF tokens. Forwarding headers are not an authentication or TLS boundary. Restrict access to a trusted network or controlled HTTPS reverse proxy. Settings are validated on load and save; stale cross-tab writes are rejected.
 
 ## Development
 
