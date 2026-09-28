@@ -142,14 +142,18 @@
       </div>
       <button type="button" id="tvr-calendar-refresh" class="tvr-secondary">Refresh</button>
     </div>
-    <p id="tvr-calendar-reading" class="tvr-lede" role="status"></p>
-    <p class="tvr-lede">Shows the next six weeks. Deletion dates are estimates for scheduled runs; with scheduling off, no deletion date can be predicted.</p>
+    <div class="tvr-calendar-info">
+      <p id="tvr-calendar-reading" role="status"></p>
+      <div class="tvr-calendar-legend" aria-label="Event types"><span class="airing">Airing</span><span class="queued">Queued removal</span><span class="estimate">Estimated deletion</span><span class="conditional">Conditional deletion</span></div>
+    </div>
+    <p class="tvr-lede">Watching series only · next six weeks. Deletion estimates depend on the next scheduled run; conditional dates also depend on future episodes arriving in Sonarr.</p>
     <div id="tvr-calendar-month-nav" class="tvr-calendar-month-nav" hidden>
       <button type="button" id="tvr-calendar-prev" aria-label="Previous month">‹</button>
       <strong id="tvr-calendar-month"></strong>
       <button type="button" id="tvr-calendar-next" aria-label="Next month">›</button>
     </div>
     <div id="tvr-calendar-events"></div>
+    <section id="tvr-calendar-agenda" class="tvr-calendar-agenda" hidden aria-label="Selected day"></section>
   </section>
 
   <!-- ---------------------------------------------------------------- -->

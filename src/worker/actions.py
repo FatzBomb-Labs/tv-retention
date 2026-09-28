@@ -124,7 +124,8 @@ def _calendar_date(value):
 
 
 def _calendar_add(events, seen, event):
-    base_key = (event['date'], event['kind'], event.get('instance_id'), event['title'])
+    base_key = (event['date'], event['kind'], event.get('instance_id'),
+                event.get('series_id'), event['title'])
     episode = event.get('episode') or {}
     generic_episode = (episode.get('season') is None and episode.get('number') is None
                        and not episode.get('title'))
@@ -171,8 +172,8 @@ def _calendar_runs(schedule, now, horizon_days=42):
 def action_calendar(settings, request):
     """Project a six-week calendar from stored Sonarr readings only.
 
-    Airings use the cached all-series catalogue where Sonarr supplies nextAiring, plus
-    episode-specific dates from managed-series episode caches. Deletion estimates run the
+    Airings use the cached catalogue for series with a retention rule, plus
+    episode-specific dates from their episode caches. Deletion estimates run the
     real retention evaluator against those caches at future dates; they are possibilities,
     not promises that Sonarr state or incoming episodes will remain unchanged.
     """
@@ -183,16 +184,21 @@ def action_calendar(settings, request):
     seen = {}
 
     catalogue = read_cache(settings, 'catalogue.json')
+    watched = {(rule.get('instance_id'), rule.get('series_id'))
+               for rule in settings.get('rules', []) if rule.get('series_id')}
     for instance in settings.get('instances', []):
         entry = catalogue.get(instance.get('id')) or {}
         if entry.get('schema') != SCHEMA:
             continue
         for series in entry.get('series') or []:
+            if (instance.get('id'), series.get('series_id')) not in watched:
+                continue
             day = _calendar_date(series.get('next_airing'))
             title = series.get('title') or 'Upcoming episode'
             if day and today <= day <= last_day:
                 _calendar_add(events, seen, {'date': day.isoformat(), 'kind': 'airing',
                      'title': title, 'instance_id': instance.get('id'),
+                     'series_id': series.get('series_id'),
                      'episode': {'season': None, 'number': None, 'title': ''},
                      'detail': 'Sonarr series-level next airing; episode details are unavailable.'})
 
@@ -210,11 +216,8 @@ def action_calendar(settings, request):
                 run_day, _ = scheduled
                 _calendar_add(events, seen, {'date': run_day.isoformat(), 'kind': 'queued',
                      'title': rule.get('series_title') or rule.get('path') or 'Queued series action',
-                     'instance_id': rule.get('instance_id'),
+                     'instance_id': rule.get('instance_id'), 'series_id': rule.get('series_id'),
                      'detail': f'Queued Sonarr action: {REMOVAL_ACTIONS.get(removal.get("action"), removal.get("action", "unknown"))}. Not yet executed; the schedule may be in Test Mode.'})
-            continue
-        if not rule.get('enabled'):
-            continue
         episodes, _, fetched_at = store_episode_cache(settings, rule)
         if episodes is None:
             continue
@@ -227,56 +230,111 @@ def action_calendar(settings, request):
                 title = rule.get('series_title') or rule.get('path') or 'Upcoming episode'
                 detail = 'Upcoming date from the cached episode catalogue.'
                 _calendar_add(events, seen, {'date': day.isoformat(), 'kind': 'airing', 'title': title,
-                     'instance_id': rule.get('instance_id'), 'episode': {'season': episode.get('season'), 'number': episode.get('episode'),
+                     'instance_id': rule.get('instance_id'), 'series_id': rule.get('series_id'),
+                     'episode': {'season': episode.get('season'), 'number': episode.get('episode'),
                                  'title': episode.get('title') or ''}, 'detail': detail})
 
-        # Forecast is retention-specific: fixed keep windows have one possible expiry
-        # date. Evaluate there once rather than rerunning the full plan for every schedule
-        # date across a six-week window. Rank-based keep rules do not expire with time.
-        keep_days = active.get('keep_days')
-        if not keep_days or not scheduled_runs:
+        if not rule.get('enabled') or removal or not rule.get('series_id') or not scheduled_runs:
             continue
-        candidates_by_file = {}
+
+        conditions = ('keep_days', 'keep_episodes', 'keep_seasons')
+        if not any(active.get(key) for key in conditions):
+            continue
+
+        retention = settings.get('retention') or {}
+        allow_import_fallback = bool(retention.get('allow_estimated_dates', True))
         excluded = excluded_episodes(episodes, active, settings)
-        for episode in episodes:
-            if not episode.get('has_file') or not episode.get('file_id') or not episode.get('path'):
-                continue
-            if episode.get('episode_id') in excluded:
-                continue
-            candidates_by_file.setdefault(episode['file_id'], []).append(episode)
-        first_forecast = scheduled_runs[0][1]
-        expiry_dates = {}
-        for file_id, members in candidates_by_file.items():
-            dates = [effective_date(member, bool((settings.get('retention') or {}).get('allow_estimated_dates', True)))[0]
-                     for member in members]
-            if not dates or any(date is None or date > first_forecast.date() for date in dates):
-                continue
-            expiry_dates[file_id] = max(dates) + dt.timedelta(days=int(keep_days) + 1)
-        for run_day, forecast_at in scheduled_runs:
-            due_ids = [file_id for file_id, expiry in expiry_dates.items()
-                       if run_day >= expiry and any(day >= expiry for day, _ in scheduled_runs)]
-            if not due_ids:
-                continue
-            planned = evaluate(episodes, active, settings, now=forecast_at)
-            allowed = set(due_ids)
+        first_day = scheduled_runs[0][0]
+        last_day = scheduled_runs[-1][0]
+        run_by_day = {day: (day, instant) for day, instant in scheduled_runs}
+        run_days = {first_day}
+        rank_based = bool(active.get('keep_episodes') or active.get('keep_seasons'))
+
+        # Retention can change only at a keep-days boundary or when a cached future
+        # episode airs and changes a rank. Evaluate those checkpoints, not every day:
+        # this bounds work to one initial plan plus actual changes in the six-week
+        # window, even for a large library and a daily schedule.
+        if active.get('keep_days'):
+            by_file = {}
+            for episode in episodes:
+                if (not episode.get('has_file') or not episode.get('path')
+                        or episode.get('episode_id') in excluded):
+                    continue
+                file_key = episode.get('file_id') or episode.get('path')
+                by_file.setdefault(file_key, []).append(episode)
+            for members in by_file.values():
+                dates = [effective_date(member, allow_import_fallback)[0] for member in members]
+                # A file is not forecast when any member has an unknown date. This is
+                # deliberately conservative, especially for multi-episode files.
+                if not dates or any(day is None for day in dates):
+                    continue
+                boundary = max(dates) + dt.timedelta(days=int(active['keep_days']) + 1)
+                if first_day <= boundary <= last_day:
+                    run_day = next((day for day, _ in scheduled_runs if day >= boundary), None)
+                    if run_day is not None:
+                        run_days.add(run_day)
+                elif boundary < first_day:
+                    # Already eligible before the first scheduled run: the first point
+                    # above ensures the forecast does not wait for a new expiry.
+                    pass
+
+        rank_arrivals = []
+        if rank_based:
+            for episode in episodes:
+                if episode.get('episode_id') in excluded:
+                    continue
+                air_date, _ = effective_date(episode, allow_import_fallback=False)
+                if (air_date is None or not first_day <= air_date <= last_day
+                        or episode.get('has_file')):
+                    continue
+                rank_arrivals.append(air_date)
+                run_day = next((day for day, _ in scheduled_runs if day >= air_date), None)
+                if run_day is not None:
+                    run_days.add(run_day)
+
+        forecasted_files = set()
+        for run_day in sorted(run_days):
+            _, forecast_at = run_by_day[run_day]
+            # Future episode rows affect ranks only once their air date arrives. Keep
+            # shared-file rows protected until then even when another member has aired.
+            future_file_keys = {episode.get('file_id') or episode.get('path')
+                                for episode in episodes
+                                if episode.get('has_file') and episode.get('path')
+                                and (effective_date(episode, False)[0] or dt.date.max) > run_day}
+            projected = [episode for episode in episodes
+                         if (effective_date(episode, False)[0] or dt.date.max) <= run_day
+                         or (episode.get('has_file') and episode.get('path'))]
+            planned = evaluate(projected, active, settings, now=forecast_at)
+            conditional_arrivals = rank_based and any(first_day < day <= run_day
+                                                      for day in rank_arrivals)
             for candidate in planned['delete']:
-                file_id = candidate.get('file_id')
-                if file_id not in allowed:
+                file_key = candidate.get('file_id') or candidate.get('path')
+                if (not candidate.get('has_file') or not candidate.get('path')
+                        or not file_key or file_key in future_file_keys
+                        or file_key in forecasted_files):
                     continue
                 title = rule.get('series_title') or rule.get('path') or 'Retention candidate'
                 episode_detail = {'season': candidate.get('season'),
                                   'number': candidate.get('episode'),
                                   'title': candidate.get('title') or ''}
+                detail = (f'Possible retention deletion based on cached data read '
+                          f'{fetched_at or "at an unknown time"}; exclusions and shared-file '
+                          'protections were applied, but Sonarr state may change before the '
+                          'scheduled run.')
+                if conditional_arrivals:
+                    detail += (' Conditional projection: cached unaired Sonarr episodes are '
+                               'assumed to air by this date, so rank-based eligibility may '
+                               'change; future imports and files are unknown.')
+                if (settings.get('schedule') or {}).get('test_mode'):
+                    detail += ' Scheduled run is in Test Mode; no action will execute.'
                 _calendar_add(events, seen, {'date': run_day.isoformat(), 'kind': 'estimate',
                      'title': title, 'instance_id': rule.get('instance_id'),
-                     'episode': episode_detail,
-                     'detail': f'Possible retention deletion based on cached data read {fetched_at or "at an unknown time"}; exclusions and evaluator protections were applied, but Sonarr state may change before the scheduled run.'})
-                expiry_dates.pop(file_id, None)
-            if not expiry_dates:
-                break
+                     'series_id': rule.get('series_id'), 'episode': episode_detail,
+                     'conditional': bool(conditional_arrivals), 'detail': detail})
+                forecasted_files.add(file_key)
 
-    # Series-level nextAiring is the broadest cache and may be absent for unmanaged
-    # catalogues. Never fetch episodes here: no calendar request should block on Sonarr.
+    # Series-level nextAiring may be absent for watched catalogues. Never fetch episodes
+    # here: no calendar request should block on Sonarr.
     events.sort(key=lambda event: (event['date'], event['kind'], event['title'],
                                    (event.get('episode') or {}).get('season') or -1,
                                    (event.get('episode') or {}).get('number') or -1))

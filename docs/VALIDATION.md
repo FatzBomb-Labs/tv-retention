@@ -6,10 +6,10 @@ gate before quoting test counts or making a release decision.
 ## Automated gate
 
 Last recorded Linux host gate: **September 28, 2026** on `fatzserver-host`, rerun after
-the calendar request logging and deferred scheduler tick changes.
+the watched-only Calendar, conditional all-rule forecasts and selected-day agenda changes.
 
-- 669 Python tests ran; 1 skipped because the host lacks two reference time zones.
-- 38 frontend tests passed.
+- 671 Python tests ran; 1 skipped because the host lacks two reference time zones.
+- 40 frontend tests passed.
 - Worker imports and shipped-module syntax checks passed; gate exited 0.
 
 These counts are historical until the gate is run again. From Windows, use

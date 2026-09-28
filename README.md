@@ -12,6 +12,13 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ## Changelog
 
+### v0.3.0-beta.4 (build 37)
+
+- Calendar now shows only Watching series, including disabled rules; the month view is
+  the default, with a selected-day agenda and clearer event markers. Enabled retention
+  rules forecast possible deletions under all configured keep conditions; dates that rely
+  on future episodes being imported into Sonarr are marked conditional.
+
 ### v0.3.0-beta.3 (build 36)
 
 - Calendar requests now log start, completion/failure, and a warning before the browser's
@@ -124,9 +131,11 @@ may remain but does not override the saved schedule timezone. Verify copied sett
 ## Getting around
 
 - **Series:** All, **Watching** (has a retention rule), **Calendar**, **Not watching**,
-  Presets and Exclusion Rules. Calendar offers a list or month layout for upcoming airings,
-  queued removals and estimated retention deletions. Its dates come from cached Sonarr
-  readings and may change before a run; it does not itself execute anything. Watching is
+  Presets and Exclusion Rules. Calendar shows Watching series (including disabled rules)
+  in a month view with a selected-day agenda or a list of upcoming airings, queued
+  removals and estimated retention deletions. Conditional deletion dates depend on
+  future episodes arriving in Sonarr. Its dates come from cached Sonarr readings and may
+  change before a run; it does not itself execute anything. Watching is
   not media-server watch history or Sonarr's monitored flag.
 - **Settings:** General (including the browser's system/light/dark theme toggle),
   Connections, Air dates and Schedule. Panels with manual settings have a Save settings

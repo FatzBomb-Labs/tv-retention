@@ -24,12 +24,13 @@ class Calendar(unittest.TestCase):
                 patch.object(actions, 'load_settings', return_value=settings):
             return actions.dispatch({'action': 'calendar'})
 
-    def test_airings_use_cached_catalogue_including_unmanaged_series(self):
+    def test_airings_only_include_watched_series_and_disabled_rules(self):
         from store import SCHEMA, write_cache
         import actions
         with IsolatedWorker() as fixture:
             settings = fixture.settings()
             settings['rules'][0]['queue'] = {'removal': None, 'fixes': []}
+            settings['rules'][0]['enabled'] = False
             fixture.store.save_settings(settings)
             write_cache(settings, 'catalogue.json', {
                 'fake': {'schema': SCHEMA, 'fetched_at': '2026-09-01T08:00:00+00:00',
@@ -53,11 +54,11 @@ class Calendar(unittest.TestCase):
             events = result['events']
             self.assertEqual([(event['date'], event['title']) for event in events if event['kind'] == 'airing'], [
                 ('2026-09-05', 'Fixture'), ('2026-09-05', 'Managed'),
-                ('2026-09-06', 'Unmanaged'),
             ])
             managed_detail = next(event for event in events if event.get('episode'))
             self.assertEqual(managed_detail['episode'], {
                 'season': 2, 'number': 3, 'title': 'Managed episode'})
+            self.assertEqual({event['series_id'] for event in events if event['kind'] == 'airing'}, {1})
             self.assertEqual(fixture.sonarr.requests, [])
             fixture.sonarr.assert_finished()
 
@@ -102,6 +103,83 @@ class Calendar(unittest.TestCase):
             self.assertIn('Possible retention deletion', estimates[0]['detail'])
             self.assertIn('may change', estimates[0]['detail'])
             self.assertEqual(fixture.sonarr.requests, [])
+
+    def test_rank_based_and_combined_rules_forecast_already_eligible_files_at_first_run(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings()
+            rule = settings['rules'][0]
+            rule.update(queue={'removal': None, 'fixes': []}, enabled=True,
+                        keep_days=None, keep_episodes=1, keep_seasons=None, combine='any')
+            settings['schedule'].update(enabled=True, frequency='daily', hour=12, minute=0,
+                                        timezone='Etc/UTC', test_mode=True)
+            episodes = [
+                {'episode_id': 101, 'file_id': 50, 'has_file': True, 'series_id': 1,
+                 'season': 1, 'episode': 1, 'title': 'Old season',
+                 'air_date': '2026-08-01', 'air_source': 'sonarr', 'monitored': True,
+                 'path': '/tv/Fixture/old.mkv', 'size': 1000},
+                {'episode_id': 102, 'file_id': 51, 'has_file': True, 'series_id': 1,
+                 'season': 2, 'episode': 1, 'title': 'Recent season',
+                 'air_date': '2026-08-20', 'air_source': 'sonarr', 'monitored': True,
+                 'path': '/tv/Fixture/recent.mkv', 'size': 1000},
+            ]
+            fixture.store.save_settings(settings)
+
+            cases = (
+                ({'keep_episodes': 1, 'keep_seasons': None, 'keep_days': None, 'combine': 'any'},
+                 [('2026-09-01', 'Old season')]),
+                ({'keep_episodes': None, 'keep_seasons': 1, 'keep_days': None, 'combine': 'any'},
+                 [('2026-09-01', 'Old season')]),
+                ({'keep_episodes': 1, 'keep_seasons': None, 'keep_days': 2, 'combine': 'any'},
+                 [('2026-09-01', 'Old season')]),
+                ({'keep_episodes': 1, 'keep_seasons': None, 'keep_days': 30, 'combine': 'all'},
+                 [('2026-09-01', 'Old season'), ('2026-09-20', 'Recent season')]),
+            )
+            for conditions, expected in cases:
+                with self.subTest(conditions=conditions):
+                    rule.update(conditions)
+                    fixture.store.store_episodes(settings, rule, episodes, {})
+                    result = self.call(fixture, settings)
+                    estimates = [event for event in result['events'] if event['kind'] == 'estimate']
+                    self.assertEqual([(event['date'], event['episode']['title']) for event in estimates],
+                                     expected)
+                    self.assertTrue(all('Test Mode' in event['detail'] for event in estimates))
+                    self.assertTrue(all('Possible retention deletion' in event['detail']
+                                        for event in estimates))
+
+            self.assertEqual(fixture.sonarr.requests, [])
+            fixture.sonarr.assert_finished()
+
+    def test_future_rank_changes_are_conditional_cached_projection_only(self):
+        with IsolatedWorker() as fixture:
+            settings = fixture.settings()
+            rule = settings['rules'][0]
+            rule.update(queue={'removal': None, 'fixes': []}, enabled=True,
+                        keep_days=None, keep_episodes=1, keep_seasons=None, combine='any')
+            settings['schedule'].update(enabled=True, frequency='daily', hour=12, minute=0,
+                                        timezone='Etc/UTC', test_mode=True)
+            fixture.store.save_settings(settings)
+            fixture.store.store_episodes(settings, rule, [
+                {'episode_id': 101, 'file_id': 50, 'has_file': True, 'series_id': 1,
+                 'season': 1, 'episode': 1, 'title': 'Currently kept',
+                 'air_date': '2026-08-01', 'air_source': 'sonarr', 'monitored': True,
+                 'path': '/tv/Fixture/old.mkv', 'size': 1000},
+                {'episode_id': 102, 'file_id': None, 'has_file': False, 'series_id': 1,
+                 'season': 2, 'episode': 1, 'title': 'Cached future episode',
+                 'air_date': '2026-09-03', 'air_source': 'sonarr', 'monitored': True,
+                 'path': 'sonarr:episode:102', 'size': 0},
+            ], {})
+
+            result = self.call(fixture, settings)
+
+            estimates = [event for event in result['events'] if event['kind'] == 'estimate']
+            self.assertEqual([(event['date'], event['episode']['title']) for event in estimates],
+                             [('2026-09-03', 'Currently kept')])
+            self.assertTrue(estimates[0]['conditional'])
+            self.assertIn('Conditional projection', estimates[0]['detail'])
+            self.assertIn('future imports and files are unknown', estimates[0]['detail'])
+            self.assertIn('Test Mode', estimates[0]['detail'])
+            self.assertEqual(fixture.sonarr.requests, [])
+            fixture.sonarr.assert_finished()
 
     def test_schedule_forecast_uses_local_wall_time_and_does_not_include_ambiguous_fallback_run(self):
         import actions

@@ -343,12 +343,50 @@ test('calendar loads only on opening and switches between list and month without
   await page.flush();
   assert.equal(page.actions('calendar'), 1);
   assert.equal(page.$('tvr-view-series-calendar').hidden, false);
-  assert.match(collectText(page.$('tvr-calendar-events')), /Example · S01E02 · Airing soon/);
+  assert.equal(page.$('tvr-calendar-grid').attributes['aria-pressed'], 'true', 'month is the default');
+  assert.match(collectText(page.$('tvr-calendar-agenda')), /Example · S01E02 · Airing soon/);
   page.click('tvr-calendar-grid');
   assert.equal(page.$('tvr-calendar-grid').attributes['aria-pressed'], 'true');
   page.click('tvr-calendar-list');
+  assert.match(collectText(page.$('tvr-calendar-events')), /Example · S01E02 · Airing soon/);
   assert.equal(page.$('tvr-calendar-list').attributes['aria-pressed'], 'true');
   assert.equal(page.actions('settings'), 0);
+});
+
+test('calendar distinguishes conditional from already-known deletion estimates', async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  const page = await loadPage(() => ({ snapshot: snapshotFixture(), calendar: {
+    events: [
+      { date: day, kind: 'estimate', title: 'Known candidate' },
+      { date: day, kind: 'estimate', conditional: true, title: 'Depends on import' },
+    ], synced_at: '',
+  } }));
+  await page.flush();
+  page.openView('series-calendar');
+  await page.flush();
+  const agenda = collectText(page.$('tvr-calendar-agenda'));
+  assert.match(agenda, /Estimated deletion Known candidate/);
+  assert.match(agenda, /Conditional deletion Depends on import/);
+});
+
+test('calendar day selection reveals that day’s agenda', async () => {
+  const current = new Date().toISOString().slice(0, 10);
+  const day = `${current.slice(0, 7)}-${current.endsWith('-02') ? '03' : '02'}`;
+  const page = await loadPage(() => ({ snapshot: snapshotFixture(), calendar: {
+    events: [{ date: day, kind: 'airing', title: 'Selected show' }], synced_at: '',
+  } }));
+  await page.flush();
+  page.openView('series-calendar');
+  await page.flush();
+  const cell = page.$('tvr-calendar-events').children.find((child) =>
+    child.tagName === 'BUTTON' && child.title.includes('1 event'));
+  assert.ok(cell);
+  assert.doesNotMatch(collectText(page.$('tvr-calendar-agenda')), /Selected show/);
+  cell.click();
+  assert.match(collectText(page.$('tvr-calendar-agenda')), /Selected show/);
+  const selected = page.$('tvr-calendar-events').children.find((child) =>
+    child.tagName === 'BUTTON' && child.title.includes('1 event'));
+  assert.equal(selected.attributes['aria-pressed'], 'true');
 });
 
 test('queued background checks all complete, update the counts, and fetch nothing else', async () => {
