@@ -63,7 +63,7 @@ async function evaluateGraph(context) {
 }
 
 const SECTIONS = {
-  series: ['series-all', 'series-connected', 'series-unconnected', 'series-presets', 'series-exclusions'],
+  series: ['series-all', 'series-connected', 'series-calendar', 'series-unconnected', 'series-presets', 'series-exclusions'],
   settings: ['settings-general', 'settings-connections', 'settings-air-dates', 'settings-schedule'],
   system: ['system-status', 'system-stats', 'system-backup', 'system-logs'],
   help: ['help-adding', 'help-connecting', 'help-presets', 'help-monitoring',
@@ -237,6 +237,7 @@ async function loadPage(setup) {
 
   const routes = {
     snapshot: () => fixtures.snapshot,
+    calendar: () => fixtures.calendar || { events: [], synced_at: '' },
     series: () => ({ series: fixtures.series || [] }),
     'check-rule': (payload) => (fixtures.checkRule ? fixtures.checkRule(payload)
       : { rule_id: payload.rule_id, state: {}, alerts: [] }),
@@ -324,9 +325,31 @@ async function loadPage(setup) {
       return { text: box.textContent, kind: box.className, hidden: box.hidden };
     },
     actions: (name) => fetchLog.filter((entry) => entry.action === name).length,
+    openView: (name) => document.querySelector(`.tvr-side [data-view="${name}"]`).click(),
     elements,
   };
 }
+
+test('calendar loads only on opening and switches between list and month without writes', async () => {
+  const page = await loadPage(() => ({ snapshot: snapshotFixture(), calendar: {
+    synced_at: new Date().toISOString(), events: [
+      { date: new Date().toISOString().slice(0, 10), kind: 'airing', title: 'Example',
+        episode: { season: 1, number: 2, title: 'Airing soon' } },
+    ],
+  } }));
+  await page.flush();
+  assert.equal(page.actions('calendar'), 0);
+  page.openView('series-calendar');
+  await page.flush();
+  assert.equal(page.actions('calendar'), 1);
+  assert.equal(page.$('tvr-view-series-calendar').hidden, false);
+  assert.match(collectText(page.$('tvr-calendar-events')), /Example · S01E02 · Airing soon/);
+  page.click('tvr-calendar-grid');
+  assert.equal(page.$('tvr-calendar-grid').attributes['aria-pressed'], 'true');
+  page.click('tvr-calendar-list');
+  assert.equal(page.$('tvr-calendar-list').attributes['aria-pressed'], 'true');
+  assert.equal(page.actions('settings'), 0);
+});
 
 test('queued background checks all complete, update the counts, and fetch nothing else', async () => {
   const page = await loadPage(() => ({

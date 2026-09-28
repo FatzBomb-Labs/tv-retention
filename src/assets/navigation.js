@@ -18,7 +18,7 @@ import { remember, remembered } from './storage.js';
 // as its state.
 export function createNavigation({ getSettings, forgetDrafts, closeEditor, renderDetails,
                                    renderLibrary, renderStatsView, renderStatusView, renderBackupView,
-                                   startLog, stopLog }) {
+                                   startLog, stopLog, loadCalendar }) {
   // One view at a time, named by the sidebar item that reaches it. The list comes from the
   // markup so the two cannot disagree, which is the failure that blanked four tabs.
   const VIEWS = [...document.querySelectorAll('.tvr-side [data-view]')].map((b) => b.dataset.view);
@@ -100,6 +100,7 @@ export function createNavigation({ getSettings, forgetDrafts, closeEditor, rende
       $('tvr-library-title').textContent = TITLES[libraryFilter];
       renderLibrary();          // it fetches itself if what it needs is not in hand
     }
+    if (name === 'series-calendar') loadCalendar();
     if (name === 'system-stats') guarded('', renderStatsView);
     if (name === 'system-status') guarded('', renderStatusView);
     if (name === 'system-backup') guarded('', renderBackupView);

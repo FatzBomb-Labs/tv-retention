@@ -173,8 +173,36 @@ class RecycleBinWiring(unittest.TestCase):
     def test_action_enable_recycle_bin_writes_with_sonarrs_own_id_not_a_guessed_one(self):
         self.mock_request.return_value = {'id': 42, 'recycleBinCleanupDays': 7}
         result = actions.action_enable_recycle_bin(
-            self.settings, {'instance_id': self.instance['id'], 'path': '/tv/.recycle'})
+            self.settings, {'instance_id': self.instance['id'], 'path': '/tv/.recycle',
+                            'cleanup_days': 7})
         self.assertEqual(result['recycle_bin'], '/tv/.recycle')
         put_calls = [call for call in self.mock_request.call_args_list if call.args[1] == 'PUT']
         self.assertEqual(len(put_calls), 1)
         self.assertEqual(put_calls[0].args[2], 'config/mediamanagement/42')
+
+    def test_recycle_bin_dialog_reads_sonarr_cleanup_days_without_writing(self):
+        self.mock_request.return_value = {'id': 42, 'recycleBinCleanupDays': 30}
+        result = actions.action_recycle_bin_settings(
+            self.settings, {'instance_id': self.instance['id']})
+        self.assertEqual(result['cleanup_days'], 30)
+        self.assertEqual([call.args[1] for call in self.mock_request.call_args_list], ['GET'])
+
+    def test_recycle_bin_preserves_entered_cleanup_days_in_sonarr(self):
+        self.mock_request.return_value = {'id': 42, 'recycleBinCleanupDays': 30}
+        actions.action_enable_recycle_bin(
+            self.settings, {'instance_id': self.instance['id'], 'path': '/tv/.recycle',
+                            'cleanup_days': '0'})
+        put = next(call for call in self.mock_request.call_args_list if call.args[1] == 'PUT')
+        self.assertEqual(put.kwargs['body']['recycleBinCleanupDays'], 0)
+        self.assertEqual(put.kwargs['body']['recycleBin'], '/tv/.recycle')
+
+    def test_recycle_bin_rejects_invalid_cleanup_days_before_sonarr_write(self):
+        from core import Rejected
+        for days in ('', '-1', '1.5', 'ten', '36501'):
+            with self.subTest(days=days):
+                self.mock_request.reset_mock()
+                with self.assertRaises(Rejected):
+                    actions.action_enable_recycle_bin(
+                        self.settings, {'instance_id': self.instance['id'], 'path': '/tv/.recycle',
+                                        'cleanup_days': days})
+                self.mock_request.assert_not_called()

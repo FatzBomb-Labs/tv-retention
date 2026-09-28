@@ -24,7 +24,6 @@
     <span class="tvr-synced" id="tvr-synced"></span>
     <button type="button" id="tvr-refresh-all" class="tvr-icon-button tvr-icon-large"
             title="Sync with Sonarr now — everything else on this page is answered from the last sync"><i class="fa fa-refresh"></i></button>
-    <button type="button" id="tvr-theme" class="tvr-icon-button tvr-icon-large"></button>
     <button type="button" id="tvr-run" class="tvr-run"><i class="fa fa-play"></i><span id="tvr-run-label">Run</span></button>
   </div>
 </header>
@@ -45,6 +44,7 @@
         <button type="button" class="tvr-side-item" data-view="series-connected">Watching
           <span class="tvr-side-count" id="tvr-count-connected">0</span>
           <span class="tvr-tab-badge" id="tvr-badge-series-connected" hidden></span></button>
+        <button type="button" class="tvr-side-item" data-view="series-calendar">Calendar</button>
         <button type="button" class="tvr-side-item" data-view="series-unconnected">Not watching
           <span class="tvr-side-count" id="tvr-count-unconnected">0</span>
           <span class="tvr-tab-badge" id="tvr-badge-series-unconnected" hidden></span></button>
@@ -134,8 +134,29 @@
   </section>
 
   <!-- ---------------------------------------------------------------- -->
+<section id="tvr-view-series-calendar" class="tvr-view" hidden>
+    <div class="tvr-view-head"><h2>Calendar</h2><span class="tvr-spacer"></span>
+      <div class="tvr-seg" role="group" aria-label="Calendar layout">
+        <button type="button" id="tvr-calendar-list" aria-label="List view">List</button>
+        <button type="button" id="tvr-calendar-grid" aria-label="Calendar view">Month</button>
+      </div>
+      <button type="button" id="tvr-calendar-refresh" class="tvr-secondary">Refresh</button>
+    </div>
+    <p id="tvr-calendar-reading" class="tvr-lede" role="status"></p>
+    <p class="tvr-lede">Shows the next six weeks. Deletion dates are estimates for scheduled runs; with scheduling off, no deletion date can be predicted.</p>
+    <div id="tvr-calendar-month-nav" class="tvr-calendar-month-nav" hidden>
+      <button type="button" id="tvr-calendar-prev" aria-label="Previous month">‹</button>
+      <strong id="tvr-calendar-month"></strong>
+      <button type="button" id="tvr-calendar-next" aria-label="Next month">›</button>
+    </div>
+    <div id="tvr-calendar-events"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
 <section id="tvr-view-settings-connections" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Connections</h2></div>
+    <div class="tvr-view-head tvr-save-head"><h2>Connections</h2><span class="tvr-spacer"></span>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span>
+      <button type="button" class="tvr-primary tvr-save">Save settings</button></div>
     <div id="tvr-alerts-system" class="tvr-rules"></div>
     <div class="tvr-actions"><button type="button" id="tvr-recheck-all" class="tvr-secondary">Re-check everything</button></div>
     <h3 class="tvr-h3">Sonarr instances</h3>
@@ -159,8 +180,6 @@
       <div id="tvr-api-key-state" class="tvr-inline-row"></div>
       <div id="tvr-api-key-actions" class="tvr-actions"></div>
     </div>
-    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
-      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
@@ -223,7 +242,9 @@
 
   <!-- ---------------------------------------------------------------- -->
 <section id="tvr-view-series-exclusions" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Exclusion Rules</h2></div>
+    <div class="tvr-view-head tvr-save-head"><h2>Exclusion Rules</h2><span class="tvr-spacer"></span>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span>
+      <button type="button" class="tvr-primary tvr-save">Save settings</button></div>
     <p class="tvr-lede">Global exceptions to retention. These apply to every series, and a series can opt out of the specials rule from its own editor.</p>
 
     <h3 class="tvr-h3">Global exclusions</h3>
@@ -241,8 +262,6 @@
         <div id="tvr-exclude-episodes" class="tvr-phrases"></div>
         <small>Matched against the episode's title and its file path, without regard to case.</small></div>
     </div>
-    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
-      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->
@@ -394,9 +413,16 @@
   <!-- ---------------------------------------------------------------- -->
 
 <section id="tvr-view-settings-general" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>General</h2></div>
-    <p class="tvr-lede">Application-wide logging and history settings.</p>
+    <div class="tvr-view-head tvr-save-head"><h2>General</h2><span class="tvr-spacer"></span>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span>
+      <button type="button" class="tvr-primary tvr-save">Save settings</button></div>
+    <p class="tvr-lede">Appearance, logging and history settings.</p>
     <div class="tvr-card">
+      <div class="tvr-inline-row">
+        <span class="tvr-inline-label">Theme</span>
+        <button type="button" id="tvr-theme" class="tvr-icon-button tvr-icon-large" aria-label="Change theme"></button>
+        <small>Cycles through system, light and dark. Applies immediately to this browser.</small>
+      </div>
       <div class="tvr-inline-row">
         <span class="tvr-inline-label">Detail</span>
         <select id="tvr-log-level">
@@ -414,15 +440,14 @@
       </div>
       <small>Older runs are dropped from the history table. The journal keeps every one regardless.</small>
     </div>
-    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
-      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
-  
   </section>
 
   <!-- ---------------------------------------------------------------- -->
 
 <section id="tvr-view-settings-air-dates" class="tvr-view" hidden>
-    <div class="tvr-view-head"><h2>Air date resolution</h2></div>
+    <div class="tvr-view-head tvr-save-head"><h2>Air date resolution</h2><span class="tvr-spacer"></span>
+      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span>
+      <button type="button" class="tvr-primary tvr-save">Save settings</button></div>
     <p class="tvr-lede">A rule that keeps by age needs a date for every episode it judges. Sonarr supplies one for almost everything with a broadcast slot, so this is rare — but when a series has no dates, a keep-by-age rule quietly finds nothing to act on.</p>
     <div class="tvr-card">
       <div class="tvr-field"><span>If Sonarr has no air date, ask these in order</span>
@@ -431,8 +456,6 @@
       <div id="tvr-air-unresolved" class="tvr-questions"></div>
       <div id="tvr-air-still" class="tvr-questions"></div>
     </div>
-    <div class="tvr-actions"><button type="button" class="tvr-primary tvr-save">Save settings</button>
-      <span class="tvr-dirty tvr-dirty-mark" hidden>Unsaved changes</span></div>
   </section>
 
   <!-- ---------------------------------------------------------------- -->

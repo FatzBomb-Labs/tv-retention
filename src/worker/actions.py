@@ -24,9 +24,9 @@ import backup
 import main
 import schedules
 from core import (DEFAULTS, REMOVAL_ACTIONS, VERSION, Rejected, canonical_json,
-                  describe_selectability, effective_rule, exclusion_summary, excluded_causes,
-                  new_id, next_episode, normalise, redact, removal_target, validate_conditions, validate_settings,
-                  validate_text)
+                  describe_selectability, effective_rule, evaluate, exclusion_summary,
+                  excluded_causes, new_id, next_episode, normalise, redact, removal_target,
+                  validate_conditions, validate_settings, validate_text)
 from sonarr import SonarrError
 from store import (SCHEMA, age_seconds, episode_cache as store_episode_cache, forget_episodes, invalidate_catalogue, job_state,
                    load_health, load_settings, load_settings_strict, load_state, load_state_strict, log_line, now_iso, read_cache,
@@ -111,6 +111,150 @@ def plan_summary(settings: dict, health: dict) -> dict:
     totals['trustworthy'] = totals['unknown'] == 0
     return totals
 
+
+
+def _calendar_date(value):
+    """Read a Sonarr date without guessing when it is malformed or timezone-free."""
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _calendar_add(events, seen, event):
+    base_key = (event['date'], event['kind'], event.get('instance_id'), event['title'])
+    episode = event.get('episode') or {}
+    generic_episode = (episode.get('season') is None and episode.get('number') is None
+                       and not episode.get('title'))
+    if episode and not generic_episode:
+        episode_key = base_key + (episode.get('season'), episode.get('number'), episode.get('title'))
+        if episode_key in seen:
+            return
+        generic = seen.get(base_key)
+        if generic is not None:
+            generic.update(event)
+            seen[episode_key] = generic
+            return
+        seen[episode_key] = event
+        events.append(event)
+        return
+    if base_key not in seen:
+        seen[base_key] = event
+        events.append(event)
+
+
+def _calendar_runs(schedule, now, horizon_days=42):
+    """Return the next actual scheduled instant for each local date in the horizon."""
+    if not schedule.get('enabled'):
+        return []
+    zone = schedules.zone_for(schedule, now.tzinfo)
+    first = now.astimezone(zone).date()
+    end = now + dt.timedelta(days=horizon_days)
+    last = end.astimezone(zone).date()
+    runs = []
+    for offset in range((last - first).days + 1):
+        local_date = first + dt.timedelta(days=offset)
+        hours, minutes = schedules.day_matches(schedule, local_date)
+        candidates = []
+        for hour in sorted(hours):
+            for minute in sorted(minutes):
+                local = dt.datetime.combine(local_date, dt.time(hour, minute), tzinfo=zone)
+                candidates.extend(candidate for candidate in schedules._local_candidates(local, zone)
+                                  if now <= candidate <= end)
+        if candidates:
+            runs.append((local_date, min(candidates)))
+    return runs
+
+
+def action_calendar(settings, request):
+    """Project a six-week calendar from stored Sonarr readings only.
+
+    Airings use the cached all-series catalogue where Sonarr supplies nextAiring, plus
+    episode-specific dates from managed-series episode caches. Deletion estimates run the
+    real retention evaluator against those caches at future dates; they are possibilities,
+    not promises that Sonarr state or incoming episodes will remain unchanged.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    today = now.date()
+    last_day = today + dt.timedelta(days=41)
+    events = []
+    seen = {}
+
+    catalogue = read_cache(settings, 'catalogue.json')
+    for instance in settings.get('instances', []):
+        entry = catalogue.get(instance.get('id')) or {}
+        if entry.get('schema') != SCHEMA:
+            continue
+        for series in entry.get('series') or []:
+            day = _calendar_date(series.get('next_airing'))
+            title = series.get('title') or 'Upcoming episode'
+            if day and today <= day <= last_day:
+                _calendar_add(events, seen, {'date': day.isoformat(), 'kind': 'airing',
+                     'title': title, 'instance_id': instance.get('id'),
+                     'episode': {'season': None, 'number': None, 'title': ''},
+                     'detail': 'Sonarr series-level next airing; episode details are unavailable.'})
+
+    try:
+        scheduled_runs = _calendar_runs(settings.get('schedule') or {}, now)
+    except (ValueError, schedules.ScheduleError):
+        scheduled_runs = []
+
+    for rule in settings.get('rules', []):
+        removal = (rule.get('queue') or {}).get('removal')
+        if removal:
+            scheduled = next(((day, instant) for day, instant in scheduled_runs
+                              if today <= day <= last_day), None)
+            if scheduled:
+                run_day, _ = scheduled
+                _calendar_add(events, seen, {'date': run_day.isoformat(), 'kind': 'queued',
+                     'title': rule.get('series_title') or rule.get('path') or 'Queued series action',
+                     'instance_id': rule.get('instance_id'),
+                     'detail': f'Queued Sonarr action: {REMOVAL_ACTIONS.get(removal.get("action"), removal.get("action", "unknown"))}. Not yet executed; the schedule may be in Test Mode.'})
+            continue
+        if not rule.get('enabled'):
+            continue
+        episodes, _, fetched_at = store_episode_cache(settings, rule)
+        if episodes is None:
+            continue
+        active = effective_rule(rule, settings.get('profiles'))
+        # Sonarr's catalogue is a library-wide list; episode-level cached dates give
+        # managed shows the richer episode title/number when present.
+        for episode in episodes:
+            day = _calendar_date(episode.get('air_date'))
+            if day and today <= day <= last_day and day > today:
+                title = rule.get('series_title') or rule.get('path') or 'Upcoming episode'
+                detail = 'Upcoming date from the cached episode catalogue.'
+                _calendar_add(events, seen, {'date': day.isoformat(), 'kind': 'airing', 'title': title,
+                     'instance_id': rule.get('instance_id'), 'episode': {'season': episode.get('season'), 'number': episode.get('episode'),
+                                 'title': episode.get('title') or ''}, 'detail': detail})
+
+        # Forecast a file only on its first schedule date whose evaluator result says
+        # delete. Candidate dates between runs are not deletion dates.
+        reported_files = set()
+        for run_day, forecast_at in scheduled_runs:
+            planned = evaluate(episodes, active, settings, now=forecast_at)
+            for candidate in planned['delete']:
+                file_id = candidate.get('file_id')
+                if not candidate.get('has_file') or not file_id or file_id in reported_files:
+                    continue
+                title = rule.get('series_title') or rule.get('path') or 'Retention candidate'
+                episode_detail = {'season': candidate.get('season'),
+                                  'number': candidate.get('episode'),
+                                  'title': candidate.get('title') or ''}
+                _calendar_add(events, seen, {'date': run_day.isoformat(), 'kind': 'estimate',
+                     'title': title, 'instance_id': rule.get('instance_id'),
+                     'episode': episode_detail,
+                     'detail': f'Possible retention deletion based on cached data read {fetched_at or "at an unknown time"}; exclusions and evaluator protections were applied, but Sonarr state may change before the scheduled run.'})
+                reported_files.add(file_id)
+
+    # Series-level nextAiring is the broadest cache and may be absent for unmanaged
+    # catalogues. Never fetch episodes here: no calendar request should block on Sonarr.
+    events.sort(key=lambda event: (event['date'], event['kind'], event['title'],
+                                   (event.get('episode') or {}).get('season') or -1,
+                                   (event.get('episode') or {}).get('number') or -1))
+    return {'events': events, 'synced_at': (main.last_sync(settings) or {}).get('synced_at')}
 
 
 def action_snapshot(settings, request):
@@ -928,6 +1072,15 @@ def _whole_or(value, fallback: int) -> int:
         return fallback
 
 
+def action_recycle_bin_settings(settings, request):
+    """Read Sonarr's current cleanup interval before offering to change its recycle bin."""
+    instance = next((i for i in settings.get('instances', []) if i['id'] == str(request.get('instance_id') or '')), None)
+    if not instance:
+        raise Rejected('That Sonarr instance no longer exists.')
+    media = main.sonarr_client(instance).media_management()
+    return {'cleanup_days': media.get('recycleBinCleanupDays') if media.get('recycleBinCleanupDays') is not None else 7}
+
+
 def action_enable_recycle_bin(settings, request):
     """Set a recycle bin on a Sonarr instance, at the operator's explicit request.
 
@@ -939,11 +1092,16 @@ def action_enable_recycle_bin(settings, request):
         raise Rejected('That Sonarr instance no longer exists.')
     from core import validate_path
     path = validate_path(request.get('path'), 'Recycle bin path')
+    entered_days = request.get('cleanup_days')
+    if isinstance(entered_days, bool) or not str(entered_days).isdigit():
+        raise Rejected('Cleanup days must be a non-negative whole number.')
+    cleanup_days = int(entered_days)
+    if cleanup_days > 36500:
+        raise Rejected('Cleanup days must be 36500 or less.')
     client = main.sonarr_client(instance)
     media = client.media_management()
     media['recycleBin'] = path
-    if not media.get('recycleBinCleanupDays'):
-        media['recycleBinCleanupDays'] = 7
+    media['recycleBinCleanupDays'] = cleanup_days
     client.set_media_management(media)
     log_line(settings, 'warning', f'{instance["name"]}: recycle bin set to {path}')
     return {'recycle_bin': path, 'ok_message': f'Sonarr will now move deleted files to {path}.'}
@@ -993,10 +1151,12 @@ def action_clear_history(settings, request):
 
 ACTIONS = {
     'snapshot': action_snapshot,
+    'calendar': action_calendar,
     'progress': action_progress,
     'log': action_log,
     'alerts': action_alerts,
     'status': action_status,
+    'recycle-bin-settings': action_recycle_bin_settings,
     'enable-recycle-bin': action_enable_recycle_bin,
     'check-rule': action_check_rule,
     'watch': action_watch,
@@ -1036,7 +1196,7 @@ def dispatch(request: dict) -> dict:
                 backup.recover_activation()
         read_only = {
             'alerts', 'episodes', 'log', 'scope-counts', 'series', 'snapshot', 'stats',
-            'settings', 'status', 'test-instance',
+            'settings', 'status', 'test-instance', 'recycle-bin-settings', 'calendar',
         }
         settings = load_settings() if action in read_only else load_settings_strict()
         return {'ok': True, **handler(settings, request)}

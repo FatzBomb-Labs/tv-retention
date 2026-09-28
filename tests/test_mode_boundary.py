@@ -101,7 +101,8 @@ class ModeBoundary(unittest.TestCase):
                     fixture.sonarr.expect('PUT', 'config/mediamanagement/1', body={
                         'id': 1, 'recycleBin': '/recycle', 'recycleBinCleanupDays': 7})
                 result = actions.dispatch({'action': 'enable-recycle-bin',
-                                           'instance_id': 'fake', 'path': '/recycle'})
+                                           'instance_id': 'fake', 'path': '/recycle',
+                                           'cleanup_days': 7})
                 self.assertEqual(result['ok'], not mode, result)
                 if mode:
                     self.assertIn('Test Mode', result['error'])

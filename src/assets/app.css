@@ -668,6 +668,31 @@ body { margin: 0; background: var(--tvr-bg); color: var(--tvr-fg);
 .tvr-main { min-width: 0; padding: 10px 13px 16px; }
 .tvr-view-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .tvr-view-head h2 { font-size: 16px; margin: 0; }
+#tv-retention .tvr-view-head #tvr-calendar-list,
+#tv-retention .tvr-view-head #tvr-calendar-grid { width: auto; height: auto; padding: 5px 9px; }
+.tvr-calendar-month-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 10px 0; }
+.tvr-calendar-month-nav[hidden] { display: none; }
+.tvr-calendar-list { display: grid; gap: 10px; }
+.tvr-calendar-day { border-bottom: 1px solid var(--tvr-line); padding: 8px 4px; }
+.tvr-calendar-day h3 { margin: 0 0 6px; font-size: 13px; }
+.tvr-calendar-event { display: flex; align-items: baseline; gap: 8px; padding: 5px 7px; flex-wrap: wrap;
+  border-left: 3px solid var(--tvr-action); margin: 3px 0; background: var(--tvr-soft); border-radius: 2px; }
+.tvr-calendar-event.queued { border-color: var(--tvr-warn); }
+.tvr-calendar-event.estimate { border-color: var(--tvr-bad); }
+.tvr-calendar-event small { opacity: .7; }
+.tvr-calendar-kind { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.tvr-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.tvr-calendar-weekday { text-align: center; font-size: 11px; font-weight: 600; }
+.tvr-calendar-cell { min-height: 95px; border: 1px solid var(--tvr-line); border-radius: 4px;
+  padding: 4px; min-width: 0; overflow-wrap: anywhere; }
+.tvr-calendar-cell.today { border-color: var(--tvr-action); }
+.tvr-calendar-cell .tvr-calendar-event { display: grid; gap: 2px; font-size: 11px; }
+@media (max-width: 700px) {
+  .tvr-calendar-grid { grid-template-columns: repeat(7, minmax(120px, 1fr)); overflow-x: auto; }
+  #tvr-view-series-calendar { overflow-x: auto; }
+}
+.tvr-save-head { position: sticky; top: 0; z-index: 3; padding: 8px 10px;
+  margin: -10px -13px 10px; background: var(--tvr-bg); border-bottom: 1px solid var(--tvr-line); }
 #tv-retention .tvr-h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   opacity: .6; margin: 12px 0 4px; font-weight: 700; }
 .tvr-view > .tvr-card, .tvr-view > .tvr-instances, .tvr-view > .tvr-actions { margin-left: 12px; }

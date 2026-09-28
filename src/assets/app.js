@@ -31,6 +31,7 @@ import { createTopBar } from './topbar.js';
 import { createPresets } from './presets.js';
 import { createConnections } from './connections.js';
 import { createLibrary } from './library.js';
+import { createCalendar } from './calendar.js';
 
 function start(root) {
   const api = createApi(root.dataset.api, root.dataset.csrf);
@@ -170,6 +171,8 @@ function start(root) {
   });
   const { seriesAlertCard, systemAlertCard, showSeriesAlerts, renderAlerts } = alerts;
 
+  const calendar = createCalendar({ api });
+
   // -- navigation --------------------------------------------------------
   // Built after the editor and the alerts, because both reach navigation and neither is
   // reachable from it: the editor's `openLibraryView` and the alerts' two intents are
@@ -185,6 +188,7 @@ function start(root) {
     renderBackupView: () => renderBackupView(),
     startLog: () => startLog(),
     stopLog: () => stopLog(),
+    loadCalendar: () => calendar.load(),
   });
   const { showView, isLibraryView, getLibraryFilter } = navigation;
 
@@ -396,6 +400,7 @@ function start(root) {
   checks.wire();
   alerts.wire();
   navigation.wire();
+  calendar.wire();
   topbar.wire();
   presets.wire();
   connections.wire();

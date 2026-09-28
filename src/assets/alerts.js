@@ -154,8 +154,9 @@ export function createAlerts({ api, getSettings, getMonitoring, getSystemAlerts,
   function runAlertAction(alert) {
     return guarded('', async () => {
       if (alert.action === 'enable-recycle-bin') {
-        // Writes to Sonarr's own configuration, so it asks for the path and says plainly
-        // that the change applies to everything Sonarr deletes.
+        // Read Sonarr's current interval so opening the dialog never invents a default.
+        const current = await api('recycle-bin-settings', { instance_id: alert.instance_id },
+                                  'Reading Sonarr settings…');
         dialog('Give Sonarr a recycle bin', (body) => {
           body.append(el('p', { textContent:
             'Sonarr will move deleted files here instead of removing them, and clean the folder '
@@ -166,10 +167,15 @@ export function createAlerts({ api, getSettings, getMonitoring, getSystemAlerts,
           body.append(field('Recycle bin path, as Sonarr sees it', path,
                             'A path inside Sonarr, on the same filesystem as your library so moves '
                             + 'are instant. Sonarr creates it if it does not exist.'));
-          return { path };
+          const cleanupDays = el('input', { type: 'number', min: '0', max: '36500', step: '1',
+                                            value: String(current.cleanup_days) });
+          body.append(field('Cleanup after (days)', cleanupDays,
+                            'Sonarr’s current interval. 0 keeps deleted files until you remove them manually.'));
+          return { path, cleanupDays };
         }, async (inner) => {
           const data = await api('enable-recycle-bin',
-                                 { instance_id: alert.instance_id, path: inner.path.value.trim() },
+                                 { instance_id: alert.instance_id, path: inner.path.value.trim(),
+                                   cleanup_days: inner.cleanupDays.value },
                                  'Updating Sonarr…');
           queueChecks((getSettings().rules || []).filter((r) => r.instance_id === alert.instance_id)
             .map((r) => r.id).slice(0, 1));

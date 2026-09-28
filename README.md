@@ -10,6 +10,17 @@ A shared multi-episode file expires with its latest episode under the selected r
 conditions. An exclusion on any member protects the whole file. It is deleted and counted
 once, only after its monitored episodes have been successfully unmonitored.
 
+## Changelog
+
+### Unreleased
+
+- Added **Series → Calendar** with list and month views for upcoming airings, queued actions,
+  and clearly labeled estimates for scheduled retention deletions.
+- Moved the browser theme toggle into **Settings → General** and kept manual settings saves
+  visible at the top of each applicable tab while scrolling.
+- The recycle-bin setup dialog now reads Sonarr's cleanup interval and can update it with
+  the recycle-bin path.
+
 ## Status and safety
 
 **Release status:** the documented build-32 demo has operator approval for its scheduled
@@ -100,9 +111,14 @@ New settings default to Test Mode on and no retention schedule; verify copied se
 
 ## Getting around
 
-- **Series:** All, **Watching** (has a retention rule), **Not watching**, Presets and
-  Exclusion Rules. Watching is not media-server watch history or Sonarr's monitored flag.
-- **Settings:** General, Connections, Air dates and Schedule.
+- **Series:** All, **Watching** (has a retention rule), **Calendar**, **Not watching**,
+  Presets and Exclusion Rules. Calendar offers a list or month layout for upcoming airings,
+  queued removals and estimated retention deletions. Its dates come from cached Sonarr
+  readings and may change before a run; it does not itself execute anything. Watching is
+  not media-server watch history or Sonarr's monitored flag.
+- **Settings:** General (including the browser's system/light/dark theme toggle),
+  Connections, Air dates and Schedule. Panels with manual settings have a Save settings
+  button that stays at the top while you scroll; Schedule changes save as you make them.
 - **System:** Status, Stats, Backup and Logs. Storage health is part of Status, not a
   separate Storage navigation item.
 - **Help:** About and usage guidance. About shows semantic version, `BUILD` and image
@@ -235,9 +251,11 @@ its rules but stops ordinary processing. Stored Sonarr/provider credentials are 
 settings responses; saving the unchanged mask retains the secret. They remain sensitive
 plaintext in local settings and backups, unlike TV Retention's own hashed API credential.
 
-Connections reports recycle-bin configuration and offers a fix that writes to Sonarr
-immediately rather than queueing; Test Mode refuses it. Without a recycle bin, deletion is
-permanent; even with one, verify recovery in a disposable environment.
+Connections reports recycle-bin configuration and offers a fix that reads Sonarr's
+current cleanup interval, lets you change it alongside the recycle-bin path, and writes
+both to Sonarr immediately rather than queueing; Test Mode refuses the write. Without a
+recycle bin, deletion is permanent; even with one, verify recovery in a disposable
+environment.
 
 ## Air dates and optional providers
 
