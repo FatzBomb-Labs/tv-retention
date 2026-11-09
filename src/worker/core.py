@@ -1262,10 +1262,16 @@ def evaluate(episodes, rule, settings, now=None) -> dict:
                 votes[key].append(('days', 'delete', f'Aired {date} ({source}), older than {rule["keep_days"]} days'))
 
     if rule.get('keep_episodes'):
-        ranked = sorted(candidates, key=lambda e: _order_key(e, allow_estimates), reverse=True)
+        # Only a dated episode can be ranked. An undated one used to sort as the oldest of
+        # all, which is backwards for the usual case of a fresh import Sonarr has not dated
+        # yet; like the age condition, it now votes unknown instead.
+        dated = [e for e in candidates if effective_date(e, allow_estimates)[0] is not None]
+        ranked = sorted(dated, key=lambda e: _order_key(e, allow_estimates), reverse=True)
         keep_set = {file_key(e) for e in ranked[:int(rule['keep_episodes'])]}
-        for key in latest:
-            if key in keep_set:
+        for key, episode in latest.items():
+            if effective_date(episode, allow_estimates)[0] is None:
+                votes[key].append(('episodes', 'unknown', 'No air date available to rank this episode'))
+            elif key in keep_set:
                 votes[key].append(('episodes', 'keep', f'Among the newest {rule["keep_episodes"]} episodes'))
             else:
                 votes[key].append(('episodes', 'delete', f'Not among the newest {rule["keep_episodes"]} episodes'))
@@ -1355,7 +1361,7 @@ def keep_frame(episodes, rule, settings, now=None) -> dict:
         else:
             aired.append(episode)
 
-    # The percentage guard exists to stop mass deletion, not to limit a read-only view.
+    # The same decision a run makes, over aired episodes only: unaired ones are in frame.
     decision = evaluate(aired, rule, settings, now=now)
     return {'considered': considered, 'specials': specials, 'unaired': unaired,
             'in_frame': decision['keep'] + decision['protected'] + unaired,

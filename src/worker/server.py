@@ -92,6 +92,41 @@ UMASK = env_int('UMASK', 0o22, base=8)
 
 MAX_BODY = 1024 * 1024
 COOKIE = 'tvr_session'
+# Extra origins a reverse proxy may present, e.g. "https://tvr.example.com". Comma-separated.
+ALLOWED_ORIGINS = {value.strip().rstrip('/').lower()
+                   for value in env('TVR_ALLOWED_ORIGINS').split(',') if value.strip()}
+
+
+def cross_site_reason(headers) -> str:
+    """Why a POST came from another site's page, or an empty string.
+
+    The CSRF token only exists while there is a login, so with TVR_AUTH=none any page open
+    in the operator's browser could post a form here and queue a removal or start a run.
+    A trusted network does not help: the request comes from the operator's own browser.
+    Browsers say where a request came from in headers a page cannot forge — Sec-Fetch-Site
+    on current ones, Origin on every cross-site POST — so a POST is accepted only when
+    those name this site. A client that sends neither (curl, a script) is not a browser
+    being steered by someone else's page and is still answered; login still applies to it.
+    """
+    site = (headers.get('Sec-Fetch-Site') or '').strip().lower()
+    if site and site not in ('same-origin', 'none'):
+        return f'Sec-Fetch-Site: {site}'
+    origin = (headers.get('Origin') or '').strip()
+    if not origin:
+        return ''
+    if origin.lower() == 'null':
+        return 'Origin: null'
+    if origin.rstrip('/').lower() in ALLOWED_ORIGINS:
+        return ''
+    netloc = urllib.parse.urlparse(origin).netloc.lower()
+    hosts = {(headers.get('Host') or '').strip().lower()}
+    forwarded = (headers.get('X-Forwarded-Host') or '').split(',')[0].strip().lower()
+    if forwarded:
+        hosts.add(forwarded)
+    hosts.discard('')
+    if netloc and netloc in hosts:
+        return ''
+    return f'Origin: {origin}'
 
 
 def startup_error() -> str:
@@ -535,6 +570,13 @@ class Handler(BaseHTTPRequestHandler):
         # request on the same connection, and every early return below is a way to leave
         # one behind.
         form = self.read_form()
+        refused = cross_site_reason(self.headers)
+        if refused:
+            with contextlib.suppress(Exception):
+                log_line(load_settings(), 'warning', f'refused a cross-site POST to {route} ({refused})')
+            if route == '/api':
+                return self.send_json(403, {'ok': False, 'error': 'Cross-site request refused.'})
+            return self.send(403, b'Cross-site request refused', 'text/plain; charset=utf-8')
         if route == '/login':
             return self.handle_login(form)
         if route == '/logout':

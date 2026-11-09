@@ -12,6 +12,10 @@ the watched-only Calendar, conditional all-rule forecasts and selected-day agend
 - 40 frontend tests passed.
 - Worker imports and shipped-module syntax checks passed; gate exited 0.
 
+Build 38 (November 9, 2026: undated-episode ranking fix and cross-site POST refusal) was
+checked off-host only, in a Linux sandbox on Python 3.13: 681 Python tests and 40 frontend
+tests passed, and every worker module imported. Re-run the host gate before deploying it.
+
 These counts are historical until the gate is run again. From Windows, use
 `tools/check-on-host.ps1`; see [AGENTS.md](../AGENTS.md) for local checks and limitations.
 
