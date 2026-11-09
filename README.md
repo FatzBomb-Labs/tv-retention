@@ -12,6 +12,16 @@ once, only after its monitored episodes have been successfully unmonitored.
 
 ## Changelog
 
+### v0.3.0-beta.5 (build 38)
+
+- Fixed: a keep-N-episodes rule ranked an episode with no air date as the oldest, so a
+  freshly imported episode Sonarr had not dated yet could be planned for deletion. Such an
+  episode now counts as unknown for that condition and is never deleted on its account.
+- Every POST now refuses requests a browser marks as coming from another site
+  (`Sec-Fetch-Site`/`Origin`). This matters most with `TVR_AUTH=none`, where there is no
+  CSRF token: any page open in your browser could previously post actions here. Behind a
+  reverse proxy that rewrites `Host`, list the public origin in `TVR_ALLOWED_ORIGINS`.
+
 ### v0.3.0-beta.4 (build 37)
 
 - Calendar now shows only Watching series, including disabled rules; the month view is
@@ -116,6 +126,7 @@ Requirements: a container runtime and a reachable Sonarr v3 or v4 instance. No m
 |---|---|---|
 | `TVR_USERNAME`, `TVR_PASSWORD` | — | Login credentials; password must be at least 8 characters. |
 | `TVR_AUTH` | — | Explicit `none` disables login; only for a separately protected, trusted network. |
+| `TVR_ALLOWED_ORIGINS` | — | Comma-separated extra origins (e.g. `https://tvr.example.com`) accepted for POSTs when a reverse proxy rewrites `Host` and does not send `X-Forwarded-Host`. |
 | `TVR_PORT` | `8787` | HTTP listen port; port mapping and health-check compatibility must be checked if changed. |
 | `PUID`, `PGID` | `1000` | Runtime identity and `/config` ownership on root-start; commonly `99`/`100` on Unraid. Explicit `user:` skips ownership adjustment and privilege drop. |
 | `UMASK` | `022` | File-creation mask; non-root startup/permission validation remains in PLAN. |

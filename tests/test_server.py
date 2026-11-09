@@ -20,7 +20,7 @@ def load(**environment):
     import sys
     previous = {key: os.environ.get(key) for key in
                 ('TVR_USERNAME', 'TVR_PASSWORD', 'TVR_AUTH', 'TVR_PORT', 'TVR_SESSION_HOURS',
-                 'PUID', 'PGID', 'UMASK')}
+                 'PUID', 'PGID', 'UMASK', 'TVR_ALLOWED_ORIGINS')}
     os.environ.update({key: '' for key in previous})
     os.environ.update(environment)
     try:
@@ -384,7 +384,7 @@ class Serves(unittest.TestCase):
             headers[name.strip().lower()] = value.strip()
         return lines[0], headers, body
 
-    def post(self, sock, reader, body):
+    def post(self, sock, reader, body, headers=''):
         """One request, and exactly one response read back off the stream.
 
         Reading with a bare recv() is what makes this test lie: the response arrives in
@@ -392,7 +392,7 @@ class Serves(unittest.TestCase):
         last one and the failure looks like the server's rather than the test's.
         """
         request = (f'POST /api HTTP/1.1\r\nHost: x\r\nContent-Type: '
-                   f'application/x-www-form-urlencoded\r\nContent-Length: {len(body)}\r\n\r\n{body}')
+                   f'application/x-www-form-urlencoded\r\n{headers}Content-Length: {len(body)}\r\n\r\n{body}')
         sock.sendall(request.encode())
         status = reader.readline().decode('utf-8', 'replace')
         length = 0
@@ -500,6 +500,52 @@ class ReleaseRoutes(Serves):
             self.assertEqual(body, b'console.log(1)\n', 'the disk moved under a live digest')
             self.assertNotEqual(self.server.build_release(directory)[0], digest,
                                 'a rebuilt release did not notice the change')
+
+
+class CrossSite(Serves):
+    """A page on another site must not be able to post here through the operator's browser.
+
+    With TVR_AUTH=none there is no CSRF token, so the browser's own provenance headers are
+    the only thing that tells a form on someone else's page from this interface.
+    """
+
+    def setUp(self):
+        self.server_module = load(TVR_AUTH='none')
+        self.start_http(self.server_module)
+
+    def status(self, headers):
+        import socket
+        with socket.create_connection(('127.0.0.1', self.port), timeout=5) as sock:
+            status, _ = self.post(sock, sock.makefile('rb'), 'payload=%7B%7D', headers)
+        return status
+
+    def test_another_sites_origin_is_refused(self):
+        self.assertIn('403', self.status('Origin: http://evil.example\r\n'))
+
+    def test_a_cross_site_fetch_is_refused(self):
+        self.assertIn('403', self.status('Sec-Fetch-Site: cross-site\r\n'))
+
+    def test_a_sibling_port_on_the_same_host_is_refused(self):
+        self.assertIn('403', self.status('Sec-Fetch-Site: same-site\r\nOrigin: http://x:8989\r\n'))
+
+    def test_an_opaque_origin_is_refused(self):
+        self.assertIn('403', self.status('Origin: null\r\n'))
+
+    def test_the_interface_itself_is_answered(self):
+        status = self.status('Sec-Fetch-Site: same-origin\r\nOrigin: http://x\r\n')
+        self.assertNotIn('403', status)
+
+    def test_a_reverse_proxy_host_is_answered(self):
+        status = self.status('Origin: https://tvr.example\r\nX-Forwarded-Host: tvr.example\r\n')
+        self.assertNotIn('403', status)
+
+    def test_a_client_without_browser_headers_is_answered(self):
+        self.assertNotIn('403', self.status(''))
+
+    def test_an_allowed_origin_can_be_configured(self):
+        from unittest import mock
+        with mock.patch.object(self.server_module, 'ALLOWED_ORIGINS', {'https://tvr.example'}):
+            self.assertNotIn('403', self.status('Origin: https://tvr.example/\r\n'))
 
 
 class KeepAlive(Serves):

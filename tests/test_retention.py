@@ -80,6 +80,26 @@ class KeepEpisodes(unittest.TestCase):
         self.assertEqual(len(result['delete']), 3)
         self.assertEqual(paths(result['keep']), paths(episodes[-2:]))
 
+    def test_an_undated_episode_is_never_ranked_as_the_oldest(self):
+        # A fresh import Sonarr has not dated yet used to lose the ranking and be deleted.
+        episodes = [episode(1, index, days_ago=100 - index) for index in range(1, 6)]
+        undated = episode(1, 6, days_ago=1, air_date=False)
+        document = settings(retention={'allow_estimated_dates': False})
+        result = evaluate(episodes + [undated], {'keep_episodes': 2, 'combine': 'any'},
+                          document, now=NOW)
+        self.assertNotIn(undated['path'], paths(result['delete']))
+        self.assertEqual(paths(result['delete']), paths(episodes[:3]))
+        kept = {entry['path']: entry['reason'] for entry in result['keep']}
+        self.assertIn('No air date', kept[undated['path']])
+
+    def test_an_undated_episode_blocks_deletion_in_all_mode_too(self):
+        undated = episode(1, 1, days_ago=400, air_date=False)
+        dated = [episode(1, index, days_ago=10 - index) for index in range(2, 5)]
+        document = settings(retention={'allow_estimated_dates': False})
+        result = evaluate([undated] + dated, {'keep_episodes': 1, 'combine': 'all'},
+                          document, now=NOW)
+        self.assertNotIn(undated['path'], paths(result['delete']))
+
 
 class KeepSeasons(unittest.TestCase):
     def test_older_seasons_are_selected(self):
